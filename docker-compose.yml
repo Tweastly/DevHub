@@ -1,0 +1,28 @@
+services:
+  devhub:
+    build: .
+    restart: unless-stopped
+    environment:
+      DEVHUB_DOMAIN: ${DEVHUB_DOMAIN}
+      DEVHUB_ORIGIN: https://${DEVHUB_DOMAIN}
+      DEVHUB_PORT_RANGE: 20000-20999
+      DEVHUB_MEMORY_MB: 4096
+      DEVHUB_CPUS: 2
+    volumes:
+      - ./data:/data
+      # Only the orchestrator gets the Docker socket — never the project containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose: ["8080"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DEVHUB_DOMAIN: ${DEVHUB_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  caddy_data:
