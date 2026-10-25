@@ -51,7 +51,7 @@ pub async fn get_not_allowed() -> StatusCode {
     StatusCode::METHOD_NOT_ALLOWED
 }
 
-fn tools() -> Value {
+pub fn tools() -> Value {
     json!([
         {
             "name": "run_command",
@@ -94,13 +94,16 @@ fn tools() -> Value {
     ])
 }
 
-fn text(s: impl Into<String>, is_error: bool) -> Value {
+pub fn text(s: impl Into<String>, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": s.into() }], "isError": is_error })
 }
 
 async fn call(st: &AppState, p: &db::Project, params: &Value) -> Value {
-    let name = params["name"].as_str().unwrap_or("");
-    let a = &params["arguments"];
+    project_tool(st, p, params["name"].as_str().unwrap_or(""), &params["arguments"]).await
+}
+
+/// Tools that act inside one project's container. Shared with the admin server.
+pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value) -> Value {
     let s = |k: &str| a[k].as_str().unwrap_or("").to_string();
     {
         let c = st.db.lock().unwrap();

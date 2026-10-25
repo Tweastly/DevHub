@@ -178,7 +178,7 @@ pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Respons
     Ok(Redirect::to("/update").into_response())
 }
 
-async fn run_update(st: &AppState) -> anyhow::Result<()> {
+pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
     let d = &st.docker;
     let me = st.cfg.self_container.as_deref().context("mise à jour possible seulement quand DevHub tourne via docker compose")?;
     let labels = d.inspect_container(me, None::<InspectContainerOptions>).await?.config.and_then(|c| c.labels).unwrap_or_default();

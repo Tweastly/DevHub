@@ -2,6 +2,8 @@ mod auth;
 mod db;
 mod docker;
 mod mcp;
+mod mcp_admin;
+mod ops;
 mod proxy;
 mod terminal;
 mod ui;
@@ -16,7 +18,7 @@ use axum_extra::extract::CookieJar;
 use maud::Markup;
 use rand::Rng;
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use webauthn_rs::prelude::{PasskeyAuthentication, PasskeyRegistration, Url};
 use webauthn_rs::{Webauthn, WebauthnBuilder};
@@ -143,6 +145,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/_caddy/ask", get(proxy::caddy_ask))
         .route("/projects/{name}/{action}", post(project_action))
         .route("/mcp/{token}", post(mcp::handle).get(mcp::get_not_allowed))
+        .route("/mcp/admin/{token}", post(mcp_admin::handle).get(mcp::get_not_allowed))
+        .route("/claude", get(mcp_admin::page))
+        .route("/claude/admin/{action}", post(mcp_admin::admin_action))
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 
@@ -168,7 +173,7 @@ fn spawn_stats_collector(st: AppState) {
 }
 
 /// Live state (fast inspect) combined with the latest cached CPU/memory.
-async fn current_status(st: &AppState, name: &str) -> docker::Status {
+pub async fn current_status(st: &AppState, name: &str) -> docker::Status {
     let state = docker::state(&st.docker, name).await;
     let mut s = if state == "running" { st.stats.lock().unwrap().get(name).cloned().unwrap_or_default() } else { Default::default() };
     s.state = state;
@@ -233,113 +238,21 @@ struct NewProject {
     ports: Option<String>,
 }
 
-fn parse_ports(s: &str) -> Result<Vec<u16>, String> {
-    s.split([',', ' '])
-        .filter(|x| !x.is_empty())
-        .map(|x| x.parse::<u16>().map_err(|_| format!("port invalide : {x}")))
-        .collect()
-}
-
 fn bad(msg: impl Into<String>) -> Response {
     (StatusCode::BAD_REQUEST, msg.into()).into_response()
 }
 
-/// Keeps existing host ports for container ports already mapped, allocates the rest.
-fn map_ports(st: &AppState, existing: &[db::PortMap], wanted: &[u16]) -> anyhow::Result<Vec<db::PortMap>> {
-    let c = st.db.lock().unwrap();
-    let mut out: Vec<db::PortMap> = Vec::new();
-    for &cp in wanted {
-        if let Some(m) = existing.iter().find(|m| m.container == cp) {
-            out.push(m.clone());
-        } else {
-            let taken: Vec<u16> = out.iter().map(|m| m.host).collect();
-            out.push(db::PortMap { container: cp, host: db::allocate_port(&c, st.cfg.port_range, &taken)? });
-        }
-    }
-    Ok(out)
-}
-
 async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): Form<NewProject>) -> Result<Response, Response> {
     auth::require(&st, &jar)?;
-    let name = f.name.trim().to_string();
-    if name.is_empty() || name.len() > 32 || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        return Err(bad("nom invalide"));
-    }
-    if db::get_project(&st.db.lock().unwrap(), &name).ok().flatten().is_some() {
-        return Err(bad("ce projet existe déjà"));
-    }
-    let image = if f.template == "custom" {
-        f.image.filter(|s| !s.trim().is_empty()).ok_or_else(|| bad("image requise"))?.trim().to_string()
-    } else {
-        docker::image_for(&f.template).ok_or_else(|| bad("modèle inconnu"))?.to_string()
-    };
-    let git_url = f.git_url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    if let Some(u) = &git_url {
-        if !(u.starts_with("https://") || u.starts_with("git@")) {
-            return Err(bad("URL git invalide"));
-        }
-    }
-    let mut wanted = parse_ports(f.ports.as_deref().unwrap_or("")).map_err(bad)?;
-    if f.template == "site" && wanted.is_empty() {
-        wanted.push(8000);
-    }
-    let ports = map_ports(&st, &[], &wanted).map_err(|e| AppError(e).into_response())?;
-    let p = db::Project {
-        name: name.clone(),
+    let np = ops::NewProject {
+        name: f.name,
         template: f.template,
-        image,
-        git_url,
-        ports,
-        env: BTreeMap::new(),
-        mcp_token: random_token(32),
-        created_at: db::now(),
-        public: false,
+        image: f.image,
+        git_url: f.git_url,
+        ports: ops::parse_ports(f.ports.as_deref().unwrap_or("")).map_err(bad)?,
     };
-    {
-        let c = st.db.lock().unwrap();
-        db::save_project(&c, &p).map_err(|e| AppError(e).into_response())?;
-        db::audit(&c, "owner", "project.create", &format!("{} ({})", p.name, p.image));
-    }
-    // Pulling an image can take minutes: do it in the background.
-    let st2 = st.clone();
-    tokio::spawn(async move {
-        let res = async {
-            docker::create(&st2.docker, &p, &st2.limits()).await?;
-            if let Some(url) = &p.git_url {
-                let cmd = format!(
-                    "if [ -z \"$(ls -A /workspace)\" ]; then git clone '{}' /workspace; fi",
-                    url.replace('\'', "")
-                );
-                let r = docker::exec(&st2.docker, &p.name, &cmd, Some("/"), std::time::Duration::from_secs(600)).await?;
-                anyhow::ensure!(r.exit_code == 0, "git clone: {}", r.output);
-            } else if p.template == "site" {
-                seed_site(&st2, &p).await?;
-            }
-            anyhow::Ok(())
-        }
-        .await;
-        let c = st2.db.lock().unwrap();
-        match res {
-            Ok(()) => db::audit(&c, "system", "project.ready", &p.name),
-            Err(e) => db::audit(&c, "system", "project.error", &format!("{}: {e:#}", p.name)),
-        }
-    });
-    Ok(Redirect::to(&format!("/projects/{name}")).into_response())
-}
-
-const SITE_TEMPLATE: &str = include_str!("../templates/site.html");
-
-/// Writes the starter page (with the project name) and a start script, then launches it.
-async fn seed_site(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
-    let d = &st.docker;
-    let port = p.ports.first().map(|m| m.container).unwrap_or(8000);
-    let name = maud::html! { (p.name) }.into_string(); // HTML-escaped
-    docker::write_file(d, &p.name, "index.html", SITE_TEMPLATE.replace("{{PROJECT}}", &name).as_bytes()).await?;
-    let start = format!("#!/bin/sh\n# Lancé automatiquement au démarrage du conteneur.\nexec python3 -m http.server {port} --bind 0.0.0.0\n");
-    docker::write_file(d, &p.name, "start.sh", start.as_bytes()).await?;
-    let cmd = "chmod +x start.sh && (nohup ./start.sh > /tmp/start.log 2>&1 &)";
-    docker::exec(d, &p.name, cmd, None, std::time::Duration::from_secs(10)).await?;
-    Ok(())
+    let p = ops::create(&st, np, "owner").await.map_err(bad)?;
+    Ok(Redirect::to(&format!("/projects/{}", p.name)).into_response())
 }
 
 fn load(st: &AppState, name: &str) -> Result<db::Project, Response> {
@@ -377,54 +290,22 @@ async fn project_action(
     Form(form): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
     auth::require(&st, &jar)?;
-    let mut p = load(&st, &name)?;
-    let d = &st.docker;
-    let err = |e: anyhow::Error| AppError(e).into_response();
-    let mut back = format!("/projects/{name}");
-    match action.as_str() {
-        "start" => docker::start(d, &name).await.map_err(err)?,
-        "stop" => docker::stop(d, &name).await.map_err(err)?,
-        "restart" => docker::restart(d, &name).await.map_err(err)?,
-        "rebuild" => docker::create(d, &p, &st.limits()).await.map_err(err)?,
-        "rotate-token" => {
-            p.mcp_token = random_token(32);
-            db::save_project(&st.db.lock().unwrap(), &p).map_err(err)?;
-        }
-        "toggle-public" => {
-            p.public = !p.public;
-            db::save_project(&st.db.lock().unwrap(), &p).map_err(err)?;
-        }
-        "ports" => {
-            let wanted = parse_ports(form.get("ports").map(String::as_str).unwrap_or("")).map_err(bad)?;
-            p.ports = map_ports(&st, &p.ports, &wanted).map_err(err)?;
-            db::save_project(&st.db.lock().unwrap(), &p).map_err(err)?;
-            docker::create(d, &p, &st.limits()).await.map_err(err)?;
-        }
-        "env" => {
-            p.env = form
-                .get("env")
-                .map(String::as_str)
-                .unwrap_or("")
-                .lines()
-                .filter_map(|l| l.trim().split_once('='))
-                .filter(|(k, _)| !k.trim().is_empty() && !k.trim().starts_with('#'))
-                .map(|(k, v)| (k.trim().to_string(), v.to_string()))
-                .collect();
-            db::save_project(&st.db.lock().unwrap(), &p).map_err(err)?;
-            docker::create(d, &p, &st.limits()).await.map_err(err)?;
-        }
-        "delete" => {
-            docker::destroy(d, &name, form.contains_key("keep_data")).await.map_err(err)?;
-            db::delete_project(&st.db.lock().unwrap(), &name).map_err(err)?;
-            back = "/".into();
-        }
+    let field = |k: &str| form.get(k).map(String::as_str).unwrap_or("");
+    let change = match action.as_str() {
+        "start" => ops::Change::Start,
+        "stop" => ops::Change::Stop,
+        "restart" => ops::Change::Restart,
+        "rebuild" => ops::Change::Rebuild,
+        "rotate-token" => ops::Change::RotateToken,
+        "toggle-public" => ops::Change::SetPublic(!load(&st, &name)?.public),
+        "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(bad)?),
+        "env" => ops::Change::Env(ops::parse_env(field("env"))),
+        "delete" => ops::Change::Delete { keep_data: form.contains_key("keep_data") },
         _ => return Err(bad("action inconnue")),
-    }
-    let detail = if action == "env" { format!("{name} ({} vars)", p.env.len()) } else { name.clone() };
-    db::audit(&st.db.lock().unwrap(), "owner", &format!("project.{action}"), &detail);
+    };
+    let deleted = matches!(change, ops::Change::Delete { .. });
+    ops::apply(&st, &name, change, "owner").await.map_err(bad)?;
     // Dashboard buttons send you back to the dashboard.
-    if matches!(action.as_str(), "start" | "stop" | "restart") && form.contains_key("from_dash") {
-        back = "/".into();
-    }
-    Ok(Redirect::to(&back))
+    let to_dash = deleted || (matches!(action.as_str(), "start" | "stop" | "restart") && form.contains_key("from_dash"));
+    Ok(Redirect::to(&if to_dash { "/".to_string() } else { format!("/projects/{name}") }))
 }

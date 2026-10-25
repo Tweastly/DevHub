@@ -68,9 +68,15 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
 
     let net = network_name(&p.name);
     if docker.inspect_network::<String>(&net, None).await.is_err() {
-        docker
+        let created = docker
             .create_network(CreateNetworkOptions { name: net.clone(), driver: "bridge".into(), ..Default::default() })
-            .await?;
+            .await;
+        // Two builds of the same project can race here (e.g. a rebuild during the initial build).
+        if let Err(e) = created {
+            if docker.inspect_network::<String>(&net, None).await.is_err() {
+                return Err(e.into());
+            }
+        }
     }
     if let Some(me) = &lim.self_container {
         join_network(docker, &net, me).await;

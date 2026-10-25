@@ -32,6 +32,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             mcp_token TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS passkeys(
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS audit(
             id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
@@ -176,4 +177,16 @@ pub fn session_valid(c: &Connection, token: &str) -> bool {
 
 pub fn delete_session(c: &Connection, token: &str) {
     let _ = c.execute("DELETE FROM sessions WHERE token=?1", [token]);
+}
+
+pub fn setting(c: &Connection, key: &str) -> Option<String> {
+    c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).ok()
+}
+
+pub fn set_setting(c: &Connection, key: &str, value: Option<&str>) -> anyhow::Result<()> {
+    match value {
+        Some(v) => c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?1,?2)", params![key, v])?,
+        None => c.execute("DELETE FROM settings WHERE key=?1", [key])?,
+    };
+    Ok(())
 }

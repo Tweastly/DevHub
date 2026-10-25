@@ -50,6 +50,7 @@ pub fn layout(title: &str, logged_in: bool, body: Markup) -> Markup {
                     @if logged_in {
                         a href="/" { "Projets" }
                         a href="/security" { "Passkeys" }
+                        a href="/claude" { "Claude" }
                         a href="/audit" { "Journal" }
                         a href="/update" { "Mise à jour" }
                         form method="post" action="/logout" { button.ghost { "Déconnexion" } }
@@ -277,6 +278,44 @@ pub fn update_page(i: &UpdateInfo) -> Markup {
             div.card {
                 h3 { "Dernière mise à jour" @if i.running { " (en cours…)" } }
                 pre { (i.last_log) }
+            }
+        }
+    }
+}
+
+pub fn claude_page(admin_url: Option<&str>, projects: &[(String, String)]) -> Markup {
+    html! {
+        div.card {
+            h2 { "Claude · accès complet au panel" }
+            p {
+                "Avec cette URL, Claude Desktop peut " b { "tout faire dans DevHub" } " : créer, configurer, "
+                "redémarrer et supprimer des projets, travailler dans n'importe quel conteneur, lire les logs et "
+                "lancer la mise à jour de DevHub."
+            }
+            p.mute {
+                "Il ne peut ni toucher à tes passkeys, ni modifier cette URL : tu gardes toujours la main. "
+                "Toutes ses actions apparaissent dans le journal (acteur « claude-admin »)."
+            }
+            @if let Some(url) = admin_url {
+                p { "Dans Claude Desktop : " b { "Réglages → Connecteurs → Ajouter un connecteur personnalisé" } ", colle :" }
+                pre { (url) }
+                div.row {
+                    form method="post" action="/claude/admin/rotate" onsubmit="return confirm('L’ancienne URL cessera de fonctionner. Continuer ?')" {
+                        button.ghost { "Régénérer l'URL" }
+                    }
+                    form method="post" action="/claude/admin/disable" onsubmit="return confirm('Couper l’accès complet de Claude ?')" {
+                        button.danger { "Désactiver" }
+                    }
+                }
+            } @else {
+                form method="post" action="/claude/admin/enable" { button { "Activer l'accès complet" } }
+            }
+        }
+        div.card {
+            h3 { "Accès limité à un seul projet" }
+            p.mute { "Pour qu'une conversation Claude ne voie qu'un projet, utilise plutôt son URL dédiée." }
+            table {
+                @for (name, url) in projects { tr { td { a href={"/projects/" (name)} { (name) } } td { code { (url) } } } }
             }
         }
     }

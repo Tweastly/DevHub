@@ -20,6 +20,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 - **Dashboard** : état, CPU et RAM de chaque projet, start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
 - **Mise à jour en un clic** : DevHub vérifie GitHub toutes les 30 min. Quand des commits sont plus récents que la version installée, un bandeau propose « Mettre à jour » : `git pull` puis `docker compose up -d --build`, lancés depuis un conteneur temporaire `devhub-updater`.
 - **Passkey** (WebAuthn), sans mot de passe. Tu peux enregistrer plusieurs appareils.
+- **MCP admin (optionnel)** : une URL qui donne à Claude tout le panel. Il peut créer, configurer, redémarrer et supprimer des projets, travailler dans n'importe quel conteneur, lire les logs et lancer la mise à jour. Elle s'active, se régénère et se coupe depuis la page **Claude**. Les passkeys restent hors de sa portée.
 - **MCP par projet** : outils `run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`. Chaque URL ne donne accès qu'à un seul conteneur, et elle est régénérable.
 
 ## Déploiement sur le VPS
