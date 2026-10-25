@@ -343,23 +343,83 @@ pub fn security(keys: &[(i64, String, String)]) -> Markup {
     }
 }
 
-pub fn login(needs_setup: bool) -> Markup {
+const AUTH_CSS: &str = r#"
+:root{--bg:#f4f4f5;--card:#fff;--fg:#18181b;--mute:#71717a;--line:#e4e4e7;--btn:#18181b;--btnfg:#fff;--ring:#a1a1aa}
+@media (prefers-color-scheme: dark){:root{--bg:#09090b;--card:#18181b;--fg:#fafafa;--mute:#a1a1aa;--line:#27272a;--btn:#fafafa;--btnfg:#18181b;--ring:#52525b}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:var(--bg);color:var(--fg);font:15px/1.5 ui-sans-serif,system-ui,sans-serif;padding:24px 16px}
+.auth{width:100%;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:16px;
+  padding:36px 28px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 32px rgba(0,0,0,.06)}
+.logo{width:56px;height:56px;margin:0 auto 20px;border-radius:14px;display:grid;place-items:center;font-size:28px;
+  background:linear-gradient(135deg,#6ea8ff,#b78cff);color:#fff}
+h1{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 28px}
+.sub b{color:var(--fg);font-weight:600}
+.btn{display:flex;width:100%;align-items:center;justify-content:center;gap:10px;background:var(--btn);color:var(--btnfg);
+  border:0;border-radius:10px;padding:12px 16px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;transition:opacity .15s}
+.btn:hover{opacity:.88}.btn:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.btn svg{width:18px;height:18px}
+label{display:block;text-align:left;margin:0 0 14px}label span{display:block;font-size:13px;color:var(--mute);margin-bottom:4px}
+input{width:100%;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit}
+input:focus{outline:2px solid var(--ring);outline-offset:1px}
+#msg{min-height:20px;margin:14px 0 0;font-size:13px;color:#ef4444}
+.foot{margin-top:20px;font-size:12px;color:var(--mute)}
+.foot a{color:inherit}
+"#;
+
+const KEY_SVG: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>"#;
+
+/// Standalone Pocket ID–style screen: centered card, logo, one primary action.
+fn auth_shell(title: &str, footer: &str, body: Markup) -> Markup {
     html! {
-        div.card style="max-width:420px;margin:60px auto" {
-            @if needs_setup {
-                h2 { "Première configuration" }
-                p.mute { "Colle le setup token affiché dans les logs du serveur, puis crée ton passkey." }
-                label { span{"Setup token"} input #setup; }
-                label { span{"Nom de l'appareil"} input #pkname value="Mon appareil"; }
-                button onclick="register(pkname.value, setup.value).then(()=>location.href='/')" { "Créer mon passkey" }
-            } @else {
-                h2 { "Connexion" }
-                button onclick="login()" { "Se connecter avec un passkey" }
+        (DOCTYPE)
+        html lang="fr" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width,initial-scale=1";
+                meta name="robots" content="noindex";
+                title { (title) }
+                style { (PreEscaped(AUTH_CSS)) }
             }
-            p #msg .mute {}
+            body {
+                main.auth { div.logo { "⬢" } (body) }
+                p.foot { "Protégé par DevHub · " (footer) }
+            }
         }
-        script { (PreEscaped(WEBAUTHN_JS)) }
     }
+}
+
+/// Shown on a private project's subdomain to visitors without a DevHub session.
+pub fn private_project(project: &str, login_url: &str, footer: &str) -> Markup {
+    auth_shell(&format!("{project} · accès privé"), footer, html! {
+        h1 { "Projet privé" }
+        p.sub { b { (project) } " est réservé au propriétaire. Connecte-toi pour continuer." }
+        a.btn href=(login_url) { (PreEscaped(KEY_SVG)) "Se connecter avec un passkey" }
+    })
+}
+
+pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
+    let next_js = serde_json::to_string(&next.unwrap_or("/")).unwrap().replace("</", "<\\/");
+    auth_shell("Connexion · DevHub", footer, html! {
+        @if needs_setup {
+            h1 { "Bienvenue sur DevHub" }
+            p.sub { "Colle le setup token affiché dans les logs du serveur, puis crée ton passkey." }
+            label { span{"Setup token"} input #setup autocomplete="off"; }
+            label { span{"Nom de l'appareil"} input #pkname value="Mon appareil"; }
+            button.btn onclick="register(pkname.value, setup.value).then(()=>location.href=NEXT)" { (PreEscaped(KEY_SVG)) "Créer mon passkey" }
+        } @else {
+            h1 { "Se connecter à DevHub" }
+            p.sub {
+                @if let Some(n) = next.filter(|n| *n != "/") {
+                    "pour accéder à " b { (n.split("://").nth(1).unwrap_or(n).split('/').next().unwrap_or("")) }
+                } @else { "Utilise ton passkey pour continuer." }
+            }
+            button.btn onclick="login()" autofocus { (PreEscaped(KEY_SVG)) "Se connecter avec un passkey" }
+        }
+        p #msg {}
+        script { (PreEscaped(format!("const NEXT={next_js};"))) (PreEscaped(WEBAUTHN_JS)) }
+    })
 }
 
 const WEBAUTHN_JS: &str = r#"
@@ -381,6 +441,6 @@ async function login(){try{
   const c=await navigator.credentials.get({publicKey:pk});const r=c.response;
   await post('/auth/login/finish',{id,credential:{id:c.id,rawId:enc(c.rawId),type:c.type,extensions:c.getClientExtensionResults(),
     response:{authenticatorData:enc(r.authenticatorData),clientDataJSON:enc(r.clientDataJSON),signature:enc(r.signature),userHandle:r.userHandle?enc(r.userHandle):null}}});
-  location.href='/';
+  location.href=(typeof NEXT!=='undefined'?NEXT:'/');
 }catch(e){msg('Erreur : '+e.message)}}
 "#;

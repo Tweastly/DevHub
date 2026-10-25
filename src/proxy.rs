@@ -22,6 +22,18 @@ pub fn base_host(st: &AppState) -> &str {
     st.cfg.origin.split_once("://").map(|x| x.1).unwrap_or(&st.cfg.origin)
 }
 
+/// Only allow post-login redirects to the dashboard or one of its project subdomains.
+pub fn safe_next(st: &AppState, next: &str) -> Option<String> {
+    let u = url::Url::parse(next).ok()?;
+    let scheme = st.cfg.origin.split_once("://")?.0;
+    let host = match u.port() {
+        Some(p) => format!("{}:{p}", u.host_str()?),
+        None => u.host_str()?.to_string(),
+    };
+    let base = base_host(st);
+    (u.scheme() == scheme && (host == base || host.ends_with(&format!(".{base}")))).then(|| u.to_string())
+}
+
 pub fn url_for(st: &AppState, p: &str, port: Option<u16>) -> String {
     let scheme = st.cfg.origin.split_once("://").map(|x| x.0).unwrap_or("https");
     match port {
@@ -60,13 +72,12 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         return (StatusCode::NOT_FOUND, "Aucun projet / port pour ce sous-domaine").into_response();
     };
     if !t.project.public && !auth::is_logged_in(&st, &CookieJar::from_headers(req.headers())) {
-        let login = format!("{}/login", st.cfg.origin);
-        return (
-            StatusCode::UNAUTHORIZED,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            format!("<p>Projet privé. <a href=\"{login}\">Connecte-toi à DevHub</a> puis recharge.</p>"),
-        )
-            .into_response();
+        let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
+        let back = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+        let login = url::Url::parse_with_params(&format!("{}/login", st.cfg.origin), [("next", back)])
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
+        return (StatusCode::UNAUTHORIZED, crate::ui::private_project(&t.project.name, &login, base_host(&st))).into_response();
     }
     let upstream = match &st.cfg.self_container {
         Some(_) => format!("{}:{}", docker::container_name(&t.project.name), t.container_port),

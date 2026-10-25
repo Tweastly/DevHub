@@ -156,12 +156,17 @@ fn page(st: &AppState, jar: &CookieJar, title: &str, body: Markup) -> Page {
     Ok(ui::layout(title, true, maud::html! { (ui::update_banner(&info)) (body) }))
 }
 
-async fn login_page(State(st): State<AppState>, jar: CookieJar) -> Response {
+async fn login_page(
+    State(st): State<AppState>,
+    jar: CookieJar,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
+) -> Response {
+    let next = q.get("next").and_then(|n| proxy::safe_next(&st, n));
     if auth::is_logged_in(&st, &jar) {
-        return Redirect::to("/").into_response();
+        return Redirect::to(next.as_deref().unwrap_or("/")).into_response();
     }
     let needs_setup = st.setup_token.lock().unwrap().is_some();
-    ui::layout("Connexion", false, ui::login(needs_setup)).into_response()
+    ui::login(needs_setup, next.as_deref(), proxy::base_host(&st)).into_response()
 }
 
 async fn dashboard(State(st): State<AppState>, jar: CookieJar) -> Page {
