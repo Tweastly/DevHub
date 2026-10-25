@@ -7,14 +7,25 @@
 }
 
 {$DEVHUB_DOMAIN} {
-	encode zstd gzip
+	# Compress pages, but never the live SSE streams (compression would buffer them).
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type application/json*
+		}
+	}
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Frame-Options DENY
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 	}
-	reverse_proxy devhub:8080
+	reverse_proxy devhub:8080 {
+		flush_interval -1
+	}
 }
 
 # Everything else: project subdomains (*.{$DEVHUB_DOMAIN}) and custom domains

@@ -2,6 +2,7 @@ mod auth;
 mod db;
 mod docker;
 mod files;
+mod live;
 mod mcp;
 mod mcp_admin;
 mod ops;
@@ -152,6 +153,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects", post(create_project))
         .route("/projects/{name}", get(project_page))
         .route("/projects/{name}/logs", get(logs_page))
+        .route("/projects/{name}/logs/stream", get(live::logs))
+        .route("/live/stats", get(live::stats))
         .route("/projects/{name}/terminal", get(terminal_page))
         .route("/projects/{name}/files", get(files::browse))
         .route("/projects/{name}/files/download", get(files::download))
@@ -189,7 +192,7 @@ fn spawn_stats_collector(st: AppState) {
                 .collect();
             let all = futures_util::future::join_all(names.iter().map(|n| docker::status(&st.docker, n))).await;
             *st.stats.lock().unwrap() = names.into_iter().zip(all).collect();
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
 }

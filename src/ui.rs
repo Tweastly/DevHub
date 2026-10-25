@@ -29,6 +29,23 @@ button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)
 pre,code{font-family:ui-monospace,monospace;font-size:12.5px}pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px;overflow:auto;max-height:70vh;white-space:pre-wrap}
 .mute{color:var(--mute)}label{display:block;margin-bottom:10px}label span{display:block;color:var(--mute);margin-bottom:3px}
 .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
+
+/* Live indicator: only visible while the stats stream is connected. */
+.live{display:none;font-size:12px;color:var(--ok)}
+html[data-live=on] .live{display:inline}
+.bar i{transition:width .6s ease}
+/* Smooth page changes: header stays, content cross-fades. */
+@view-transition{navigation:auto}
+main{view-transition-name:main}
+::view-transition-old(main){animation:vt-out .12s ease both}
+::view-transition-new(main){animation:vt-in .2s ease both}
+@keyframes vt-out{to{opacity:0}}
+@keyframes vt-in{from{opacity:0;transform:translateY(6px)}}
+/* Skeleton shown while a page loads. */
+.sk-line{height:12px;margin:12px 0;border-radius:6px;background:linear-gradient(90deg,var(--line) 25%,var(--bg) 50%,var(--line) 75%);background-size:200% 100%;animation:sk 1.1s linear infinite}
+.sk-line.h{height:22px;width:40%}
+@keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.sk-line,::view-transition-old(main),::view-transition-new(main){animation:none}.bar i{transition:none}}
 "#;
 
 pub fn layout(title: &str, logged_in: bool, body: Markup) -> Markup {
@@ -40,6 +57,7 @@ pub fn layout(title: &str, logged_in: bool, body: Markup) -> Markup {
                 meta name="viewport" content="width=device-width,initial-scale=1";
                 title { (title) " · DevHub" }
                 style { (PreEscaped(CSS)) }
+                script { (PreEscaped(NAV_JS)) }
                 // Prefetch panel links on hover so navigation feels instant. Safe: every
                 // action is a POST form, links are side-effect-free GETs.
                 script type="speculationrules" { (PreEscaped(r#"{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":"/*/terminal"}}]},"eagerness":"moderate"}]}"#)) }
@@ -47,6 +65,7 @@ pub fn layout(title: &str, logged_in: bool, body: Markup) -> Markup {
             body {
                 header {
                     b { "⬢ DevHub" }
+                    span.live title="Données en direct" { "● en direct" }
                     @if logged_in {
                         a href="/" { "Projets" }
                         a href="/security" { "Passkeys" }
@@ -66,8 +85,8 @@ fn fmt_mb(b: u64) -> String {
     format!("{:.0} Mo", b as f64 / 1_048_576.0)
 }
 
-pub fn status_pill(s: &Status) -> Markup {
-    html! { span class={"pill " (s.state)} { (s.state) } }
+fn live_pill(project: &str, s: &Status) -> Markup {
+    html! { span class={"pill " (s.state)} data-live={(project) ":state"} { (s.state) } }
 }
 
 pub fn dashboard(st: &AppState, projects: &[(Project, Status)]) -> Markup {
@@ -81,11 +100,12 @@ pub fn dashboard(st: &AppState, projects: &[(Project, Status)]) -> Markup {
                     @for (p, s) in projects {
                         tr {
                             td { a href={"/projects/" (p.name)} { b { (p.name) } } br; span.mute { (p.template) } }
-                            td { (status_pill(s)) }
-                            td { (format!("{:.1} %", s.cpu_pct)) }
+                            td { (live_pill(&p.name, s)) }
+                            td { span data-live={(p.name) ":cpu"} { (format!("{:.1} %", s.cpu_pct)) } }
                             td {
-                                (fmt_mb(s.mem_used)) " / " (fmt_mb(s.mem_limit))
-                                @if s.mem_limit > 0 { div.bar { i style={"width:" (s.mem_used * 100 / s.mem_limit) "%"} {} } }
+                                span data-live={(p.name) ":mem"} { (fmt_mb(s.mem_used)) } " / "
+                                span data-live={(p.name) ":memmax"} { (fmt_mb(s.mem_limit)) }
+                                div.bar { i data-live={(p.name) ":membar"} style={"width:" (if s.mem_limit > 0 { s.mem_used * 100 / s.mem_limit } else { 0 }) "%"} {} }
                             }
                             td {
                                 @if !p.ports.is_empty() { a href=(proxy::url_for(st, &p.name, None)) target="_blank" { "ouvrir ↗" } br; }
@@ -135,10 +155,14 @@ pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str, host: (i64
     html! {
         div.card {
             div.row {
-                h2 style="margin:0" { (p.name) } (status_pill(s))
+                h2 style="margin:0" { (p.name) } (live_pill(&p.name, s))
                 span.mute { (p.image) }
             }
-            p.mute { "CPU " (format!("{:.1} %", s.cpu_pct)) " · Mémoire " (fmt_mb(s.mem_used)) " / " (fmt_mb(s.mem_limit)) }
+            p.mute {
+                "CPU " span data-live={(p.name) ":cpu"} { (format!("{:.1} %", s.cpu_pct)) }
+                " · Mémoire " span data-live={(p.name) ":mem"} { (fmt_mb(s.mem_used)) } " / "
+                span data-live={(p.name) ":memmax"} { (fmt_mb(s.mem_limit)) }
+            }
             div.row {
                 form method="post" action={(base) "/start"} { button { "Start" } }
                 form method="post" action={(base) "/stop"} { button.ghost { "Stop" } }
@@ -340,13 +364,13 @@ fn resources_card(st: &AppState, p: &Project, s: &Status, (ncpu, mem_total): (i6
             div.grid {
                 div {
                     span.mute { "RAM utilisée" }
-                    div { b { (fmt_mb(s.mem_used)) } " / " (mem) " Mo" }
-                    div.bar { i style={"width:" (format!("{:.0}", pct(s.mem_used as f64 / 1_048_576.0, mem as f64))) "%"} {} }
+                    div { b data-live={(p.name) ":mem"} { (fmt_mb(s.mem_used)) } " / " (mem) " Mo" }
+                    div.bar { i data-live={(p.name) ":membar"} style={"width:" (format!("{:.0}", pct(s.mem_used as f64 / 1_048_576.0, mem as f64))) "%"} {} }
                 }
                 div {
                     span.mute { "CPU utilisé" }
-                    div { b { (format!("{:.1} %", s.cpu_pct)) } " / " (format!("{:.0} %", cpu * 100.0)) }
-                    div.bar { i style={"width:" (format!("{:.0}", pct(s.cpu_pct, cpu * 100.0))) "%"} {} }
+                    div { b data-live={(p.name) ":cpu"} { (format!("{:.1} %", s.cpu_pct)) } " / " (format!("{:.0} %", cpu * 100.0)) }
+                    div.bar { i data-live={(p.name) ":cpubar"} style={"width:" (format!("{:.0}", pct(s.cpu_pct, cpu * 100.0))) "%"} {} }
                 }
             }
             form method="post" action={"/projects/" (p.name) "/resources"} style="margin-top:14px" {
@@ -429,13 +453,28 @@ fn domains_card(st: &AppState, p: &Project) -> Markup {
 
 pub fn logs(name: &str, logs: &str) -> Markup {
     html! {
-        meta http-equiv="refresh" content="5";
         div.card {
-            div.row { h2 style="margin:0" { "Logs · " (name) } a href={"/projects/" (name)} { "← retour" } span.mute { "rafraîchi toutes les 5 s" } }
-            pre { (logs) }
+            div.row { h2 style="margin:0" { "Logs · " (name) } a href={"/projects/" (name)} { "← retour" } span.mute #logstate { "● en direct" } }
+            pre #logs { (logs) }
         }
+        script { (PreEscaped(LOGS_JS)) }
     }
 }
+
+/// Appends new lines from the SSE stream; sticks to the bottom unless the user scrolled up.
+const LOGS_JS: &str = r#"
+const pre=document.getElementById('logs'),state=document.getElementById('logstate');
+pre.scrollTop=pre.scrollHeight;
+const es=new EventSource(location.pathname+'/stream');
+es.addEventListener('log',e=>{
+  const near=pre.scrollHeight-pre.scrollTop-pre.clientHeight<40;
+  pre.append(e.data.endsWith('\n')?e.data:e.data+'\n');
+  if(near)pre.scrollTop=pre.scrollHeight;
+});
+es.onopen=()=>state.textContent='● en direct';
+es.onerror=()=>state.textContent='○ reconnexion…';
+document.addEventListener('devhub:load',()=>es.close(),{once:true});
+"#;
 
 pub fn audit(rows: &[(i64, String, String, String)]) -> Markup {
     html! {
@@ -597,7 +636,7 @@ const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repe
 const enc=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const msg=t=>{const m=document.getElementById('msg');if(m)m.textContent=t};
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json()}
-async function register(name,setup_token){try{
+window.register=async function(name,setup_token){try{
   const {id,options}=await post('/auth/register/start',{name,setup_token:setup_token||null});
   const pk=options.publicKey;pk.challenge=dec(pk.challenge);pk.user.id=dec(pk.user.id);
   (pk.excludeCredentials||[]).forEach(c=>c.id=dec(c.id));
@@ -605,7 +644,7 @@ async function register(name,setup_token){try{
   await post('/auth/register/finish',{id,credential:{id:c.id,rawId:enc(c.rawId),type:c.type,extensions:c.getClientExtensionResults(),
     response:{attestationObject:enc(c.response.attestationObject),clientDataJSON:enc(c.response.clientDataJSON)}}});
 }catch(e){msg('Erreur : '+e.message);throw e}}
-async function login(){try{
+window.login=async function(){try{
   const {id,options}=await post('/auth/login/start',{});
   const pk=options.publicKey;pk.challenge=dec(pk.challenge);(pk.allowCredentials||[]).forEach(c=>c.id=dec(c.id));
   const c=await navigator.credentials.get({publicKey:pk});const r=c.response;
@@ -613,4 +652,78 @@ async function login(){try{
     response:{authenticatorData:enc(r.authenticatorData),clientDataJSON:enc(r.clientDataJSON),signature:enc(r.signature),userHandle:r.userHandle?enc(r.userHandle):null}}});
   location.href=(typeof NEXT!=='undefined'?NEXT:'/');
 }catch(e){msg('Erreur : '+e.message)}}
+"#;
+
+/// Client-side navigation: fetch the next page, swap <main> (with a View Transition when
+/// supported) and show a skeleton if the response takes more than 120 ms. Anything
+/// unusual (other origin, terminal, downloads, non-HTML, auth pages) falls back to a
+/// normal navigation. Also drives the live stats stream for `[data-live]` elements.
+const NAV_JS: &str = r#"
+(()=>{
+const SK='<div class="card"><div class="sk-line h"></div><div class="sk-line" style="width:70%"></div><div class="sk-line" style="width:55%"></div></div>'+
+ '<div class="grid"><div class="card"><div class="sk-line h"></div><div class="sk-line"></div><div class="sk-line" style="width:60%"></div></div>'+
+ '<div class="card"><div class="sk-line h"></div><div class="sk-line"></div><div class="sk-line" style="width:45%"></div></div></div>'+
+ '<div class="card"><div class="sk-line"></div><div class="sk-line"></div><div class="sk-line"></div><div class="sk-line" style="width:80%"></div></div>';
+const skip=a=>{const u=new URL(a.href,location.href);
+  return u.origin!==location.origin||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('#')||
+    /\/terminal$|\/files\/download$|^\/login/.test(u.pathname)||'reload' in a.dataset;};
+let ctrl;
+async function go(url,push){
+  ctrl?.abort();ctrl=new AbortController();
+  const m=document.querySelector('main');
+  const t=setTimeout(()=>{m.innerHTML=SK;scrollTo(0,0)},120);
+  let res;
+  try{res=await fetch(url,{signal:ctrl.signal});}catch(e){if(e.name!=='AbortError')location.href=url;return;}
+  clearTimeout(t);
+  if(!res.ok||!(res.headers.get('content-type')||'').includes('text/html')){location.href=url;return;}
+  const doc=new DOMParser().parseFromString(await res.text(),'text/html');
+  const nm=doc.querySelector('main');
+  // Login redirect, auth pages, or pages that refresh themselves: do a real load.
+  if(!nm||!doc.querySelector('header')||nm.querySelector('meta[http-equiv=refresh]')){location.href=res.url;return;}
+  const swap=()=>{
+    document.title=doc.title;m.replaceWith(nm);
+    if(push)history.pushState({},'',res.url);
+    scrollTo(0,0);
+    document.dispatchEvent(new Event('devhub:load'));
+    // Inline scripts inserted via DOM don't run: recreate them, block-scoped so
+    // top-level consts don't clash when a page is visited twice.
+    nm.querySelectorAll('script').forEach(o=>{const s=document.createElement('script');
+      [...o.attributes].forEach(a=>s.setAttribute(a.name,a.value));
+      s.textContent=o.src?'':'{'+o.textContent+'\n}';o.replaceWith(s);});
+  };
+  document.startViewTransition?document.startViewTransition(swap):swap();
+}
+document.addEventListener('click',e=>{
+  const a=e.target.closest('a[href]');
+  if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||skip(a))return;
+  e.preventDefault();go(a.href,true);
+});
+addEventListener('popstate',()=>go(location.href,false));
+
+let es=null;
+function live(){
+  const any=document.querySelector('[data-live]');
+  if(!any){if(es){es.close();es=null;}document.documentElement.dataset.live='';return;}
+  if(es)return;
+  es=new EventSource('/live/stats');
+  es.addEventListener('stats',e=>{
+    const d=JSON.parse(e.data);
+    document.querySelectorAll('[data-live]').forEach(el=>{
+      const i=el.dataset.live.lastIndexOf(':'),s=d[el.dataset.live.slice(0,i)];if(!s)return;
+      const pct=(a,b)=>(b?Math.min(100,a/b*100):0)+'%';
+      switch(el.dataset.live.slice(i+1)){
+        case'state':el.textContent=s.state;el.className='pill '+s.state;break;
+        case'cpu':el.textContent=s.cpu.toFixed(1)+' %';break;
+        case'mem':el.textContent=s.mem+' Mo';break;
+        case'memmax':el.textContent=s.mem_max+' Mo';break;
+        case'membar':el.style.width=pct(s.mem,s.mem_max);break;
+        case'cpubar':el.style.width=pct(s.cpu,s.cpu_max);break;
+      }});
+    document.documentElement.dataset.live='on';
+  });
+  es.onerror=()=>{document.documentElement.dataset.live='off';};
+}
+document.addEventListener('DOMContentLoaded',live);
+document.addEventListener('devhub:load',live);
+})();
 "#;
