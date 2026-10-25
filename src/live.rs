@@ -32,6 +32,17 @@ async fn snapshot(st: &AppState) -> String {
             }))
         })
         .collect();
+    let mut map = map;
+    let h = st.host.lock().unwrap().clone();
+    map.insert("_host".into(), json!({
+        "state": "running",
+        "cpu": (h.cpu_pct * 10.0).round() / 10.0,
+        "cpu_max": 100.0,
+        "mem": h.mem_used_mb,
+        "mem_max": h.mem_total_mb,
+        "mem_gb": (h.mem_used_mb as f64 / 102.4).round() / 10.0,
+        "disk": (h.disk_pct() * 10.0).round() / 10.0,
+    }));
     serde_json::Value::Object(map).to_string()
 }
 

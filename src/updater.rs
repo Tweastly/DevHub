@@ -17,13 +17,20 @@ const UPDATER: &str = "devhub-updater";
 const UPDATER_IMAGE: &str = "docker:27-cli";
 const CHECK_EVERY: Duration = Duration::from_secs(30 * 60);
 
+#[derive(Clone)]
+pub struct Pending {
+    pub sha: String,
+    pub message: String,
+    pub date: Option<i64>,
+}
+
 #[derive(Default, Clone)]
 pub struct Info {
     pub local: Option<String>,
     pub branch: String,
     pub repo: Option<String>,
-    /// Commits on GitHub not deployed yet (short sha, first line of message).
-    pub pending: Vec<(String, String)>,
+    /// Commits on GitHub not deployed yet, newest first.
+    pub pending: Vec<Pending>,
     pub checked_at: Option<i64>,
     pub error: Option<String>,
     pub running: bool,
@@ -92,6 +99,11 @@ struct CommitEntry {
 #[derive(Deserialize)]
 struct CommitBody {
     message: String,
+    committer: Option<Committer>,
+}
+#[derive(Deserialize)]
+struct Committer {
+    date: Option<String>,
 }
 
 pub async fn check(st: &AppState) {
@@ -123,7 +135,11 @@ pub async fn check(st: &AppState) {
             c.commits
                 .iter()
                 .rev()
-                .map(|e| (e.sha[..7].to_string(), e.commit.message.lines().next().unwrap_or("").to_string()))
+                .map(|e| Pending {
+                    sha: e.sha[..7].to_string(),
+                    message: e.commit.message.lines().next().unwrap_or("").to_string(),
+                    date: e.commit.committer.as_ref().and_then(|c| c.date.as_deref()).and_then(crate::timefmt::parse_rfc3339),
+                })
                 .collect()
         } else {
             Vec::new()
@@ -229,10 +245,11 @@ echo "== terminé""#;
     Ok(())
 }
 
-pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<maud::Markup, Response> {
-    auth::require(&st, &jar)?;
+/// Updates the "running / last log" part of the shared info (for the update page).
+pub async fn refresh(st: &AppState) {
     let mut info = st.update.lock().unwrap().clone();
-    refresh_runner(&st, &mut info).await;
-    st.update.lock().unwrap().running = info.running;
-    Ok(crate::ui::layout("Mise à jour", true, crate::ui::update_page(&info)))
+    refresh_runner(st, &mut info).await;
+    let mut cur = st.update.lock().unwrap();
+    cur.running = info.running;
+    cur.last_log = info.last_log;
 }

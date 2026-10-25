@@ -119,7 +119,7 @@ fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
         return error_page(st, StatusCode::FORBIDDEN, "Lien expiré", "Ce lien de connexion n'est plus valable. Recharge la page du projet.", None, None);
     }
     let token = crate::random_token(32);
-    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600).is_err() {
+    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, None).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//")).cloned().unwrap_or_else(|| "/".into());
@@ -155,7 +155,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         let login = url::Url::parse_with_params(&format!("{}/{entry}", st.cfg.origin), [("next", back)])
             .map(|u| u.to_string())
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
-        return (StatusCode::UNAUTHORIZED, crate::ui::private_project(&t.project.name, &login, base_host(&st))).into_response();
+        return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, base_host(&st))).into_response();
     }
     let owner = auth::is_logged_in(&st, &CookieJar::from_headers(req.headers()));
     let name = t.project.name.clone();
@@ -202,7 +202,7 @@ async fn connect(st: &AppState, t: &Target) -> anyhow::Result<tokio::net::TcpStr
 }
 
 fn error_page(st: &AppState, code: StatusCode, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>) -> Response {
-    (code, crate::ui::error_page(code.as_u16(), title, message, detail, action, base_host(st))).into_response()
+    (code, crate::web::auth::error_page(code.as_u16(), title, message, detail, action, base_host(st))).into_response()
 }
 
 async fn forward(mut req: Request, stream: tokio::net::TcpStream, host: &str, https: bool) -> anyhow::Result<Response> {

@@ -2,14 +2,16 @@ mod auth;
 mod db;
 mod docker;
 mod files;
+mod host;
 mod live;
 mod mcp;
 mod mcp_admin;
 mod ops;
 mod proxy;
 mod terminal;
-mod ui;
+mod timefmt;
 mod updater;
+mod web;
 
 use axum::extract::{Form, Path, State};
 use axum::http::StatusCode;
@@ -17,7 +19,6 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use axum_extra::extract::CookieJar;
-use maud::Markup;
 use rand::Rng;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -51,6 +52,9 @@ pub struct AppState {
     pub stats: Arc<Mutex<HashMap<String, docker::Status>>>,
     /// One-time session handoff codes for custom domains: code → (host, expiry).
     pub handoffs: Arc<Mutex<HashMap<String, (String, i64)>>>,
+    /// The VPS itself (CPU, RAM, disk), refreshed by the collector.
+    pub host: Arc<Mutex<host::Host>>,
+    pub data_dir: Arc<String>,
 }
 
 impl AppState {
@@ -122,6 +126,8 @@ async fn main() -> anyhow::Result<()> {
         update: Default::default(),
         stats: Default::default(),
         handoffs: Default::default(),
+        host: Default::default(),
+        data_dir: Arc::new(data_dir.clone()),
     };
     if let Some(me) = &st.cfg.self_container {
         let projects = db::list_projects(&st.db.lock().unwrap())?;
@@ -136,7 +142,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = Router::new()
-        .route("/", get(dashboard))
+        .route("/", get(web::overview::page))
+        .route("/assets/{file}", get(web::asset))
+        .route("/menu", get(web::menu))
         .route("/login", get(login_page))
         .route("/logout", post(auth::logout))
         .route("/auth/register/start", post(auth::register_start))
@@ -144,19 +152,26 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/login/start", post(auth::login_start))
         .route("/auth/login/finish", post(auth::login_finish))
         .route("/auth/handoff", get(proxy::handoff))
-        .route("/security", get(security_page))
+        .route("/security", get(web::security::page))
         .route("/security/{id}/delete", post(delete_passkey))
-        .route("/audit", get(audit_page))
-        .route("/update", get(updater::page))
+        .route("/audit", get(web::audit::page))
+        .route("/audit.csv", get(web::audit::csv))
+        .route("/update", get(web::update::page))
         .route("/update/check", post(updater::check_now))
         .route("/update/apply", post(updater::apply))
-        .route("/projects", post(create_project))
-        .route("/projects/{name}", get(project_page))
-        .route("/projects/{name}/logs", get(logs_page))
+        .route("/claude", get(web::claude::page))
+        .route("/claude/admin/{action}", post(mcp_admin::admin_action))
+        .route("/projects", get(web::projects::list).post(create_project))
+        .route("/projects/new", get(web::projects::new_form))
+        .route("/projects/{name}", get(web::project::overview))
+        .route("/projects/{name}/network", get(web::project::network))
+        .route("/projects/{name}/settings", get(web::project::settings))
+        .route("/projects/{name}/terminal", get(web::project::terminal))
+        .route("/projects/{name}/terminal/ws", get(terminal::ws))
+        .route("/projects/{name}/logs", get(logs_redirect))
         .route("/projects/{name}/logs/stream", get(live::logs))
-        .route("/live/stats", get(live::stats))
-        .route("/projects/{name}/terminal", get(terminal_page))
-        .route("/projects/{name}/files", get(files::browse))
+        .route("/projects/{name}/logs/download", get(web::project::logs_download))
+        .route("/projects/{name}/files", get(web::files::browse))
         .route("/projects/{name}/files/download", get(files::download))
         .route("/projects/{name}/files/save", post(files::save))
         .route(
@@ -166,13 +181,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}/files/new", post(files::create))
         .route("/projects/{name}/files/rename", post(files::rename))
         .route("/projects/{name}/files/delete", post(files::delete))
-        .route("/projects/{name}/terminal/ws", get(terminal::ws))
-        .route("/_caddy/ask", get(proxy::caddy_ask))
         .route("/projects/{name}/{action}", post(project_action))
+        .route("/live/stats", get(live::stats))
+        .route("/_caddy/ask", get(proxy::caddy_ask))
         .route("/mcp/{token}", post(mcp::handle).get(mcp::get_not_allowed))
         .route("/mcp/admin/{token}", post(mcp_admin::handle).get(mcp::get_not_allowed))
-        .route("/claude", get(mcp_admin::page))
-        .route("/claude/admin/{action}", post(mcp_admin::admin_action))
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 
@@ -182,8 +195,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Live stats for every project and the server, plus one history sample per minute.
 fn spawn_stats_collector(st: AppState) {
     tokio::spawn(async move {
+        let mut sampler = host::Sampler::default();
+        let mut last_sample = 0;
         loop {
             let names: Vec<String> = db::list_projects(&st.db.lock().unwrap())
                 .unwrap_or_default()
@@ -191,6 +207,21 @@ fn spawn_stats_collector(st: AppState) {
                 .map(|p| p.name)
                 .collect();
             let all = futures_util::future::join_all(names.iter().map(|n| docker::status(&st.docker, n))).await;
+            let mut h = st.host.lock().unwrap().clone();
+            sampler.sample(&st.docker, &st.data_dir, &mut h).await;
+            *st.host.lock().unwrap() = h.clone();
+
+            let minute = db::now() / 60 * 60;
+            if minute != last_sample {
+                last_sample = minute;
+                let mut rows = vec![(String::new(), h.cpu_pct, h.mem_used_mb)];
+                for (n, s) in names.iter().zip(&all) {
+                    if s.state == "running" {
+                        rows.push((n.clone(), s.cpu_pct, (s.mem_used / 1_048_576) as i64));
+                    }
+                }
+                db::metrics_insert(&st.db.lock().unwrap(), minute, &rows);
+            }
             *st.stats.lock().unwrap() = names.into_iter().zip(all).collect();
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
@@ -205,14 +236,6 @@ pub async fn current_status(st: &AppState, name: &str) -> docker::Status {
     s
 }
 
-pub(crate) type Page = Result<Markup, Response>;
-
-pub(crate) fn page(st: &AppState, jar: &CookieJar, title: &str, body: Markup) -> Page {
-    auth::require(st, jar)?;
-    let info = st.update.lock().unwrap().clone();
-    Ok(ui::layout(title, true, maud::html! { (ui::update_banner(&info)) (body) }))
-}
-
 async fn login_page(
     State(st): State<AppState>,
     jar: CookieJar,
@@ -223,35 +246,18 @@ async fn login_page(
         return Redirect::to(next.as_deref().unwrap_or("/")).into_response();
     }
     let needs_setup = st.setup_token.lock().unwrap().is_some();
-    ui::login(needs_setup, next.as_deref(), proxy::base_host(&st)).into_response()
-}
-
-async fn dashboard(State(st): State<AppState>, jar: CookieJar) -> Page {
-    auth::require(&st, &jar)?;
-    let projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
-    let statuses = futures_util::future::join_all(projects.iter().map(|p| current_status(&st, &p.name))).await;
-    let rows: Vec<_> = projects.into_iter().zip(statuses).collect();
-    page(&st, &jar, "Projets", ui::dashboard(&st, &rows))
-}
-
-async fn security_page(State(st): State<AppState>, jar: CookieJar) -> Page {
-    let keys = db::passkeys(&st.db.lock().unwrap()).unwrap_or_default();
-    page(&st, &jar, "Passkeys", ui::security(&keys))
+    web::auth::login(needs_setup, next.as_deref(), proxy::base_host(&st)).into_response()
 }
 
 async fn delete_passkey(State(st): State<AppState>, jar: CookieJar, Path(id): Path<i64>) -> Result<Redirect, Response> {
     auth::require(&st, &jar)?;
     let c = st.db.lock().unwrap();
     if db::passkeys(&c).map(|k| k.len()).unwrap_or(0) > 1 {
+        let name = db::passkeys(&c).ok().and_then(|k| k.into_iter().find(|k| k.0 == id)).map(|k| k.1).unwrap_or_default();
         let _ = db::delete_passkey(&c, id);
-        db::audit(&c, "owner", "passkey.delete", &id.to_string());
+        db::audit(&c, "owner", "passkey.delete", &name);
     }
     Ok(Redirect::to("/security"))
-}
-
-async fn audit_page(State(st): State<AppState>, jar: CookieJar) -> Page {
-    let rows = db::audit_list(&st.db.lock().unwrap(), 300).unwrap_or_default();
-    page(&st, &jar, "Journal", ui::audit(&rows))
 }
 
 #[derive(Deserialize)]
@@ -269,44 +275,41 @@ fn bad(msg: impl Into<String>) -> Response {
 
 async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): Form<NewProject>) -> Result<Response, Response> {
     auth::require(&st, &jar)?;
-    let np = ops::NewProject {
-        name: f.name,
-        template: f.template,
-        image: f.image,
-        git_url: f.git_url,
-        ports: ops::parse_ports(f.ports.as_deref().unwrap_or("")).map_err(bad)?,
+    let back = |e: String| {
+        let q = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("err", &e)
+            .append_pair("name", &f.name)
+            .append_pair("template", &f.template)
+            .append_pair("image", f.image.as_deref().unwrap_or(""))
+            .append_pair("git_url", f.git_url.as_deref().unwrap_or(""))
+            .append_pair("ports", f.ports.as_deref().unwrap_or(""))
+            .finish();
+        Redirect::to(&format!("/projects/new?{q}")).into_response()
     };
-    let p = ops::create(&st, np, "owner").await.map_err(bad)?;
+    let ports = ops::parse_ports(f.ports.as_deref().unwrap_or("")).map_err(back)?;
+    let np = ops::NewProject { name: f.name.clone(), template: f.template.clone(), image: f.image.clone(), git_url: f.git_url.clone(), ports };
+    let p = ops::create(&st, np, "owner").await.map_err(back)?;
     Ok(Redirect::to(&format!("/projects/{}", p.name)).into_response())
 }
 
-fn load(st: &AppState, name: &str) -> Result<db::Project, Response> {
-    db::get_project(&st.db.lock().unwrap(), name)
-        .ok()
-        .flatten()
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "projet introuvable").into_response())
+async fn logs_redirect(Path(name): Path<String>) -> Redirect {
+    Redirect::to(&format!("/projects/{name}/terminal#logs"))
 }
 
-async fn project_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
-    auth::require(&st, &jar)?;
-    let p = load(&st, &name)?;
-    let s = current_status(&st, &name).await;
-    let url = format!("{}/mcp/{}", st.cfg.origin, p.mcp_token);
-    let host = docker::host_resources(&st.docker).await;
-    page(&st, &jar, &name, ui::project(&st, &p, &s, &url, host))
+/// Where a form action returns: its `back` field if it's a local path, else the project.
+fn back_to(form: &HashMap<String, String>, name: &str) -> String {
+    form.get("back")
+        .filter(|b| b.starts_with('/') && !b.starts_with("//"))
+        .cloned()
+        .unwrap_or_else(|| format!("/projects/{name}"))
 }
 
-async fn terminal_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
-    auth::require(&st, &jar)?;
-    load(&st, &name)?;
-    page(&st, &jar, "Terminal", ui::terminal(&name))
-}
-
-async fn logs_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
-    auth::require(&st, &jar)?;
-    load(&st, &name)?;
-    let l = docker::logs(&st.docker, &name, 500).await;
-    page(&st, &jar, "Logs", ui::logs(&name, &l))
+/// Appends `?err=…` (or `&err=…`) before any `#fragment`.
+fn with_param(url: &str, key: &str, value: &str) -> String {
+    let (path, frag) = url.split_once('#').map(|(p, f)| (p, format!("#{f}"))).unwrap_or((url, String::new()));
+    let sep = if path.contains('?') { '&' } else { '?' };
+    let v: String = url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
+    format!("{path}{sep}{key}={v}{frag}")
 }
 
 /// Empty field = None (use the default), otherwise it must parse.
@@ -322,31 +325,44 @@ async fn project_action(
     Form(form): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
     auth::require(&st, &jar)?;
+    let back = back_to(&form, &name);
     let field = |k: &str| form.get(k).map(String::as_str).unwrap_or("");
+    let fail = |e: String| Redirect::to(&with_param(&back, "err", &e));
     let change = match action.as_str() {
         "start" => ops::Change::Start,
         "stop" => ops::Change::Stop,
         "restart" => ops::Change::Restart,
         "rebuild" => ops::Change::Rebuild,
         "rotate-token" => ops::Change::RotateToken,
-        "toggle-public" => ops::Change::SetPublic(!load(&st, &name)?.public),
-        "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(bad)?),
+        "public" => ops::Change::SetPublic(true),
+        "private" => ops::Change::SetPublic(false),
+        "toggle-public" => {
+            let p = ops::load(&st, &name).map_err(|e| fail(e).into_response())?;
+            ops::Change::SetPublic(!p.public)
+        }
+        "pin" => ops::Change::Pin(true),
+        "unpin" => ops::Change::Pin(false),
+        "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),
         "env" => ops::Change::Env(ops::parse_env(field("env"))),
-        "delete" => ops::Change::Delete { keep_data: form.contains_key("keep_data") },
-        "domain-add" => ops::Change::AddDomain {
-            host: field("host").to_string(),
-            port: field("port").parse().ok(),
-        },
+        "delete" => {
+            if field("confirm") != name {
+                return Ok(fail(format!("Tape exactement « {name} » pour confirmer la suppression.")));
+            }
+            ops::Change::Delete { keep_data: form.contains_key("keep_data") }
+        }
+        "domain-add" => ops::Change::AddDomain { host: field("host").to_string(), port: field("port").parse().ok() },
         "domain-remove" => ops::Change::RemoveDomain(field("host").to_string()),
         "resources" => ops::Change::Resources {
-            memory_mb: opt_num(field("memory_mb")).map_err(bad)?,
-            cpus: opt_num(&field("cpus").replace(',', ".")).map_err(bad)?,
+            memory_mb: opt_num(field("memory_mb")).map_err(|e| fail(e).into_response())?,
+            cpus: opt_num(&field("cpus").replace(',', ".")).map_err(|e| fail(e).into_response())?,
         },
         _ => return Err(bad("action inconnue")),
     };
-    let deleted = matches!(change, ops::Change::Delete { .. });
-    ops::apply(&st, &name, change, "owner").await.map_err(bad)?;
-    // Dashboard buttons send you back to the dashboard.
-    let to_dash = deleted || (matches!(action.as_str(), "start" | "stop" | "restart") && form.contains_key("from_dash"));
-    Ok(Redirect::to(&if to_dash { "/".to_string() } else { format!("/projects/{name}") }))
+    let is_domain = action == "domain-add";
+    match ops::apply(&st, &name, change, "owner").await {
+        Ok(()) => Ok(Redirect::to(&back)),
+        // Keep what was typed so the field isn't emptied by the error.
+        Err(e) if is_domain => Ok(Redirect::to(&with_param(&with_param(&back, "err", &e), "host", field("host")))),
+        Err(e) => Ok(fail(e)),
+    }
 }

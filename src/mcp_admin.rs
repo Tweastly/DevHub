@@ -15,12 +15,14 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub const SETTING: &str = "admin_mcp_token";
+pub const LAST_USED: &str = "admin_mcp_last_used";
 
 pub async fn handle(State(st): State<AppState>, Path(token): Path<String>, Json(req): Json<Value>) -> Response {
     let ok = db::setting(&st.db.lock().unwrap(), SETTING).is_some_and(|t| t == token);
     if !ok {
         return StatusCode::NOT_FOUND.into_response();
     }
+    let _ = db::set_setting(&st.db.lock().unwrap(), LAST_USED, Some(&db::now().to_string()));
     let Some(id) = req.get("id").cloned() else {
         return StatusCode::ACCEPTED.into_response();
     };
@@ -282,7 +284,7 @@ async fn call(st: &AppState, params: &Value) -> Value {
                     let i = st.update.lock().unwrap().clone();
                     pretty(&json!({
                         "installed": i.local, "branch": i.branch, "error": i.error,
-                        "pending": i.pending.iter().map(|(sha, m)| format!("{sha} {m}")).collect::<Vec<_>>(),
+                        "pending": i.pending.iter().map(|p| format!("{} {}", p.sha, p.message)).collect::<Vec<_>>(),
                     }))
                 }
             }
@@ -298,16 +300,6 @@ async fn call(st: &AppState, params: &Value) -> Value {
 }
 
 // --- Panel page to enable / rotate / revoke the admin URL ---
-
-pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<maud::Markup, Response> {
-    auth::require(&st, &jar)?;
-    let token = db::setting(&st.db.lock().unwrap(), SETTING);
-    let url = token.map(|t| format!("{}/mcp/admin/{t}", st.cfg.origin));
-    let projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
-    let per_project: Vec<(String, String)> =
-        projects.into_iter().map(|p| (p.name.clone(), format!("{}/mcp/{}", st.cfg.origin, p.mcp_token))).collect();
-    Ok(crate::ui::layout("Claude", true, crate::ui::claude_page(url.as_deref(), &per_project)))
-}
 
 pub async fn admin_action(State(st): State<AppState>, jar: CookieJar, Path(action): Path<String>) -> Result<Redirect, Response> {
     auth::require(&st, &jar)?;

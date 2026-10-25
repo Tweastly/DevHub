@@ -29,6 +29,7 @@ pub enum Change {
     RemoveDomain(String),
     /// None = back to the server-wide default.
     Resources { memory_mb: Option<i64>, cpus: Option<f64> },
+    Pin(bool),
 }
 
 impl Change {
@@ -46,6 +47,7 @@ impl Change {
             Change::AddDomain { .. } => "domain-add",
             Change::RemoveDomain(_) => "domain-remove",
             Change::Resources { .. } => "resources",
+            Change::Pin(_) => "pin",
         }
     }
 }
@@ -130,6 +132,8 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         public: false,
         memory_mb: None,
         cpus: None,
+        pinned: false,
+        mcp_last_used: None,
     };
     {
         let c = st.db.lock().unwrap();
@@ -168,7 +172,7 @@ async fn seed_site(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
     let d = &st.docker;
     let port = p.ports.first().map(|m| m.container).unwrap_or(8000);
     let name = maud::html! { (p.name) }.into_string(); // HTML-escaped
-    docker::write_file(d, &p.name, "index.html", SITE_TEMPLATE.replace("{{PROJECT}}", &name).as_bytes()).await?;
+    docker::write_file(d, &p.name, "index.html", SITE_TEMPLATE.replace("{{PROJECT}}", &name).replace("{{PORT}}", &port.to_string()).as_bytes()).await?;
     let start = format!("#!/bin/sh\n# Lancé automatiquement au démarrage du conteneur.\nexec python3 -m http.server {port} --bind 0.0.0.0\n");
     docker::write_file(d, &p.name, "start.sh", start.as_bytes()).await?;
     let cmd = "chmod +x start.sh && (nohup ./start.sh > /tmp/start.log 2>&1 &)";
@@ -251,6 +255,11 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
             let show = |v: Option<String>| v.unwrap_or_else(|| "défaut".into());
             detail = format!("{name} : RAM {} Mo, CPU {}", show(memory_mb.map(|m| m.to_string())), show(cpus.map(|c| c.to_string())));
+        }
+        Change::Pin(pinned) => {
+            db::set_pinned(&st.db.lock().unwrap(), name, pinned).map_err(internal)?;
+            // Pins are a UI preference: not worth an audit entry.
+            return Ok(());
         }
         Change::Delete { keep_data } => {
             docker::destroy(d, name, keep_data).await.map_err(internal)?;

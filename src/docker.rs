@@ -215,6 +215,41 @@ pub struct Status {
     pub mem_limit: u64,
 }
 
+/// State plus timing details from one inspect call.
+#[derive(Default, Clone)]
+pub struct Detail {
+    pub state: String,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub exit_code: Option<i64>,
+}
+
+pub async fn detail(d: &Docker, p: &str) -> Detail {
+    let Ok(info) = d.inspect_container(&container_name(p), None::<InspectContainerOptions>).await else {
+        return Detail { state: "absent".into(), ..Default::default() };
+    };
+    let s = info.state.unwrap_or_default();
+    Detail {
+        state: s.status.map(|x| x.to_string()).unwrap_or_else(|| "unknown".into()),
+        started_at: s.started_at.as_deref().and_then(crate::timefmt::parse_rfc3339),
+        finished_at: s.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339),
+        exit_code: s.exit_code,
+    }
+}
+
+/// Is something listening on this container port? (Proxy-style check, 300 ms max.)
+pub async fn port_open(self_container: bool, project: &str, container_port: u16, host_port: u16) -> bool {
+    let addr = if self_container {
+        format!("{}:{container_port}", container_name(project))
+    } else {
+        format!("127.0.0.1:{host_port}")
+    };
+    matches!(
+        tokio::time::timeout(Duration::from_millis(300), tokio::net::TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
+}
+
 /// Container state only (one fast inspect call, a few ms).
 pub async fn state(d: &Docker, p: &str) -> String {
     match d.inspect_container(&container_name(p), None::<InspectContainerOptions>).await {

@@ -18,6 +18,7 @@ pub async fn handle(State(st): State<AppState>, Path(token): Path<String>, Json(
     let Some(p) = project else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    db::touch_mcp(&st.db.lock().unwrap(), &p.name);
 
     // Notifications (no id) only need an ack.
     let Some(id) = req.get("id").cloned() else {

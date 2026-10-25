@@ -23,6 +23,10 @@ pub struct Project {
     /// Per-project limits; None = the server-wide defaults (DEVHUB_MEMORY_MB / DEVHUB_CPUS).
     pub memory_mb: Option<i64>,
     pub cpus: Option<f64>,
+    /// Shown in the sidebar's « Épinglés ».
+    pub pinned: bool,
+    /// Last call on the project's own MCP URL.
+    pub mcp_last_used: Option<i64>,
 }
 
 pub fn open(path: &str) -> anyhow::Result<Connection> {
@@ -46,6 +50,15 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN memory_mb INTEGER", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN cpus REAL", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN mcp_last_used INTEGER", []);
+    let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
+    let _ = c.execute("ALTER TABLE sessions ADD COLUMN passkey_id INTEGER", []);
+    c.execute_batch(
+        "CREATE TABLE IF NOT EXISTS metrics(ts INTEGER NOT NULL, scope TEXT NOT NULL, cpu REAL NOT NULL, mem INTEGER NOT NULL);
+         CREATE INDEX IF NOT EXISTS metrics_scope_ts ON metrics(scope, ts);
+         CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);",
+    )?;
     Ok(c)
 }
 
@@ -71,10 +84,12 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         public: r.get::<_, i64>(8)? != 0,
         memory_mb: r.get(9)?,
         cpus: r.get(10)?,
+        pinned: r.get::<_, i64>(11)? != 0,
+        mcp_last_used: r.get(12)?,
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -94,8 +109,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         params![
             p.name,
             p.template,
@@ -107,7 +122,9 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             p.created_at,
             p.public as i64,
             p.memory_mb,
-            p.cpus
+            p.cpus,
+            p.pinned as i64,
+            p.mcp_last_used
         ],
     )?;
     Ok(())
@@ -153,12 +170,12 @@ pub fn passkeys(c: &Connection) -> anyhow::Result<Vec<(i64, String, String)>> {
     Ok(v)
 }
 
-pub fn add_passkey(c: &Connection, name: &str, data: &str) -> anyhow::Result<()> {
+pub fn add_passkey(c: &Connection, name: &str, data: &str) -> anyhow::Result<i64> {
     c.execute(
         "INSERT INTO passkeys(name, data, created_at) VALUES (?1,?2,?3)",
         params![name, data, now()],
     )?;
-    Ok(())
+    Ok(c.last_insert_rowid())
 }
 
 pub fn update_passkey(c: &Connection, id: i64, data: &str) -> anyhow::Result<()> {
@@ -171,10 +188,23 @@ pub fn delete_passkey(c: &Connection, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn create_session(c: &Connection, token: &str, ttl: i64) -> anyhow::Result<()> {
+pub fn create_session(c: &Connection, token: &str, ttl: i64, passkey_id: Option<i64>) -> anyhow::Result<()> {
     c.execute("DELETE FROM sessions WHERE expires < ?1", [now()])?;
-    c.execute("INSERT INTO sessions(token, expires) VALUES (?1,?2)", params![token, now() + ttl])?;
+    c.execute(
+        "INSERT INTO sessions(token, expires, passkey_id) VALUES (?1,?2,?3)",
+        params![token, now() + ttl, passkey_id],
+    )?;
     Ok(())
+}
+
+/// The passkey (id, name) that opened this session, if known.
+pub fn session_passkey(c: &Connection, token: &str) -> Option<(i64, String)> {
+    c.query_row(
+        "SELECT p.id, p.name FROM sessions s JOIN passkeys p ON p.id = s.passkey_id WHERE s.token=?1",
+        [token],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .ok()
 }
 
 pub fn session_valid(c: &Connection, token: &str) -> bool {
@@ -221,4 +251,143 @@ pub fn add_domain(c: &Connection, host: &str, project: &str, port: u16) -> anyho
 
 pub fn remove_domain(c: &Connection, host: &str, project: &str) -> anyhow::Result<bool> {
     Ok(c.execute("DELETE FROM domains WHERE host=?1 AND project=?2", params![host, project])? > 0)
+}
+
+pub struct PasskeyRow {
+    pub id: i64,
+    pub name: String,
+    pub created_at: i64,
+    pub last_used: Option<i64>,
+}
+
+pub fn passkey_rows(c: &Connection) -> Vec<PasskeyRow> {
+    let Ok(mut s) = c.prepare("SELECT id, name, created_at, last_used FROM passkeys ORDER BY id") else { return Vec::new() };
+    s.query_map([], |r| Ok(PasskeyRow { id: r.get(0)?, name: r.get(1)?, created_at: r.get(2)?, last_used: r.get(3)? }))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+}
+
+pub fn passkey_used(c: &Connection, id: i64) {
+    let _ = c.execute("UPDATE passkeys SET last_used=?1 WHERE id=?2", params![now(), id]);
+}
+
+pub fn set_pinned(c: &Connection, name: &str, pinned: bool) -> anyhow::Result<()> {
+    c.execute("UPDATE projects SET pinned=?1 WHERE name=?2", params![pinned as i64, name])?;
+    Ok(())
+}
+
+pub fn touch_mcp(c: &Connection, name: &str) {
+    let _ = c.execute("UPDATE projects SET mcp_last_used=?1 WHERE name=?2", params![now(), name]);
+}
+
+// --- Metrics history: one sample per minute per scope ("" = the whole server) ---
+
+pub fn metrics_insert(c: &Connection, ts: i64, rows: &[(String, f64, i64)]) {
+    for (scope, cpu, mem) in rows {
+        let _ = c.execute("INSERT INTO metrics(ts, scope, cpu, mem) VALUES (?1,?2,?3,?4)", params![ts, scope, cpu, mem]);
+    }
+    let _ = c.execute("DELETE FROM metrics WHERE ts < ?1", [ts - 31 * 86400]);
+}
+
+/// Average CPU per bucket over [since, now], plus the peak sample (cpu, ts).
+pub fn metrics_series(c: &Connection, scope: &str, since: i64, buckets: i64) -> (Vec<f64>, Option<(f64, i64)>) {
+    let span = ((now() - since) / buckets).max(1);
+    let mut out = vec![0.0; buckets as usize];
+    if let Ok(mut s) = c.prepare("SELECT (ts - ?2) / ?3 AS b, AVG(cpu) FROM metrics WHERE scope=?1 AND ts >= ?2 GROUP BY b") {
+        if let Ok(rows) = s.query_map(params![scope, since, span], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))) {
+            for (b, v) in rows.flatten() {
+                if (0..buckets).contains(&b) {
+                    out[b as usize] = v;
+                }
+            }
+        }
+    }
+    let peak = c
+        .query_row(
+            "SELECT cpu, ts FROM metrics WHERE scope=?1 AND ts >= ?2 ORDER BY cpu DESC LIMIT 1",
+            params![scope, since],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    (out, peak)
+}
+
+/// Project using the most CPU at a given minute (to explain a server peak).
+pub fn metrics_top_at(c: &Connection, ts: i64) -> Option<String> {
+    c.query_row(
+        "SELECT scope FROM metrics WHERE ts=?1 AND scope != '' ORDER BY cpu DESC LIMIT 1",
+        [ts],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
+// --- Audit queries for the journal page ---
+
+pub struct AuditRow {
+    pub ts: i64,
+    pub actor: String,
+    pub action: String,
+    pub detail: String,
+}
+
+#[derive(Default)]
+pub struct AuditFilter {
+    /// "fail" groups refused logins (actor "?").
+    pub actor: Option<String>,
+    /// Matches entries whose action or detail starts with the project name.
+    pub project: Option<String>,
+    pub since: Option<i64>,
+}
+
+fn audit_where(f: &AuditFilter) -> (String, Vec<rusqlite::types::Value>) {
+    use rusqlite::types::Value as V;
+    let mut w = vec!["1=1".to_string()];
+    let mut p: Vec<V> = Vec::new();
+    if let Some(a) = &f.actor {
+        p.push(V::Text(if a == "fail" { "?".into() } else { a.clone() }));
+        w.push(format!("actor = ?{}", p.len()));
+    }
+    if let Some(name) = &f.project {
+        p.push(V::Text(format!("{name}:%")));
+        let a = p.len();
+        p.push(V::Text(format!("{name}%")));
+        let b = p.len();
+        w.push(format!("(action LIKE ?{a} OR detail LIKE ?{b})"));
+    }
+    if let Some(s) = f.since {
+        p.push(V::Integer(s));
+        w.push(format!("ts >= ?{}", p.len()));
+    }
+    (w.join(" AND "), p)
+}
+
+pub fn audit_query(c: &Connection, f: &AuditFilter, limit: i64, offset: i64) -> (Vec<AuditRow>, i64) {
+    let (w, p) = audit_where(f);
+    let total = c
+        .query_row(&format!("SELECT COUNT(*) FROM audit WHERE {w}"), rusqlite::params_from_iter(p.iter()), |r| r.get(0))
+        .unwrap_or(0);
+    let sql = format!("SELECT ts, actor, action, detail FROM audit WHERE {w} ORDER BY ts DESC, id DESC LIMIT {limit} OFFSET {offset}");
+    let rows = c
+        .prepare(&sql)
+        .and_then(|mut s| {
+            s.query_map(rusqlite::params_from_iter(p.iter()), |r| {
+                Ok(AuditRow { ts: r.get(0)?, actor: r.get(1)?, action: r.get(2)?, detail: r.get(3)? })
+            })
+            .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
+    (rows, total)
+}
+
+/// Entry count per actor for the filter chips (same project/period filter, any actor).
+pub fn audit_actor_counts(c: &Connection, f: &AuditFilter) -> Vec<(String, i64)> {
+    let f = AuditFilter { actor: None, project: f.project.clone(), since: f.since };
+    let (w, p) = audit_where(&f);
+    c.prepare(&format!("SELECT actor, COUNT(*) FROM audit WHERE {w} GROUP BY actor"))
+        .and_then(|mut s| {
+            s.query_map(rusqlite::params_from_iter(p.iter()), |r| Ok((r.get(0)?, r.get(1)?)))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default()
 }

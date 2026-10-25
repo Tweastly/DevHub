@@ -3,7 +3,7 @@
 
 use crate::{db, random_token, AppError, AppState};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -19,6 +19,29 @@ pub fn is_logged_in(st: &AppState, jar: &CookieJar) -> bool {
     jar.get(COOKIE)
         .map(|c| db::session_valid(&st.db.lock().unwrap(), c.value()))
         .unwrap_or(false)
+}
+
+/// Passkey (id, name) behind the current session.
+pub fn current_passkey(st: &AppState, jar: &CookieJar) -> Option<(i64, String)> {
+    jar.get(COOKIE).and_then(|c| db::session_passkey(&st.db.lock().unwrap(), c.value()))
+}
+
+/// Client IP with the last two IPv4 octets hidden ("90.12.x.x"), from Caddy's X-Forwarded-For.
+pub fn masked_ip(h: &HeaderMap) -> String {
+    let ip = h
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(str::trim)
+        .unwrap_or("");
+    let parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() == 4 {
+        format!("{}.{}.x.x", parts[0], parts[1])
+    } else if ip.contains(':') {
+        format!("{}:…", ip.split(':').take(2).collect::<Vec<_>>().join(":"))
+    } else {
+        "ip inconnue".into()
+    }
 }
 
 /// Guard for HTML pages.
@@ -72,15 +95,20 @@ pub async fn register_finish(State(st): State<AppState>, jar: CookieJar, Json(b)
     let cred: RegisterPublicKeyCredential = serde_json::from_value(b.credential)?;
     let pk = st.webauthn.finish_passkey_registration(&cred, &state)?;
     let first = stored_passkeys(&st)?.is_empty();
-    {
+    let id = {
         let c = st.db.lock().unwrap();
-        db::add_passkey(&c, &name, &serde_json::to_string(&pk)?)?;
+        let id = db::add_passkey(&c, &name, &serde_json::to_string(&pk)?)?;
         db::audit(&c, "owner", "passkey.add", &name);
-    }
+        id
+    };
     *st.setup_token.lock().unwrap() = None;
     // First registration logs you straight in.
-    if first { Ok((new_session(&st, jar)?, Json(json!({"ok": true}))).into_response()) }
-    else { Ok(Json(json!({"ok": true})).into_response()) }
+    if first {
+        db::passkey_used(&st.db.lock().unwrap(), id);
+        Ok((new_session(&st, jar, Some(id))?, Json(json!({"ok": true, "name": name}))).into_response())
+    } else {
+        Ok(Json(json!({"ok": true, "name": name})).into_response())
+    }
 }
 
 pub async fn login_start(State(st): State<AppState>) -> Result<Response, AppError> {
@@ -94,7 +122,8 @@ pub async fn login_start(State(st): State<AppState>) -> Result<Response, AppErro
     Ok(Json(json!({ "id": id, "options": opts })).into_response())
 }
 
-pub async fn login_finish(State(st): State<AppState>, jar: CookieJar, Json(b): Json<Finish>) -> Result<Response, AppError> {
+pub async fn login_finish(State(st): State<AppState>, jar: CookieJar, headers: HeaderMap, Json(b): Json<Finish>) -> Result<Response, AppError> {
+    let ip = masked_ip(&headers);
     let Some(state) = st.auth_states.lock().unwrap().remove(&b.id) else {
         return Ok((StatusCode::BAD_REQUEST, "cérémonie inconnue").into_response());
     };
@@ -102,23 +131,34 @@ pub async fn login_finish(State(st): State<AppState>, jar: CookieJar, Json(b): J
     let res = match st.webauthn.finish_passkey_authentication(&cred, &state) {
         Ok(r) => r,
         Err(e) => {
-            db::audit(&st.db.lock().unwrap(), "?", "login.fail", &e.to_string());
+            db::audit(&st.db.lock().unwrap(), "?", "login.fail", &format!("{e} · {ip}"));
             return Ok((StatusCode::UNAUTHORIZED, "échec").into_response());
         }
     };
-    // Persist updated signature counter / backup state.
+    // Persist updated signature counter / backup state, and remember which passkey was used.
+    let mut used = None;
     for (id, mut pk) in stored_passkeys(&st)? {
+        if pk.cred_id() == res.cred_id() {
+            used = Some((id, db::passkeys(&st.db.lock().unwrap())?.into_iter().find(|k| k.0 == id).map(|k| k.1).unwrap_or_default()));
+        }
         if pk.update_credential(&res) == Some(true) {
             db::update_passkey(&st.db.lock().unwrap(), id, &serde_json::to_string(&pk)?)?;
         }
     }
-    db::audit(&st.db.lock().unwrap(), "owner", "login", "");
-    Ok((new_session(&st, jar)?, Json(json!({"ok": true}))).into_response())
+    {
+        let c = st.db.lock().unwrap();
+        if let Some((id, _)) = &used {
+            db::passkey_used(&c, *id);
+        }
+        let device = used.as_ref().map(|u| u.1.as_str()).unwrap_or("?");
+        db::audit(&c, "owner", "login.ok", &format!("{device} · {ip}"));
+    }
+    Ok((new_session(&st, jar, used.map(|u| u.0))?, Json(json!({"ok": true}))).into_response())
 }
 
-fn new_session(st: &AppState, jar: CookieJar) -> anyhow::Result<CookieJar> {
+fn new_session(st: &AppState, jar: CookieJar, passkey_id: Option<i64>) -> anyhow::Result<CookieJar> {
     let token = random_token(32);
-    db::create_session(&st.db.lock().unwrap(), &token, SESSION_TTL)?;
+    db::create_session(&st.db.lock().unwrap(), &token, SESSION_TTL, passkey_id)?;
     let c = Cookie::build((COOKIE, token))
         .http_only(true)
         .secure(st.cfg.origin.starts_with("https"))

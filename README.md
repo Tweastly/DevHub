@@ -10,6 +10,10 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 
 ## Fonctionnalités
 
+- **Interface** : barre latérale avec projets épinglés et jauges du serveur, onglets projet (Aperçu, Réseau, Fichiers, Terminal & logs, Paramètres), cartes ou liste, recherche (`/`), thème clair/sombre (système ou forcé), navigation mobile en bas. Le design system est dans `assets/app.css`.
+- **Historique** : CPU et RAM du serveur et de chaque projet échantillonnés chaque minute, gardés 31 jours (sparklines 24 h / 7 j / 30 j).
+- **Journal** : filtres par acteur, projet et période, regroupement par jour, pagination, export CSV. Les connexions notent le passkey utilisé et l'IP masquée.
+
 - **Projets** : création à partir d'un modèle (Node, Rust, Python, Go, Debian) ou d'une image perso, avec un dépôt Git optionnel cloné dans `/workspace`.
 - **Modèle « Page web »** : génère une page d'accueil au nom du projet (`templates/site.html`), servie tout de suite sur le port 8000 par défaut.
 - **Démarrage automatique** : si `/workspace/start.sh` existe et est exécutable, il est lancé à chaque démarrage du conteneur (logs dans `/tmp/start.log`).
