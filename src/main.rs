@@ -2,6 +2,8 @@ mod auth;
 mod db;
 mod docker;
 mod mcp;
+mod proxy;
+mod terminal;
 mod ui;
 
 use axum::extract::{Form, Path, State};
@@ -25,6 +27,7 @@ pub struct Config {
     pub memory_bytes: i64,
     pub nano_cpus: i64,
     pub bind_ip: String,
+    pub self_container: Option<String>,
 }
 
 #[derive(Clone)]
@@ -40,7 +43,7 @@ pub struct AppState {
 
 impl AppState {
     fn limits(&self) -> docker::Limits {
-        docker::Limits { memory_bytes: self.cfg.memory_bytes, nano_cpus: self.cfg.nano_cpus, bind_ip: self.cfg.bind_ip.clone() }
+        docker::Limits { memory_bytes: self.cfg.memory_bytes, nano_cpus: self.cfg.nano_cpus, bind_ip: self.cfg.bind_ip.clone(), self_container: self.cfg.self_container.clone() }
     }
 }
 
@@ -82,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         memory_bytes: env("DEVHUB_MEMORY_MB", "4096").parse::<i64>()? * 1024 * 1024,
         nano_cpus: (env("DEVHUB_CPUS", "2").parse::<f64>()? * 1e9) as i64,
         bind_ip: env("DEVHUB_BIND_IP", "0.0.0.0"),
+        self_container: std::env::var("DEVHUB_SELF_CONTAINER").ok().filter(|s| !s.is_empty()),
     };
 
     let data_dir = env("DEVHUB_DATA", "./data");
@@ -99,6 +103,10 @@ async fn main() -> anyhow::Result<()> {
         reg_states: Default::default(),
         auth_states: Default::default(),
     };
+    if let Some(me) = &st.cfg.self_container {
+        let projects = db::list_projects(&st.db.lock().unwrap())?;
+        docker::join_all(&st.docker, &projects, me).await;
+    }
     if needs_setup {
         let t = random_token(24);
         println!("\n=== DevHub : aucun passkey. SETUP TOKEN : {t} ===\n=== Ouvre {origin}/login pour créer ton passkey ===\n");
@@ -119,8 +127,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects", post(create_project))
         .route("/projects/{name}", get(project_page))
         .route("/projects/{name}/logs", get(logs_page))
+        .route("/projects/{name}/terminal", get(terminal_page))
+        .route("/projects/{name}/terminal/ws", get(terminal::ws))
+        .route("/_caddy/ask", get(proxy::caddy_ask))
         .route("/projects/{name}/{action}", post(project_action))
         .route("/mcp/{token}", post(mcp::handle).get(mcp::get_not_allowed))
+        .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 
     let addr = env("DEVHUB_LISTEN", "0.0.0.0:8080");
@@ -152,7 +164,7 @@ async fn dashboard(State(st): State<AppState>, jar: CookieJar) -> Page {
         let s = docker::status(&st.docker, &p.name).await;
         rows.push((p, s));
     }
-    page(&st, &jar, "Projets", ui::dashboard(&rows, &st.cfg.domain))
+    page(&st, &jar, "Projets", ui::dashboard(&st, &rows))
 }
 
 async fn security_page(State(st): State<AppState>, jar: CookieJar) -> Page {
@@ -241,6 +253,7 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
         env: BTreeMap::new(),
         mcp_token: random_token(32),
         created_at: db::now(),
+        public: false,
     };
     {
         let c = st.db.lock().unwrap();
@@ -284,7 +297,13 @@ async fn project_page(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let p = load(&st, &name)?;
     let s = docker::status(&st.docker, &name).await;
     let url = format!("{}/mcp/{}", st.cfg.origin, p.mcp_token);
-    page(&st, &jar, &name, ui::project(&p, &s, &url, &st.cfg.domain))
+    page(&st, &jar, &name, ui::project(&st, &p, &s, &url))
+}
+
+async fn terminal_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
+    auth::require(&st, &jar)?;
+    load(&st, &name)?;
+    page(&st, &jar, "Terminal", ui::terminal(&name))
 }
 
 async fn logs_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
@@ -312,6 +331,10 @@ async fn project_action(
         "rebuild" => docker::create(d, &p, &st.limits()).await.map_err(err)?,
         "rotate-token" => {
             p.mcp_token = random_token(32);
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(err)?;
+        }
+        "toggle-public" => {
+            p.public = !p.public;
             db::save_project(&st.db.lock().unwrap(), &p).map_err(err)?;
         }
         "ports" => {

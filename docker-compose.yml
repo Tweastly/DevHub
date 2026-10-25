@@ -1,6 +1,7 @@
 services:
   devhub:
     build: .
+    container_name: devhub
     restart: unless-stopped
     environment:
       DEVHUB_DOMAIN: ${DEVHUB_DOMAIN}
@@ -8,6 +9,10 @@ services:
       DEVHUB_PORT_RANGE: 20000-20999
       DEVHUB_MEMORY_MB: 4096
       DEVHUB_CPUS: 2
+      # DevHub joins each project's network and proxies <projet>.${DEVHUB_DOMAIN} to it.
+      DEVHUB_SELF_CONTAINER: devhub
+      # Project ports stay off the internet: they're reached only through the subdomains.
+      DEVHUB_BIND_IP: 127.0.0.1
     volumes:
       - ./data:/data
       # Only the orchestrator gets the Docker socket — never the project containers.

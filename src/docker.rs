@@ -10,7 +10,7 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, Mount, MountTypeEnum, PortBinding, RestartPolicy, RestartPolicyNameEnum};
-use bollard::network::CreateNetworkOptions;
+use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
 use bollard::Docker;
 use futures_util::StreamExt;
 use std::collections::HashMap;
@@ -42,6 +42,8 @@ pub struct Limits {
     pub memory_bytes: i64,
     pub nano_cpus: i64,
     pub bind_ip: String,
+    /// Name of the DevHub container itself, when it runs in Docker (enables proxying by container name).
+    pub self_container: Option<String>,
 }
 
 pub async fn pull(docker: &Docker, image: &str) -> anyhow::Result<()> {
@@ -68,6 +70,9 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         docker
             .create_network(CreateNetworkOptions { name: net.clone(), driver: "bridge".into(), ..Default::default() })
             .await?;
+    }
+    if let Some(me) = &lim.self_container {
+        join_network(docker, &net, me).await;
     }
     if docker.inspect_image(&p.image).await.is_err() {
         pull(docker, &p.image).await?;
@@ -119,6 +124,20 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         .await?;
     docker.start_container::<String>(&name, None).await?;
     Ok(())
+}
+
+pub async fn join_network(docker: &Docker, net: &str, me: &str) {
+    // Errors when already connected; that's fine.
+    let _ = docker
+        .connect_network(net, ConnectNetworkOptions { container: me.to_string(), ..Default::default() })
+        .await;
+}
+
+/// On startup, rejoin every project network (they are lost if DevHub's container is recreated).
+pub async fn join_all(docker: &Docker, projects: &[Project], me: &str) {
+    for p in projects {
+        join_network(docker, &network_name(&p.name), me).await;
+    }
 }
 
 pub async fn start(d: &Docker, p: &str) -> anyhow::Result<()> {

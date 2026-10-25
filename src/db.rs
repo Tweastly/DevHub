@@ -18,6 +18,8 @@ pub struct Project {
     pub env: BTreeMap<String, String>,
     pub mcp_token: String,
     pub created_at: i64,
+    /// Subdomains reachable without a DevHub session.
+    pub public: bool,
 }
 
 pub fn open(path: &str) -> anyhow::Result<Connection> {
@@ -35,6 +37,8 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
             action TEXT NOT NULL, detail TEXT NOT NULL);",
     )?;
+    // Migration: column added after the first release.
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0", []);
     Ok(c)
 }
 
@@ -57,10 +61,11 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         env: serde_json::from_str(&env).unwrap_or_default(),
         mcp_token: r.get(6)?,
         created_at: r.get(7)?,
+        public: r.get::<_, i64>(8)? != 0,
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -80,8 +85,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             p.name,
             p.template,
@@ -90,7 +95,8 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             serde_json::to_string(&p.ports)?,
             serde_json::to_string(&p.env)?,
             p.mcp_token,
-            p.created_at
+            p.created_at,
+            p.public as i64
         ],
     )?;
     Ok(())

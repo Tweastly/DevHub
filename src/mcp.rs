@@ -2,7 +2,7 @@
 //! Claude Desktop connects to https://<domain>/mcp/<token>; the token maps to exactly
 //! one project, and every tool runs inside that project's container only.
 
-use crate::{db, docker, AppState};
+use crate::{db, docker, proxy, AppState};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -157,13 +157,19 @@ async fn call(st: &AppState, p: &db::Project, params: &Value) -> Value {
                 let ports: Vec<String> = p
                     .ports
                     .iter()
-                    .map(|m| format!("{} -> http://{}:{} (hôte)", m.container, st.cfg.domain, m.host))
+                    .enumerate()
+                    .map(|(i, m)| {
+                        let main = if i == 0 { format!(" et {}", proxy::url_for(st, &p.name, None)) } else { String::new() };
+                        format!("{} -> {}{main}", m.container, proxy::url_for(st, &p.name, Some(m.container)))
+                    })
                     .collect();
                 let env: Vec<&String> = p.env.keys().collect();
                 text(
                     format!(
-                        "projet: {}\nimage: {}\ngit: {}\nports:\n  {}\nenv: {:?}\nPense à écouter sur 0.0.0.0 dans le conteneur.",
-                        p.name, p.image, p.git_url.clone().unwrap_or_default(), ports.join("\n  "), env
+                        "projet: {}\nimage: {}\ngit: {}\naccès: {}\nports (conteneur -> URL publique):\n  {}\nenv: {:?}\nPense à écouter sur 0.0.0.0 dans le conteneur.",
+                        p.name, p.image, p.git_url.clone().unwrap_or_default(),
+                        if p.public { "public" } else { "privé (passkey requis)" },
+                        ports.join("\n  "), env
                     ),
                     false,
                 )

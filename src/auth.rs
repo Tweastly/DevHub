@@ -124,9 +124,11 @@ fn new_session(st: &AppState, jar: CookieJar) -> anyhow::Result<CookieJar> {
         .secure(st.cfg.origin.starts_with("https"))
         .same_site(SameSite::Strict)
         .path("/")
-        .max_age(time_dur(SESSION_TTL))
-        .build();
-    Ok(jar.add(c))
+        .max_age(time_dur(SESSION_TTL));
+    // Share the cookie with project subdomains (the proxy strips it before forwarding).
+    // Not possible on bare "localhost", so private projects need a real domain.
+    let c = if st.cfg.domain.contains('.') { c.domain(st.cfg.domain.clone()) } else { c };
+    Ok(jar.add(c.build()))
 }
 
 fn time_dur(secs: i64) -> cookie::time::Duration {
@@ -137,5 +139,10 @@ pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> impl IntoResp
     if let Some(c) = jar.get(COOKIE) {
         db::delete_session(&st.db.lock().unwrap(), c.value());
     }
-    (jar.remove(Cookie::from(COOKIE)), Redirect::to("/login"))
+    let mut c = Cookie::from(COOKIE);
+    c.set_path("/");
+    if st.cfg.domain.contains('.') {
+        c.set_domain(st.cfg.domain.clone());
+    }
+    (jar.remove(c), Redirect::to("/login"))
 }

@@ -2,6 +2,7 @@
 //! because browsers expose passkeys exclusively through navigator.credentials.
 
 use crate::db::Project;
+use crate::{proxy, AppState};
 use crate::docker::{Status, TEMPLATES};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
@@ -63,14 +64,14 @@ pub fn status_pill(s: &Status) -> Markup {
     html! { span class={"pill " (s.state)} { (s.state) } }
 }
 
-pub fn dashboard(projects: &[(Project, Status)], domain: &str) -> Markup {
+pub fn dashboard(st: &AppState, projects: &[(Project, Status)]) -> Markup {
     html! {
         div.card {
             h2 { "Projets" }
             @if projects.is_empty() { p.mute { "Aucun projet. Crée le premier ci-dessous." } }
             @else {
                 table {
-                    tr { th{"Nom"} th{"État"} th{"CPU"} th{"Mémoire"} th{"Ports"} th{} }
+                    tr { th{"Nom"} th{"État"} th{"CPU"} th{"Mémoire"} th{"Accès"} th{} }
                     @for (p, s) in projects {
                         tr {
                             td { a href={"/projects/" (p.name)} { b { (p.name) } } br; span.mute { (p.template) } }
@@ -80,7 +81,11 @@ pub fn dashboard(projects: &[(Project, Status)], domain: &str) -> Markup {
                                 (fmt_mb(s.mem_used)) " / " (fmt_mb(s.mem_limit))
                                 @if s.mem_limit > 0 { div.bar { i style={"width:" (s.mem_used * 100 / s.mem_limit) "%"} {} } }
                             }
-                            td { @for m in &p.ports { a href={"http://" (domain) ":" (m.host)} target="_blank" { (m.container) "→" (m.host) } " " } }
+                            td {
+                                @if !p.ports.is_empty() { a href=(proxy::url_for(st, &p.name, None)) target="_blank" { "ouvrir ↗" } br; }
+                                span.mute { @for m in &p.ports { (m.container) " " } }
+                                @if p.public { span.pill { "public" } }
+                            }
                             td.row {
                                 @if s.state == "running" {
                                     form method="post" action={"/projects/" (p.name) "/stop"} { button.ghost { "Stop" } }
@@ -117,7 +122,7 @@ pub fn dashboard(projects: &[(Project, Status)], domain: &str) -> Markup {
     }
 }
 
-pub fn project(p: &Project, s: &Status, mcp_url: &str, domain: &str) -> Markup {
+pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str) -> Markup {
     let env_text: String = p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     let ports_text: String = p.ports.iter().map(|m| m.container.to_string()).collect::<Vec<_>>().join(", ");
     let base = format!("/projects/{}", p.name);
@@ -133,6 +138,7 @@ pub fn project(p: &Project, s: &Status, mcp_url: &str, domain: &str) -> Markup {
                 form method="post" action={(base) "/stop"} { button.ghost { "Stop" } }
                 form method="post" action={(base) "/restart"} { button.ghost { "Restart" } }
                 form method="post" action={(base) "/rebuild"} { button.ghost title="Recrée le conteneur, garde /workspace" { "Rebuild" } }
+                a href={(base) "/terminal"} { "Terminal →" }
                 a href={(base) "/logs"} { "Logs →" }
             }
         }
@@ -147,10 +153,23 @@ pub fn project(p: &Project, s: &Status, mcp_url: &str, domain: &str) -> Markup {
         }
         div.grid {
             div.card {
-                h3 { "Ports" }
+                h3 { "Ports & sous-domaines" }
                 table {
-                    tr { th{"Conteneur"} th{"Hôte"} }
-                    @for m in &p.ports { tr { td{(m.container)} td{ a href={"http://" (domain) ":" (m.host)} target="_blank" {(m.host)} } } }
+                    tr { th{"Conteneur"} th{"URL"} th{"Hôte"} }
+                    @for (i, m) in p.ports.iter().enumerate() { tr {
+                        td{(m.container)}
+                        td{
+                            @if i == 0 { a href=(proxy::url_for(st, &p.name, None)) target="_blank" {(proxy::url_for(st, &p.name, None))} br; }
+                            a href=(proxy::url_for(st, &p.name, Some(m.container))) target="_blank" {(proxy::url_for(st, &p.name, Some(m.container)))}
+                        }
+                        td.mute{(m.host)}
+                    } }
+                }
+                div.row style="margin:10px 0" {
+                    span { "Accès : " b { @if p.public { "public" } @else { "privé (passkey)" } } }
+                    form method="post" action={(base) "/toggle-public"} {
+                        button.ghost { @if p.public { "Rendre privé" } @else { "Rendre public" } }
+                    }
                 }
                 form method="post" action={(base) "/ports"} {
                     label { span{"Ports conteneur (séparés par des virgules)"} input name="ports" value=(ports_text); }
@@ -174,6 +193,33 @@ pub fn project(p: &Project, s: &Status, mcp_url: &str, domain: &str) -> Markup {
         }
     }
 }
+
+pub fn terminal(name: &str) -> Markup {
+    html! {
+        link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css";
+        script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" {}
+        script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" {}
+        div.card {
+            div.row { h2 style="margin:0" { "Terminal · " (name) } a href={"/projects/" (name)} { "← retour" } span #tstate .mute { "connexion…" } }
+            div #term style="height:70vh;margin-top:12px;background:#000;border-radius:6px;padding:6px" {}
+        }
+        script { (PreEscaped(TERMINAL_JS.replace("__NAME__", name))) }
+    }
+}
+
+const TERMINAL_JS: &str = r#"
+const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'ui-monospace,monospace',theme:{background:'#000'}});
+const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(document.getElementById('term'));fit.fit();
+const state=document.getElementById('tstate');
+const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/projects/__NAME__/terminal/ws');
+ws.binaryType='arraybuffer';const te=new TextEncoder();
+const resize=()=>{fit.fit();if(ws.readyState===1)ws.send(JSON.stringify({cols:term.cols,rows:term.rows}))};
+ws.onopen=()=>{state.textContent='connecté';resize();term.focus()};
+ws.onmessage=e=>term.write(new Uint8Array(e.data));
+ws.onclose=()=>{state.textContent='déconnecté — recharge la page';term.write('\r\n[session terminée]\r\n')};
+term.onData(d=>ws.readyState===1&&ws.send(te.encode(d)));
+window.addEventListener('resize',resize);
+"#;
 
 pub fn logs(name: &str, logs: &str) -> Markup {
     html! {

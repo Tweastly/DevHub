@@ -12,14 +12,16 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 
 - **Projets** : création à partir d'un modèle (Node, Rust, Python, Go, Debian) ou d'une image perso, avec un dépôt Git optionnel cloné dans `/workspace`.
 - **Isolation** : chaque projet a son réseau, une limite RAM/CPU/PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker. Le code vit dans un volume (`/workspace`) qui survit aux rebuilds.
-- **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. Modifiables depuis le dashboard.
+- **Sous-domaines** : `projet.dev.tondomaine.com` pointe vers le premier port du projet, `projet-5173.dev.tondomaine.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
+- **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
+- **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
 - **Dashboard** : état, CPU et RAM de chaque projet, start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
 - **Passkey** (WebAuthn), sans mot de passe. Tu peux enregistrer plusieurs appareils.
 - **MCP par projet** : outils `run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`. Chaque URL ne donne accès qu'à un seul conteneur, et elle est régénérable.
 
 ## Déploiement sur le VPS
 
-1. DNS : un enregistrement `A` de `dev.tondomaine.com` vers l'IP du VPS.
+1. DNS : deux enregistrements `A` vers l'IP du VPS, `dev.tondomaine.com` et `*.dev.tondomaine.com`.
 2. Sur le VPS (avec Docker installé) :
    ```bash
    git clone <ce dépôt> devhub && cd devhub
@@ -28,7 +30,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
    docker compose logs devhub | grep "SETUP TOKEN"
    ```
 3. Ouvre `https://dev.tondomaine.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
-4. Pare-feu : ouvre 80, 443 et la plage de ports des projets (par défaut 20000-20999) si tu veux y accéder depuis l'extérieur. Pour garder les ports privés, mets `DEVHUB_BIND_IP=127.0.0.1`.
+4. Pare-feu : seuls 80 et 443 doivent être ouverts. Les certificats des sous-domaines sont générés automatiquement à la première visite.
 
 ## Connecter Claude Desktop à un projet
 
@@ -44,7 +46,8 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 | `DEVHUB_ORIGIN` | `https://$DOMAIN` | origine exacte du dashboard |
 | `DEVHUB_PORT_RANGE` | `20000-20999` | plage des ports hôte |
 | `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par projet |
-| `DEVHUB_BIND_IP` | `0.0.0.0` | IP sur laquelle les ports projets sont publiés |
+| `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP sur laquelle les ports projets sont publiés |
+| `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |
 
 ## Dev local
@@ -52,4 +55,4 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 ```bash
 DEVHUB_ORIGIN=http://localhost:8080 cargo run
 ```
-(les navigateurs acceptent les passkeys sur `localhost` sans HTTPS)
+(les navigateurs acceptent les passkeys sur `localhost` sans HTTPS ; les sous-domaines `projet.localhost:8080` fonctionnent pour les projets publics)
