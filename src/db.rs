@@ -32,6 +32,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             mcp_token TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS passkeys(
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS domains(host TEXT PRIMARY KEY, project TEXT NOT NULL, port INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS audit(
@@ -105,6 +106,7 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
 
 pub fn delete_project(c: &Connection, name: &str) -> anyhow::Result<()> {
     c.execute("DELETE FROM projects WHERE name=?1", [name])?;
+    c.execute("DELETE FROM domains WHERE project=?1", [name])?;
     Ok(())
 }
 
@@ -189,4 +191,25 @@ pub fn set_setting(c: &Connection, key: &str, value: Option<&str>) -> anyhow::Re
         None => c.execute("DELETE FROM settings WHERE key=?1", [key])?,
     };
     Ok(())
+}
+
+/// Custom domains (e.g. new.tweastly.com) pointing at one port of a project.
+pub fn domains_of(c: &Connection, project: &str) -> Vec<(String, u16)> {
+    let Ok(mut s) = c.prepare("SELECT host, port FROM domains WHERE project=?1 ORDER BY host") else { return Vec::new() };
+    s.query_map([project], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+}
+
+pub fn domain(c: &Connection, host: &str) -> Option<(String, u16)> {
+    c.query_row("SELECT project, port FROM domains WHERE host=?1", [host], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+}
+
+pub fn add_domain(c: &Connection, host: &str, project: &str, port: u16) -> anyhow::Result<()> {
+    c.execute("INSERT INTO domains(host, project, port) VALUES (?1,?2,?3)", params![host, project, port])?;
+    Ok(())
+}
+
+pub fn remove_domain(c: &Connection, host: &str, project: &str) -> anyhow::Result<bool> {
+    Ok(c.execute("DELETE FROM domains WHERE host=?1 AND project=?2", params![host, project])? > 0)
 }

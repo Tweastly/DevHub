@@ -1,6 +1,6 @@
 {
-	# Certificates for project subdomains are issued on first visit,
-	# only if DevHub confirms the subdomain belongs to a project.
+	# Certificates for project hosts are issued on first visit,
+	# only if DevHub confirms the host belongs to a project.
 	on_demand_tls {
 		ask http://devhub:8080/_caddy/ask
 	}
@@ -17,7 +17,9 @@
 	reverse_proxy devhub:8080
 }
 
-*.{$DEVHUB_DOMAIN} {
+# Everything else: project subdomains (*.{$DEVHUB_DOMAIN}) and custom domains
+# added in DevHub (e.g. new.tweastly.com). DevHub routes them by Host header.
+https:// {
 	tls {
 		on_demand
 	}

@@ -45,6 +45,8 @@ pub struct AppState {
     pub update: Arc<Mutex<updater::Info>>,
     /// CPU/memory per project, refreshed in the background so pages never wait on `docker stats`.
     pub stats: Arc<Mutex<HashMap<String, docker::Status>>>,
+    /// One-time session handoff codes for custom domains: code → (host, expiry).
+    pub handoffs: Arc<Mutex<HashMap<String, (String, i64)>>>,
 }
 
 impl AppState {
@@ -110,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         auth_states: Default::default(),
         update: Default::default(),
         stats: Default::default(),
+        handoffs: Default::default(),
     };
     if let Some(me) = &st.cfg.self_container {
         let projects = db::list_projects(&st.db.lock().unwrap())?;
@@ -131,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/register/finish", post(auth::register_finish))
         .route("/auth/login/start", post(auth::login_start))
         .route("/auth/login/finish", post(auth::login_finish))
+        .route("/auth/handoff", get(proxy::handoff))
         .route("/security", get(security_page))
         .route("/security/{id}/delete", post(delete_passkey))
         .route("/audit", get(audit_page))
@@ -301,6 +305,11 @@ async fn project_action(
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(bad)?),
         "env" => ops::Change::Env(ops::parse_env(field("env"))),
         "delete" => ops::Change::Delete { keep_data: form.contains_key("keep_data") },
+        "domain-add" => ops::Change::AddDomain {
+            host: field("host").to_string(),
+            port: field("port").parse().ok(),
+        },
+        "domain-remove" => ops::Change::RemoveDomain(field("host").to_string()),
         _ => return Err(bad("action inconnue")),
     };
     let deleted = matches!(change, ops::Change::Delete { .. });

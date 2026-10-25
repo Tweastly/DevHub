@@ -190,6 +190,7 @@ pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str) -> Markup 
                 }
             }
         }
+        (domains_card(st, p))
         div.card {
             h3 { "Zone dangereuse" }
             form method="post" action={(base) "/delete"} onsubmit="return confirm('Supprimer le projet ET ses données ?')" {
@@ -316,6 +317,46 @@ pub fn claude_page(admin_url: Option<&str>, projects: &[(String, String)]) -> Ma
             p.mute { "Pour qu'une conversation Claude ne voie qu'un projet, utilise plutôt son URL dédiée." }
             table {
                 @for (name, url) in projects { tr { td { a href={"/projects/" (name)} { (name) } } td { code { (url) } } } }
+            }
+        }
+    }
+}
+
+fn domains_card(st: &AppState, p: &Project) -> Markup {
+    let domains = crate::db::domains_of(&st.db.lock().unwrap(), &p.name);
+    let base = format!("/projects/{}", p.name);
+    let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
+    html! {
+        div.card {
+            h3 { "Domaines personnalisés" }
+            p.mute {
+                "Sers ce projet sur ton propre domaine, par exemple " code { "new.tweastly.com" } ". "
+                "Le domaine doit pointer vers l'IP du VPS (un enregistrement " code { "*" } " sur tweastly.com suffit pour tous). "
+                "Le certificat HTTPS est créé à la première visite."
+            }
+            @if !domains.is_empty() {
+                table {
+                    tr { th { "Domaine" } th { "Port" } th {} }
+                    @for (host, port) in &domains {
+                        tr {
+                            td { a href={(scheme) "://" (host)} target="_blank" { (host) } }
+                            td { (port) }
+                            td { form method="post" action={(base) "/domain-remove"} {
+                                input type="hidden" name="host" value=(host);
+                                button.ghost { "Retirer" }
+                            } }
+                        }
+                    }
+                }
+            }
+            @if p.ports.is_empty() {
+                p.mute { "Ajoute d'abord un port au projet." }
+            } @else {
+                form.row method="post" action={(base) "/domain-add"} style="margin-top:10px" {
+                    input name="host" placeholder="new.tweastly.com" required style="flex:1;min-width:200px";
+                    select name="port" style="width:auto" { @for m in &p.ports { option value=(m.container) { "port " (m.container) } } }
+                    button { "Ajouter" }
+                }
             }
         }
     }

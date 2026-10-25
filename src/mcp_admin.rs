@@ -90,6 +90,14 @@ fn tools() -> Value {
                 "inputSchema": { "type": "object", "properties": {
                     "project": p, "public": { "type": "boolean" }
                 }, "required": ["project", "public"] } }),
+        json!({ "name": "add_domain", "description": "Sert un projet sur un domaine personnalisé (ex. new.tweastly.com). Le DNS du domaine doit pointer vers le VPS. port : un des ports exposés (défaut : le premier).",
+                "inputSchema": { "type": "object", "properties": {
+                    "project": p, "host": { "type": "string" }, "port": { "type": "integer" }
+                }, "required": ["project", "host"] } }),
+        json!({ "name": "remove_domain", "description": "Retire un domaine personnalisé d'un projet.",
+                "inputSchema": { "type": "object", "properties": {
+                    "project": p, "host": { "type": "string" }
+                }, "required": ["project", "host"] } }),
         json!({ "name": "delete_project", "description": "Supprime un projet. DEMANDE CONFIRMATION à l'utilisateur avant. keep_data garde le volume /workspace.",
                 "inputSchema": { "type": "object", "properties": {
                     "project": p, "keep_data": { "type": "boolean", "default": false }
@@ -134,6 +142,8 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
     if with_env {
         v["env"] = json!(p.env);
     }
+    let domains = db::domains_of(&st.db.lock().unwrap(), &p.name);
+    v["domains"] = json!(domains.iter().map(|(h, port)| json!({ "host": h, "port": port })).collect::<Vec<_>>());
     v
 }
 
@@ -208,6 +218,16 @@ async fn call(st: &AppState, params: &Value) -> Value {
                 let public = a["public"].as_bool().unwrap_or(false);
                 ops::apply(st, &project, Change::SetPublic(public), "claude-admin").await?;
                 text(format!("{project} est maintenant {}", if public { "public" } else { "privé" }), false)
+            }
+            "add_domain" => {
+                let port = a["port"].as_u64().map(|n| u16::try_from(n).map_err(|_| format!("port invalide : {n}"))).transpose()?;
+                ops::apply(st, &project, Change::AddDomain { host: s("host"), port }, "claude-admin").await?;
+                let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
+                text(format!("{project} est maintenant servi sur {scheme}://{}", ops::normalize_host(&s("host"))?), false)
+            }
+            "remove_domain" => {
+                ops::apply(st, &project, Change::RemoveDomain(s("host")), "claude-admin").await?;
+                text(format!("{} retiré de {project}", s("host")), false)
             }
             "delete_project" => {
                 ops::apply(st, &project, Change::Delete { keep_data: a["keep_data"].as_bool().unwrap_or(false) }, "claude-admin").await?;

@@ -24,6 +24,9 @@ pub enum Change {
     Ports(Vec<u16>),
     Env(BTreeMap<String, String>),
     Delete { keep_data: bool },
+    /// `port: None` = the project's first port.
+    AddDomain { host: String, port: Option<u16> },
+    RemoveDomain(String),
 }
 
 impl Change {
@@ -38,6 +41,8 @@ impl Change {
             Change::Ports(_) => "ports",
             Change::Env(_) => "env",
             Change::Delete { .. } => "delete",
+            Change::AddDomain { .. } => "domain-add",
+            Change::RemoveDomain(_) => "domain-remove",
         }
     }
 }
@@ -196,6 +201,31 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
             docker::create(d, &p, &st.limits()).await.map_err(internal)?;
         }
+        Change::AddDomain { host, port } => {
+            let host = normalize_host(&host)?;
+            let base = crate::proxy::base_host(st);
+            if host == base || host.ends_with(&format!(".{base}")) {
+                return Err(format!("{host} est déjà géré automatiquement (sous-domaine de {base})"));
+            }
+            let port = match port {
+                Some(port) if p.ports.iter().any(|m| m.container == port) => port,
+                Some(port) => return Err(format!("le port {port} n'est pas exposé par {name} : ajoute-le d'abord dans ses ports")),
+                None => p.ports.first().map(|m| m.container).ok_or("ce projet n'expose aucun port")?,
+            };
+            let c = st.db.lock().unwrap();
+            if let Some((other, _)) = db::domain(&c, &host) {
+                return Err(format!("{host} est déjà utilisé par le projet {other}"));
+            }
+            db::add_domain(&c, &host, name, port).map_err(internal)?;
+            detail = format!("{name} ← {host} (port {port})");
+        }
+        Change::RemoveDomain(host) => {
+            let host = normalize_host(&host)?;
+            if !db::remove_domain(&st.db.lock().unwrap(), &host, name).map_err(internal)? {
+                return Err(format!("{host} n'est pas un domaine de {name}"));
+            }
+            detail = format!("{name} ✕ {host}");
+        }
         Change::Delete { keep_data } => {
             docker::destroy(d, name, keep_data).await.map_err(internal)?;
             db::delete_project(&st.db.lock().unwrap(), name).map_err(internal)?;
@@ -203,4 +233,15 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
     }
     db::audit(&st.db.lock().unwrap(), actor, &format!("project.{label}"), &detail);
     Ok(())
+}
+
+/// Lowercase host name, optional :port (local dev), without scheme or path.
+pub fn normalize_host(input: &str) -> R<String> {
+    let h = input.trim().trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_ascii_lowercase();
+    let (name, port) = h.split_once(':').map_or((h.as_str(), None), |(n, p)| (n, Some(p)));
+    let label_ok = |l: &str| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-')
+        && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    let ok = name.contains('.') && name.len() <= 253 && name.split('.').all(label_ok)
+        && port.is_none_or(|p| p.parse::<u16>().is_ok());
+    if ok { Ok(h) } else { Err(format!("domaine invalide : {input}")) }
 }

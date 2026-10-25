@@ -15,6 +15,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 - **Démarrage automatique** : si `/workspace/start.sh` existe et est exécutable, il est lancé à chaque démarrage du conteneur (logs dans `/tmp/start.log`).
 - **Isolation** : chaque projet a son réseau, une limite RAM/CPU/PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker. Le code vit dans un volume (`/workspace`) qui survit aux rebuilds.
 - **Sous-domaines** : `projet.dev.tweastly.com` pointe vers le premier port du projet, `projet-5173.dev.tweastly.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
+- **Domaines personnalisés** : sers un projet sur n'importe quel domaine (ex. `new.tweastly.com`) depuis sa page ou via Claude. Le HTTPS est automatique. Les projets privés restent protégés par ton passkey, grâce à un passage de session à usage unique (le cookie du dashboard n'est jamais partagé).
 - **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
 - **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
 - **Dashboard** : état, CPU et RAM de chaque projet, start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
@@ -25,7 +26,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 
 ## Déploiement sur le VPS
 
-1. DNS : deux enregistrements `A` vers l'IP du VPS, `dev.tweastly.com` et `*.dev.tweastly.com`.
+1. DNS : deux enregistrements `A` vers l'IP du VPS, `dev.tweastly.com` et `*.dev.tweastly.com`. Pour les domaines personnalisés, ajoute aussi `*.tweastly.com`, ou un enregistrement par domaine.
 2. Sur le VPS (avec Docker installé) :
    ```bash
    git clone https://github.com/Tweastly/DevHub devhub && cd devhub

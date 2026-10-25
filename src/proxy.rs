@@ -62,13 +62,87 @@ pub fn resolve(st: &AppState, host: &str) -> Option<Target> {
     Some(Target { project: p, container_port: m.container, host_port: m.host })
 }
 
-/// Middleware in front of the whole app: subdomain hosts are proxied, everything else continues.
+/// Custom domain (e.g. new.tweastly.com) → project and port.
+pub fn resolve_custom(st: &AppState, host: &str) -> Option<Target> {
+    let c = st.db.lock().unwrap();
+    let (project, port) = db::domain(&c, &host.to_ascii_lowercase())?;
+    let p = db::get_project(&c, &project).ok()??;
+    let m = p.ports.iter().find(|m| m.container == port)?.clone();
+    Some(Target { project: p, container_port: m.container, host_port: m.host })
+}
+
+const HANDOFF_PATH: &str = "/__devhub/auth";
+const HANDOFF_TTL: i64 = 60;
+
+/// Dashboard side of the session handoff for custom domains, which can't see the
+/// dashboard's cookie: mints a one-time code bound to the target host and sends the
+/// browser there.
+pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Response {
+    let next = q.get("next").cloned().unwrap_or_default();
+    let Some(u) = url::Url::parse(&next).ok() else {
+        return (StatusCode::BAD_REQUEST, "next invalide").into_response();
+    };
+    let host = match (u.host_str(), u.port()) {
+        (Some(h), Some(p)) => format!("{h}:{p}"),
+        (Some(h), None) => h.to_string(),
+        _ => return (StatusCode::BAD_REQUEST, "next invalide").into_response(),
+    };
+    if resolve_custom(&st, &host).is_none() {
+        return (StatusCode::BAD_REQUEST, "domaine inconnu").into_response();
+    }
+    if !auth::is_logged_in(&st, &jar) {
+        let me = format!("{}/auth/handoff", st.cfg.origin);
+        let back = url::Url::parse_with_params(&me, [("next", &next)]).map(|u| u.to_string()).unwrap_or(me);
+        let login = url::Url::parse_with_params(&format!("{}/login", st.cfg.origin), [("next", back)]).map(|u| u.to_string());
+        return axum::response::Redirect::to(&login.unwrap_or_default()).into_response();
+    }
+    let code = crate::random_token(32);
+    st.handoffs.lock().unwrap().insert(code.clone(), (host.clone(), db::now() + HANDOFF_TTL));
+    let path = match u.query() {
+        Some(q) => format!("{}?{q}", u.path()),
+        None => u.path().to_string(),
+    };
+    let target = url::Url::parse_with_params(&format!("{}://{host}{HANDOFF_PATH}", u.scheme()), [("code", code.as_str()), ("next", path.as_str())]);
+    axum::response::Redirect::to(&target.map(|u| u.to_string()).unwrap_or_default()).into_response()
+}
+
+/// Custom-domain side: trades the code for a session cookie scoped to this host only.
+fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
+    let q: HashMap<String, String> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
+    let code = q.get("code").cloned().unwrap_or_default();
+    let valid = {
+        let mut h = st.handoffs.lock().unwrap();
+        h.retain(|_, (_, exp)| *exp > db::now());
+        h.remove(&code).is_some_and(|(bound, _)| bound == host)
+    };
+    if !valid {
+        return error_page(st, StatusCode::FORBIDDEN, "Lien expiré", "Ce lien de connexion n'est plus valable. Recharge la page du projet.", None, None);
+    }
+    let token = crate::random_token(32);
+    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//")).cloned().unwrap_or_else(|| "/".into());
+    let secure = if st.cfg.origin.starts_with("https") { "; Secure" } else { "" };
+    // Lax, not Strict: the cookie must survive the redirect chain that started on the dashboard.
+    let cookie = format!("{}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800{secure}", auth::COOKIE);
+    (StatusCode::SEE_OTHER, [(header::SET_COOKIE, cookie), (header::LOCATION, next)]).into_response()
+}
+
+/// Middleware in front of the whole app: project hosts are proxied, everything else continues.
 pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) -> Response {
-    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
-    if host == base_host(&st) || !host.ends_with(&format!(".{}", base_host(&st))) {
+    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+    if host == base_host(&st) {
         return next.run(req).await;
     }
-    let Some(t) = resolve(&st, &host) else {
+    let custom = resolve_custom(&st, &host);
+    if custom.is_none() && !host.ends_with(&format!(".{}", base_host(&st))) {
+        return next.run(req).await;
+    }
+    if custom.is_some() && req.uri().path() == HANDOFF_PATH {
+        return handoff_finish(&st, &host, &req);
+    }
+    let Some(t) = custom.or_else(|| resolve(&st, &host)) else {
         let label = host.split('.').next().unwrap_or("");
         return error_page(&st, StatusCode::NOT_FOUND, "Introuvable",
             &format!("Aucun projet ne correspond à « {label} »."), None, None);
@@ -76,7 +150,9 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
     if !t.project.public && !auth::is_logged_in(&st, &CookieJar::from_headers(req.headers())) {
         let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
         let back = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
-        let login = url::Url::parse_with_params(&format!("{}/login", st.cfg.origin), [("next", back)])
+        // Custom domains don't share the dashboard cookie: go through the session handoff.
+        let entry = if host.ends_with(&format!(".{}", base_host(&st))) { "login" } else { "auth/handoff" };
+        let login = url::Url::parse_with_params(&format!("{}/{entry}", st.cfg.origin), [("next", back)])
             .map(|u| u.to_string())
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
         return (StatusCode::UNAUTHORIZED, crate::ui::private_project(&t.project.name, &login, base_host(&st))).into_response();
@@ -177,5 +253,5 @@ fn strip_session_cookie(h: &mut axum::http::HeaderMap) {
 /// Caddy on-demand TLS: only issue certificates for subdomains that map to a project.
 pub async fn caddy_ask(State(st): State<AppState>, Query(q): Query<HashMap<String, String>>) -> StatusCode {
     let d = q.get("domain").map(String::as_str).unwrap_or("");
-    if d == base_host(&st) || resolve(&st, d).is_some() { StatusCode::OK } else { StatusCode::NOT_FOUND }
+    if d == base_host(&st) || resolve(&st, d).is_some() || resolve_custom(&st, d).is_some() { StatusCode::OK } else { StatusCode::NOT_FOUND }
 }
