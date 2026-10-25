@@ -2,6 +2,7 @@
 //! because browsers expose passkeys exclusively through navigator.credentials.
 
 use crate::db::Project;
+use crate::updater::Info as UpdateInfo;
 use crate::{proxy, AppState};
 use crate::docker::{Status, TEMPLATES};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
@@ -47,6 +48,7 @@ pub fn layout(title: &str, logged_in: bool, body: Markup) -> Markup {
                         a href="/" { "Projets" }
                         a href="/security" { "Passkeys" }
                         a href="/audit" { "Journal" }
+                        a href="/update" { "Mise à jour" }
                         form method="post" action="/logout" { button.ghost { "Déconnexion" } }
                     }
                 }
@@ -220,6 +222,62 @@ ws.onclose=()=>{state.textContent='déconnecté — recharge la page';term.write
 term.onData(d=>ws.readyState===1&&ws.send(te.encode(d)));
 window.addEventListener('resize',resize);
 "#;
+
+pub fn update_banner(i: &UpdateInfo) -> Markup {
+    html! {
+        @if i.running {
+            div.card style="border-color:var(--warn)" { "⏳ Mise à jour en cours… DevHub va redémarrer. " a href="/update" { "Suivre" } }
+        } @else if i.available() {
+            div.card.row style="border-color:var(--acc)" {
+                span { "🆕 " b { (i.pending.len()) " nouvelle(s) version(s)" } " disponible(s) sur GitHub." }
+                a href="/update" { "Voir les changements" }
+                form method="post" action="/update/apply" onsubmit="return confirm('Mettre à jour DevHub maintenant ? Il redémarrera.')" {
+                    button { "Mettre à jour" }
+                }
+            }
+        }
+    }
+}
+
+pub fn update_page(i: &UpdateInfo) -> Markup {
+    let short = |s: &Option<String>| s.as_deref().map(|s| s[..7.min(s.len())].to_string()).unwrap_or_else(|| "?".into());
+    html! {
+        @if i.running { meta http-equiv="refresh" content="4"; }
+        div.card {
+            h2 { "Mise à jour de DevHub" }
+            p {
+                "Version installée : " code { (short(&i.local)) } " · branche " code { (i.branch) }
+                @if let Some(r) = &i.repo { " · " a href={"https://github.com/" (r)} target="_blank" { (r) } }
+            }
+            p.mute {
+                @if let Some(t) = i.checked_at { "Dernière vérification : " (fmt_ts(t)) " UTC (toutes les 30 min). " }
+            }
+            @if let Some(e) = &i.error { p style="color:var(--bad)" { "Erreur : " (e) } }
+            div.row {
+                form method="post" action="/update/check" { button.ghost { "Vérifier maintenant" } }
+                @if i.available() && !i.running {
+                    form method="post" action="/update/apply" onsubmit="return confirm('Mettre à jour DevHub maintenant ? Il redémarrera.')" {
+                        button { "Mettre à jour" }
+                    }
+                }
+            }
+        }
+        @if i.available() {
+            div.card {
+                h3 { "Changements à venir" }
+                table { @for (sha, msg) in &i.pending { tr { td { code { (sha) } } td { (msg) } } } }
+            }
+        } @else if i.error.is_none() && i.checked_at.is_some() {
+            div.card { "✅ DevHub est à jour." }
+        }
+        @if !i.last_log.is_empty() {
+            div.card {
+                h3 { "Dernière mise à jour" @if i.running { " (en cours…)" } }
+                pre { (i.last_log) }
+            }
+        }
+    }
+}
 
 pub fn logs(name: &str, logs: &str) -> Markup {
     html! {

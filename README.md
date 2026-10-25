@@ -18,6 +18,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 - **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
 - **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
 - **Dashboard** : état, CPU et RAM de chaque projet, start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
+- **Mise à jour en un clic** : DevHub vérifie GitHub toutes les 30 min. Quand des commits sont plus récents que la version installée, un bandeau propose « Mettre à jour » : `git pull` puis `docker compose up -d --build`, lancés depuis un conteneur temporaire `devhub-updater`.
 - **Passkey** (WebAuthn), sans mot de passe. Tu peux enregistrer plusieurs appareils.
 - **MCP par projet** : outils `run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`. Chaque URL ne donne accès qu'à un seul conteneur, et elle est régénérable.
 
@@ -33,6 +34,15 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
    ```
 3. Ouvre `https://dev.tweastly.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
 4. Pare-feu : seuls 80 et 443 doivent être ouverts. Les certificats des sous-domaines sont générés automatiquement à la première visite.
+
+## Mises à jour (dépôt privé)
+
+Crée un jeton GitHub *fine-grained* : Settings → Developer settings → Fine-grained tokens. Limite-le au dépôt DevHub, avec la seule permission **Contents : Read-only**. Ajoute-le au `.env` :
+```bash
+echo "DEVHUB_GITHUB_TOKEN=github_pat_..." >> .env
+docker compose up -d
+```
+Le jeton sert à vérifier les versions et à faire le `git pull`. Il n'est jamais écrit sur le disque.
 
 ## Connecter Claude Desktop à un projet
 
@@ -51,6 +61,8 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 | `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP sur laquelle les ports projets sont publiés |
 | `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |
+| `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour la mise à jour (dépôt privé) |
+| `DEVHUB_REPO` | `/repo` | où le dépôt est monté dans le conteneur |
 
 ## Dev local
 

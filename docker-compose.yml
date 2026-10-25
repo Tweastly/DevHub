@@ -13,10 +13,14 @@ services:
       DEVHUB_SELF_CONTAINER: devhub
       # Project ports stay off the internet: they're reached only through the subdomains.
       DEVHUB_BIND_IP: 127.0.0.1
+      # Fine-grained token, read-only "Contents" on this repo (needed: the repo is private).
+      DEVHUB_GITHUB_TOKEN: ${DEVHUB_GITHUB_TOKEN:-}
     volumes:
       - ./data:/data
       # Only the orchestrator gets the Docker socket — never the project containers.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Read-only: lets DevHub know which commit is deployed.
+      - .:/repo:ro
     expose: ["8080"]
 
   caddy:

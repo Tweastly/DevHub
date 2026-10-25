@@ -5,6 +5,7 @@ mod mcp;
 mod proxy;
 mod terminal;
 mod ui;
+mod updater;
 
 use axum::extract::{Form, Path, State};
 use axum::http::StatusCode;
@@ -39,6 +40,7 @@ pub struct AppState {
     pub setup_token: Arc<Mutex<Option<String>>>,
     pub reg_states: Arc<Mutex<HashMap<String, (String, PasskeyRegistration)>>>,
     pub auth_states: Arc<Mutex<HashMap<String, PasskeyAuthentication>>>,
+    pub update: Arc<Mutex<updater::Info>>,
 }
 
 impl AppState {
@@ -102,11 +104,13 @@ async fn main() -> anyhow::Result<()> {
         setup_token: Arc::new(Mutex::new(None)),
         reg_states: Default::default(),
         auth_states: Default::default(),
+        update: Default::default(),
     };
     if let Some(me) = &st.cfg.self_container {
         let projects = db::list_projects(&st.db.lock().unwrap())?;
         docker::join_all(&st.docker, &projects, me).await;
     }
+    updater::spawn_periodic(st.clone());
     if needs_setup {
         let t = random_token(24);
         println!("\n=== DevHub : aucun passkey. SETUP TOKEN : {t} ===\n=== Ouvre {origin}/login pour créer ton passkey ===\n");
@@ -124,6 +128,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/security", get(security_page))
         .route("/security/{id}/delete", post(delete_passkey))
         .route("/audit", get(audit_page))
+        .route("/update", get(updater::page))
+        .route("/update/check", post(updater::check_now))
+        .route("/update/apply", post(updater::apply))
         .route("/projects", post(create_project))
         .route("/projects/{name}", get(project_page))
         .route("/projects/{name}/logs", get(logs_page))
@@ -145,7 +152,8 @@ type Page = Result<Markup, Response>;
 
 fn page(st: &AppState, jar: &CookieJar, title: &str, body: Markup) -> Page {
     auth::require(st, jar)?;
-    Ok(ui::layout(title, true, body))
+    let info = st.update.lock().unwrap().clone();
+    Ok(ui::layout(title, true, maud::html! { (ui::update_banner(&info)) (body) }))
 }
 
 async fn login_page(State(st): State<AppState>, jar: CookieJar) -> Response {
