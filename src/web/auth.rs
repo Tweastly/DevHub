@@ -3,12 +3,12 @@
 use super::*;
 
 /// Centered card with the logo (or a lock for private projects) and a footer.
-fn shell(title: &str, footer: &str, lock: bool, body: Markup) -> Markup {
+fn shell(title: &str, origin: &str, footer: &str, lock: bool, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="fr" {
             head {
-                (head(title))
+                (head_at(title, origin))
                 meta name="robots" content="noindex";
                 style { (PreEscaped(AUTH_CSS)) }
             }
@@ -41,8 +41,9 @@ const AUTH_CSS: &str = r#"
 "#;
 
 pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
+    // Always rendered on the dashboard's own host: relative assets are fine.
     let next_js = serde_json::to_string(&next.unwrap_or("/")).unwrap().replace("</", "<\\/");
-    shell("Connexion · DevHub", footer, false, html! {
+    shell("Connexion · DevHub", "", footer, false, html! {
         @if needs_setup {
             h1 { "Bienvenue sur DevHub" }
             p.sub { "Colle le setup token affiché dans les logs du serveur, puis crée ton passkey." }
@@ -63,8 +64,8 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
     })
 }
 
-pub fn private_project(project: &str, login_url: &str, footer: &str) -> Markup {
-    shell(&format!("{project} · accès privé"), footer, true, html! {
+pub fn private_project(project: &str, login_url: &str, origin: &str, footer: &str) -> Markup {
+    shell(&format!("{project} · accès privé"), origin, footer, true, html! {
         h1 { "Projet privé" }
         p.sub { b style="color:var(--text)" { (project) } " est réservé au propriétaire. Connecte-toi pour continuer." }
         a.btn.solid href=(login_url) { (icon("key")) "Se connecter avec un passkey" }
@@ -72,8 +73,8 @@ pub fn private_project(project: &str, login_url: &str, footer: &str) -> Markup {
 }
 
 /// Proxy errors. `message` is trusted HTML built by the proxy.
-pub fn error_page(code: u16, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>, footer: &str) -> Markup {
-    shell(&format!("{title} · {code}"), footer, false, html! {
+pub fn error_page(code: u16, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>, origin: &str, footer: &str) -> Markup {
+    shell(&format!("{title} · {code}"), origin, footer, false, html! {
         p.code { (code) }
         h1 { (title) }
         p.sub { (PreEscaped(message)) }

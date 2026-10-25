@@ -51,6 +51,13 @@ pub async fn asset(axum::extract::Path(file): axum::extract::Path<String>) -> Re
 }
 
 pub fn head(title: &str) -> Markup {
+    head_at(title, "")
+}
+
+/// `origin` prefixes the asset URLs. Pages served on a project's host (private page,
+/// proxy errors) must load them from the dashboard: a relative /assets/… would be
+/// forwarded to the project itself.
+pub fn head_at(title: &str, origin: &str) -> Markup {
     let v = asset_version();
     html! {
         meta charset="utf-8";
@@ -58,8 +65,8 @@ pub fn head(title: &str) -> Markup {
         meta name="color-scheme" content="light dark";
         title { (title) }
         link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%236ea8ff'/%3E%3Cstop offset='1' stop-color='%23b78cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M16 8l7 4v8l-7 4-7-4v-8z' fill='white'/%3E%3C/svg%3E";
-        link rel="stylesheet" href={"/assets/app.css?v=" (v)};
-        script src={"/assets/app.js?v=" (v)} defer {}
+        link rel="stylesheet" href={(origin) "/assets/app.css?v=" (v)};
+        script src={(origin) "/assets/app.js?v=" (v)} defer {}
         // Prefetch panel links on hover. Safe: every action is a POST form.
         script type="speculationrules" { (PreEscaped(r#"{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":"/*/terminal"}},{"not":{"href_matches":"/*download*"}}]},"eagerness":"moderate"}]}"#)) }
     }
@@ -140,13 +147,16 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         _ => r#"<circle cx="12" cy="12" r="9"/>"#,
     };
     let cls = if class.is_empty() { "i".to_string() } else { format!("i {class}") };
-    html! { svg.(cls) viewBox="0 0 24 24" aria-hidden="true" { (PreEscaped(d)) } }
+    html! {
+        svg.(cls) viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" { (PreEscaped(d)) }
+    }
 }
 
 pub fn logo(size: u32) -> Markup {
     html! {
         span.logo style={"width:" (size) "px;height:" (size) "px"} {
-            svg viewBox="0 0 24 24" aria-hidden="true" { path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" {} }
+            svg viewBox="0 0 24 24" width="55%" height="55%" fill="#fff" aria-hidden="true" { path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" {} }
         }
     }
 }

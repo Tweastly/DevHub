@@ -155,7 +155,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         let login = url::Url::parse_with_params(&format!("{}/{entry}", st.cfg.origin), [("next", back)])
             .map(|u| u.to_string())
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
-        return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, base_host(&st))).into_response();
+        return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, &st.cfg.origin, base_host(&st))).into_response();
     }
     let owner = auth::is_logged_in(&st, &CookieJar::from_headers(req.headers()));
     let name = t.project.name.clone();
@@ -202,7 +202,7 @@ async fn connect(st: &AppState, t: &Target) -> anyhow::Result<tokio::net::TcpStr
 }
 
 fn error_page(st: &AppState, code: StatusCode, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>) -> Response {
-    (code, crate::web::auth::error_page(code.as_u16(), title, message, detail, action, base_host(st))).into_response()
+    (code, crate::web::auth::error_page(code.as_u16(), title, message, detail, action, &st.cfg.origin, base_host(st))).into_response()
 }
 
 async fn forward(mut req: Request, stream: tokio::net::TcpStream, host: &str, https: bool) -> anyhow::Result<Response> {
