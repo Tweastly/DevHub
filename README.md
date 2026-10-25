@@ -12,7 +12,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 
 - **Projets** : création à partir d'un modèle (Node, Rust, Python, Go, Debian) ou d'une image perso, avec un dépôt Git optionnel cloné dans `/workspace`.
 - **Isolation** : chaque projet a son réseau, une limite RAM/CPU/PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker. Le code vit dans un volume (`/workspace`) qui survit aux rebuilds.
-- **Sous-domaines** : `projet.dev.tondomaine.com` pointe vers le premier port du projet, `projet-5173.dev.tondomaine.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
+- **Sous-domaines** : `projet.dev.tweastly.com` pointe vers le premier port du projet, `projet-5173.dev.tweastly.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
 - **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
 - **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
 - **Dashboard** : état, CPU et RAM de chaque projet, start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
@@ -21,15 +21,15 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 
 ## Déploiement sur le VPS
 
-1. DNS : deux enregistrements `A` vers l'IP du VPS, `dev.tondomaine.com` et `*.dev.tondomaine.com`.
+1. DNS : deux enregistrements `A` vers l'IP du VPS, `dev.tweastly.com` et `*.dev.tweastly.com`.
 2. Sur le VPS (avec Docker installé) :
    ```bash
-   git clone <ce dépôt> devhub && cd devhub
-   echo "DEVHUB_DOMAIN=dev.tondomaine.com" > .env
+   git clone https://github.com/Tweastly/DevHub devhub && cd devhub
+   echo "DEVHUB_DOMAIN=dev.tweastly.com" > .env
    docker compose up -d --build
    docker compose logs devhub | grep "SETUP TOKEN"
    ```
-3. Ouvre `https://dev.tondomaine.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
+3. Ouvre `https://dev.tweastly.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
 4. Pare-feu : seuls 80 et 443 doivent être ouverts. Les certificats des sous-domaines sont générés automatiquement à la première visite.
 
 ## Connecter Claude Desktop à un projet
