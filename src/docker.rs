@@ -318,6 +318,7 @@ pub async fn write_file(d: &Docker, p: &str, path: &str, content: &[u8]) -> anyh
     let mut h = tar::Header::new_gnu();
     h.set_size(content.len() as u64);
     h.set_mode(0o644);
+    h.set_mtime(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
     h.set_cksum();
     tar.append_data(&mut h, file, content)?;
     let body = tar.into_inner()?;

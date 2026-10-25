@@ -96,7 +96,7 @@ fn tools() -> Value {
                 }, "required": ["project"] } }),
         json!({ "name": "server_resources", "description": "Capacité du serveur (cœurs, RAM) et total alloué aux projets.",
                 "inputSchema": { "type": "object", "properties": {} } }),
-        json!({ "name": "add_domain", "description": "Sert un projet sur un domaine personnalisé (ex. new.tweastly.com). Le DNS du domaine doit pointer vers le VPS. port : un des ports exposés (défaut : le premier).",
+        json!({ "name": "add_domain", "description": "Sert un projet sur un sous-domaine personnalisé : host = juste le nom (ex. \"new\" → new.<domaine racine>, voir l'URL renvoyée). port : un des ports exposés (défaut : le premier).",
                 "inputSchema": { "type": "object", "properties": {
                     "project": p, "host": { "type": "string" }, "port": { "type": "integer" }
                 }, "required": ["project", "host"] } }),
@@ -253,7 +253,7 @@ async fn call(st: &AppState, params: &Value) -> Value {
                 let port = a["port"].as_u64().map(|n| u16::try_from(n).map_err(|_| format!("port invalide : {n}"))).transpose()?;
                 ops::apply(st, &project, Change::AddDomain { host: s("host"), port }, "claude-admin").await?;
                 let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
-                text(format!("{project} est maintenant servi sur {scheme}://{}", ops::normalize_host(&s("host"))?), false)
+                text(format!("{project} est maintenant servi sur {scheme}://{}", ops::subdomain_host(st, &s("host"))?), false)
             }
             "remove_domain" => {
                 ops::apply(st, &project, Change::RemoveDomain(s("host")), "claude-admin").await?;

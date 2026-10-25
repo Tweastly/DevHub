@@ -144,6 +144,7 @@ pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str, host: (i64
                 form method="post" action={(base) "/stop"} { button.ghost { "Stop" } }
                 form method="post" action={(base) "/restart"} { button.ghost { "Restart" } }
                 form method="post" action={(base) "/rebuild"} { button.ghost title="Recrée le conteneur, garde /workspace" { "Rebuild" } }
+                a href={(base) "/files"} { "Fichiers →" }
                 a href={(base) "/terminal"} { "Terminal →" }
                 a href={(base) "/logs"} { "Logs →" }
             }
@@ -382,11 +383,14 @@ fn domains_card(st: &AppState, p: &Project) -> Markup {
     let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
     html! {
         div.card {
-            h3 { "Domaines personnalisés" }
+            h3 { "Sous-domaines personnalisés" }
             p.mute {
-                "Sers ce projet sur ton propre domaine, par exemple " code { "new.tweastly.com" } ". "
-                "Le domaine doit pointer vers l'IP du VPS (un enregistrement " code { "*" } " sur tweastly.com suffit pour tous). "
-                "Le certificat HTTPS est créé à la première visite."
+                @if let Some(apps) = &st.cfg.apps_domain {
+                    "Sers ce projet sur " code { "<nom>." (apps) } ". Il faut un enregistrement DNS " code { "*." (apps) }
+                    " vers l'IP du VPS (une seule fois pour tous). Le certificat HTTPS est créé à la première visite."
+                } @else {
+                    "Sers ce projet sur un autre nom d'hôte. Le certificat HTTPS est créé à la première visite."
+                }
             }
             @if !domains.is_empty() {
                 table {
@@ -407,7 +411,14 @@ fn domains_card(st: &AppState, p: &Project) -> Markup {
                 p.mute { "Ajoute d'abord un port au projet." }
             } @else {
                 form.row method="post" action={(base) "/domain-add"} style="margin-top:10px" {
-                    input name="host" placeholder="new.tweastly.com" required style="flex:1;min-width:200px";
+                    @if let Some(apps) = &st.cfg.apps_domain {
+                        div.row style="flex:1;min-width:220px;gap:0;flex-wrap:nowrap" {
+                            input name="host" placeholder="new" required pattern="[a-zA-Z0-9-]+" style="border-top-right-radius:0;border-bottom-right-radius:0";
+                            span.mute style="border:1px solid var(--line);border-left:0;border-radius:0 6px 6px 0;padding:7px 9px;white-space:nowrap" { "." (apps) }
+                        }
+                    } @else {
+                        input name="host" placeholder="new.example.com" required style="flex:1;min-width:200px";
+                    }
                     select name="port" style="width:auto" { @for m in &p.ports { option value=(m.container) { "port " (m.container) } } }
                     button { "Ajouter" }
                 }
@@ -440,7 +451,7 @@ pub fn audit(rows: &[(i64, String, String, String)]) -> Markup {
     }
 }
 
-fn fmt_ts(ts: i64) -> String {
+pub fn fmt_ts(ts: i64) -> String {
     let (d, s) = (ts.div_euclid(86400), ts.rem_euclid(86400));
     // civil-from-days (Howard Hinnant)
     let z = d + 719468;

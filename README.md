@@ -15,7 +15,8 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 - **Démarrage automatique** : si `/workspace/start.sh` existe et est exécutable, il est lancé à chaque démarrage du conteneur (logs dans `/tmp/start.log`).
 - **Isolation** : chaque projet a son réseau, une limite RAM/CPU/PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker. Le code vit dans un volume (`/workspace`) qui survit aux rebuilds.
 - **Sous-domaines** : `projet.dev.tweastly.com` pointe vers le premier port du projet, `projet-5173.dev.tweastly.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
-- **Domaines personnalisés** : sers un projet sur n'importe quel domaine (ex. `new.tweastly.com`) depuis sa page ou via Claude. Le HTTPS est automatique. Les projets privés restent protégés par ton passkey, grâce à un passage de session à usage unique (le cookie du dashboard n'est jamais partagé).
+- **Sous-domaines personnalisés** : sers un projet sur `<nom>.tweastly.com` (tape juste `new`) depuis sa page ou via Claude. Le domaine racine se déduit de `DEVHUB_DOMAIN` (`dev.tweastly.com` → `tweastly.com`), ou se force avec `DEVHUB_APPS_DOMAIN`. Le HTTPS est automatique. Les projets privés restent protégés par ton passkey, grâce à un passage de session à usage unique (le cookie du dashboard n'est jamais partagé).
+- **Fichiers** : explorateur de `/workspace` avec éditeur de texte (Ctrl+S), envoi de fichiers (200 Mo max par envoi), création de fichiers et dossiers, renommage, suppression et téléchargement.
 - **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
 - **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
 - **Ressources par projet** : RAM max (Mo) et CPU max (cœurs) réglables depuis la page du projet ou par Claude. C'est appliqué à chaud, sans redémarrage, et conservé aux rebuilds. Le panel affiche la capacité du serveur et le total alloué.
@@ -64,6 +65,7 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 | `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP sur laquelle les ports projets sont publiés |
 | `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |
+| `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés (`<nom>.tweastly.com`) |
 | `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour la mise à jour (dépôt privé) |
 | `DEVHUB_REPO` | `/repo` | où le dépôt est monté dans le conteneur |
 

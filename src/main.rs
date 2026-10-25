@@ -1,6 +1,7 @@
 mod auth;
 mod db;
 mod docker;
+mod files;
 mod mcp;
 mod mcp_admin;
 mod ops;
@@ -31,6 +32,8 @@ pub struct Config {
     pub nano_cpus: i64,
     pub bind_ip: String,
     pub self_container: Option<String>,
+    /// Parent domain for custom project subdomains (dev.tweastly.com → tweastly.com).
+    pub apps_domain: Option<String>,
 }
 
 #[derive(Clone)]
@@ -94,6 +97,11 @@ async fn main() -> anyhow::Result<()> {
         nano_cpus: (env("DEVHUB_CPUS", "2").parse::<f64>()? * 1e9) as i64,
         bind_ip: env("DEVHUB_BIND_IP", "0.0.0.0"),
         self_container: std::env::var("DEVHUB_SELF_CONTAINER").ok().filter(|s| !s.is_empty()),
+        apps_domain: std::env::var("DEVHUB_APPS_DOMAIN").ok().filter(|s| !s.is_empty()).or_else(|| {
+            // Drop the first label when the dashboard lives on a subdomain.
+            let parts: Vec<&str> = domain.split('.').collect();
+            (parts.len() >= 3).then(|| parts[1..].join("."))
+        }),
     };
 
     let data_dir = env("DEVHUB_DATA", "./data");
@@ -145,6 +153,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}", get(project_page))
         .route("/projects/{name}/logs", get(logs_page))
         .route("/projects/{name}/terminal", get(terminal_page))
+        .route("/projects/{name}/files", get(files::browse))
+        .route("/projects/{name}/files/download", get(files::download))
+        .route("/projects/{name}/files/save", post(files::save))
+        .route(
+            "/projects/{name}/files/upload",
+            post(files::upload).layer(axum::extract::DefaultBodyLimit::max(files::UPLOAD_MAX)),
+        )
+        .route("/projects/{name}/files/new", post(files::create))
+        .route("/projects/{name}/files/rename", post(files::rename))
+        .route("/projects/{name}/files/delete", post(files::delete))
         .route("/projects/{name}/terminal/ws", get(terminal::ws))
         .route("/_caddy/ask", get(proxy::caddy_ask))
         .route("/projects/{name}/{action}", post(project_action))
@@ -184,9 +202,9 @@ pub async fn current_status(st: &AppState, name: &str) -> docker::Status {
     s
 }
 
-type Page = Result<Markup, Response>;
+pub(crate) type Page = Result<Markup, Response>;
 
-fn page(st: &AppState, jar: &CookieJar, title: &str, body: Markup) -> Page {
+pub(crate) fn page(st: &AppState, jar: &CookieJar, title: &str, body: Markup) -> Page {
     auth::require(st, jar)?;
     let info = st.update.lock().unwrap().clone();
     Ok(ui::layout(title, true, maud::html! { (ui::update_banner(&info)) (body) }))

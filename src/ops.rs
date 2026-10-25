@@ -207,7 +207,7 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             docker::create(d, &p, &st.limits()).await.map_err(internal)?;
         }
         Change::AddDomain { host, port } => {
-            let host = normalize_host(&host)?;
+            let host = subdomain_host(st, &host)?;
             let base = crate::proxy::base_host(st);
             if host == base || host.ends_with(&format!(".{base}")) {
                 return Err(format!("{host} est déjà géré automatiquement (sous-domaine de {base})"));
@@ -225,7 +225,7 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             detail = format!("{name} ← {host} (port {port})");
         }
         Change::RemoveDomain(host) => {
-            let host = normalize_host(&host)?;
+            let host = subdomain_host(st, &host).or_else(|_| normalize_host(&host))?;
             if !db::remove_domain(&st.db.lock().unwrap(), &host, name).map_err(internal)? {
                 return Err(format!("{host} n'est pas un domaine de {name}"));
             }
@@ -270,4 +270,16 @@ pub fn normalize_host(input: &str) -> R<String> {
     let ok = name.contains('.') && name.len() <= 253 && name.split('.').all(label_ok)
         && port.is_none_or(|p| p.parse::<u16>().is_ok());
     if ok { Ok(h) } else { Err(format!("domaine invalide : {input}")) }
+}
+
+/// "new" → "new.tweastly.com". Custom domains are limited to one-level subdomains of
+/// the apps domain; with no apps domain configured (local dev), any host is accepted.
+pub fn subdomain_host(st: &AppState, input: &str) -> R<String> {
+    let Some(apps) = &st.cfg.apps_domain else { return normalize_host(input) };
+    let raw = input.trim().to_ascii_lowercase();
+    let label = raw.strip_suffix(&format!(".{apps}")).unwrap_or(&raw);
+    if label.is_empty() || label.contains('.') || label.contains(':') {
+        return Err(format!("sous-domaine invalide : indique seulement le nom, par ex. « new » pour new.{apps}"));
+    }
+    normalize_host(&format!("{label}.{apps}"))
 }
