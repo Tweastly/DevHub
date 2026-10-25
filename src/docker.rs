@@ -114,8 +114,8 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         host_config: Some(HostConfig {
             network_mode: Some(net),
             port_bindings: Some(bindings),
-            memory: Some(lim.memory_bytes),
-            nano_cpus: Some(lim.nano_cpus),
+            memory: Some(memory_bytes(p, lim)),
+            nano_cpus: Some(nano_cpus(p, lim)),
             pids_limit: Some(2048),
             init: Some(true),
             security_opt: Some(vec!["no-new-privileges".into()]),
@@ -136,6 +136,40 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         .await?;
     docker.start_container::<String>(&name, None).await?;
     Ok(())
+}
+
+fn memory_bytes(p: &Project, lim: &Limits) -> i64 {
+    p.memory_mb.map(|mb| mb * 1024 * 1024).unwrap_or(lim.memory_bytes)
+}
+
+fn nano_cpus(p: &Project, lim: &Limits) -> i64 {
+    p.cpus.map(|c| (c * 1e9) as i64).unwrap_or(lim.nano_cpus)
+}
+
+/// Applies the project's limits to its running container, without a restart.
+pub async fn update_limits(d: &Docker, p: &Project, lim: &Limits) -> anyhow::Result<()> {
+    let mem = memory_bytes(p, lim);
+    let opts = bollard::container::UpdateContainerOptions::<String> {
+        memory: Some(mem),
+        // Same ratio as Docker's default at creation (swap = RAM).
+        memory_swap: Some(mem * 2),
+        nano_cpus: Some(nano_cpus(p, lim)),
+        ..Default::default()
+    };
+    match d.update_container(&container_name(&p.name), opts).await {
+        Ok(_) => Ok(()),
+        // No container yet (still building): the limits apply when it's created.
+        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Server totals, as seen by Docker: (CPU count, RAM in MB).
+pub async fn host_resources(d: &Docker) -> (i64, i64) {
+    match d.info().await {
+        Ok(i) => (i.ncpu.unwrap_or(1), i.mem_total.unwrap_or(0) / 1_048_576),
+        Err(_) => (1, 0),
+    }
 }
 
 pub async fn join_network(docker: &Docker, net: &str, me: &str) {

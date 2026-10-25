@@ -18,6 +18,7 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 - **Domaines personnalisés** : sers un projet sur n'importe quel domaine (ex. `new.tweastly.com`) depuis sa page ou via Claude. Le HTTPS est automatique. Les projets privés restent protégés par ton passkey, grâce à un passage de session à usage unique (le cookie du dashboard n'est jamais partagé).
 - **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
 - **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
+- **Ressources par projet** : RAM max (Mo) et CPU max (cœurs) réglables depuis la page du projet ou par Claude. C'est appliqué à chaud, sans redémarrage, et conservé aux rebuilds. Le panel affiche la capacité du serveur et le total alloué.
 - **Dashboard** : état, CPU et RAM de chaque projet, start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
 - **Mise à jour en un clic** : DevHub vérifie GitHub toutes les 30 min. Quand des commits sont plus récents que la version installée, un bandeau propose « Mettre à jour » : `git pull` puis `docker compose up -d --build`, lancés depuis un conteneur temporaire `devhub-updater`.
 - **Passkey** (WebAuthn), sans mot de passe. Tu peux enregistrer plusieurs appareils.
@@ -59,7 +60,7 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 | `DEVHUB_DOMAIN` | `localhost` | domaine (RP ID WebAuthn) |
 | `DEVHUB_ORIGIN` | `https://$DOMAIN` | origine exacte du dashboard |
 | `DEVHUB_PORT_RANGE` | `20000-20999` | plage des ports hôte |
-| `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par projet |
+| `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par défaut des projets (modifiables projet par projet) |
 | `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP sur laquelle les ports projets sont publiés |
 | `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |

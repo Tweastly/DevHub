@@ -90,6 +90,12 @@ fn tools() -> Value {
                 "inputSchema": { "type": "object", "properties": {
                     "project": p, "public": { "type": "boolean" }
                 }, "required": ["project", "public"] } }),
+        json!({ "name": "set_resources", "description": "Limites RAM (Mo) et CPU (cœurs, ex. 1.5) du projet, appliquées à chaud. Omettre un champ (ou null) = revenir au défaut. Voir server_resources pour les maximums.",
+                "inputSchema": { "type": "object", "properties": {
+                    "project": p, "memory_mb": { "type": ["integer", "null"] }, "cpus": { "type": ["number", "null"] }
+                }, "required": ["project"] } }),
+        json!({ "name": "server_resources", "description": "Capacité du serveur (cœurs, RAM) et total alloué aux projets.",
+                "inputSchema": { "type": "object", "properties": {} } }),
         json!({ "name": "add_domain", "description": "Sert un projet sur un domaine personnalisé (ex. new.tweastly.com). Le DNS du domaine doit pointer vers le VPS. port : un des ports exposés (défaut : le premier).",
                 "inputSchema": { "type": "object", "properties": {
                     "project": p, "host": { "type": "string" }, "port": { "type": "integer" }
@@ -138,6 +144,11 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         "public": p.public, "ports": ports,
         "url": p.ports.first().map(|_| proxy::url_for(st, &p.name, None)),
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
+        "limits": {
+            "memory_mb": p.memory_mb.unwrap_or(st.cfg.memory_bytes / 1_048_576),
+            "cpus": p.cpus.unwrap_or(st.cfg.nano_cpus as f64 / 1e9),
+            "custom": p.memory_mb.is_some() || p.cpus.is_some(),
+        },
     });
     if with_env {
         v["env"] = json!(p.env);
@@ -218,6 +229,25 @@ async fn call(st: &AppState, params: &Value) -> Value {
                 let public = a["public"].as_bool().unwrap_or(false);
                 ops::apply(st, &project, Change::SetPublic(public), "claude-admin").await?;
                 text(format!("{project} est maintenant {}", if public { "public" } else { "privé" }), false)
+            }
+            "set_resources" => {
+                let c = Change::Resources { memory_mb: a["memory_mb"].as_i64(), cpus: a["cpus"].as_f64() };
+                ops::apply(st, &project, c, "claude-admin").await?;
+                pretty(&project_json(st, &ops::load(st, &project)?, false).await)
+            }
+            "server_resources" => {
+                let (ncpu, mem_total) = docker::host_resources(&st.docker).await;
+                let def_mb = st.cfg.memory_bytes / 1_048_576;
+                let def_cpu = st.cfg.nano_cpus as f64 / 1e9;
+                let ps = db::list_projects(&st.db.lock().unwrap()).map_err(|e| e.to_string())?;
+                pretty(&json!({
+                    "cpus": ncpu, "memory_mb": mem_total,
+                    "defaults": { "memory_mb": def_mb, "cpus": def_cpu },
+                    "allocated": {
+                        "memory_mb": ps.iter().map(|x| x.memory_mb.unwrap_or(def_mb)).sum::<i64>(),
+                        "cpus": ps.iter().map(|x| x.cpus.unwrap_or(def_cpu)).sum::<f64>(),
+                    }
+                }))
             }
             "add_domain" => {
                 let port = a["port"].as_u64().map(|n| u16::try_from(n).map_err(|_| format!("port invalide : {n}"))).transpose()?;

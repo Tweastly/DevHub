@@ -20,6 +20,9 @@ pub struct Project {
     pub created_at: i64,
     /// Subdomains reachable without a DevHub session.
     pub public: bool,
+    /// Per-project limits; None = the server-wide defaults (DEVHUB_MEMORY_MB / DEVHUB_CPUS).
+    pub memory_mb: Option<i64>,
+    pub cpus: Option<f64>,
 }
 
 pub fn open(path: &str) -> anyhow::Result<Connection> {
@@ -41,6 +44,8 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     )?;
     // Migration: column added after the first release.
     let _ = c.execute("ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN memory_mb INTEGER", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN cpus REAL", []);
     Ok(c)
 }
 
@@ -64,10 +69,12 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         mcp_token: r.get(6)?,
         created_at: r.get(7)?,
         public: r.get::<_, i64>(8)? != 0,
+        memory_mb: r.get(9)?,
+        cpus: r.get(10)?,
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -87,8 +94,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         params![
             p.name,
             p.template,
@@ -98,7 +105,9 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             serde_json::to_string(&p.env)?,
             p.mcp_token,
             p.created_at,
-            p.public as i64
+            p.public as i64,
+            p.memory_mb,
+            p.cpus
         ],
     )?;
     Ok(())

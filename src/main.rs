@@ -271,7 +271,8 @@ async fn project_page(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let p = load(&st, &name)?;
     let s = current_status(&st, &name).await;
     let url = format!("{}/mcp/{}", st.cfg.origin, p.mcp_token);
-    page(&st, &jar, &name, ui::project(&st, &p, &s, &url))
+    let host = docker::host_resources(&st.docker).await;
+    page(&st, &jar, &name, ui::project(&st, &p, &s, &url, host))
 }
 
 async fn terminal_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
@@ -285,6 +286,12 @@ async fn logs_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<
     load(&st, &name)?;
     let l = docker::logs(&st.docker, &name, 500).await;
     page(&st, &jar, "Logs", ui::logs(&name, &l))
+}
+
+/// Empty field = None (use the default), otherwise it must parse.
+fn opt_num<T: std::str::FromStr>(s: &str) -> Result<Option<T>, String> {
+    let s = s.trim();
+    if s.is_empty() { Ok(None) } else { s.parse().map(Some).map_err(|_| format!("valeur invalide : {s}")) }
 }
 
 async fn project_action(
@@ -310,6 +317,10 @@ async fn project_action(
             port: field("port").parse().ok(),
         },
         "domain-remove" => ops::Change::RemoveDomain(field("host").to_string()),
+        "resources" => ops::Change::Resources {
+            memory_mb: opt_num(field("memory_mb")).map_err(bad)?,
+            cpus: opt_num(&field("cpus").replace(',', ".")).map_err(bad)?,
+        },
         _ => return Err(bad("action inconnue")),
     };
     let deleted = matches!(change, ops::Change::Delete { .. });

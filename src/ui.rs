@@ -128,7 +128,7 @@ pub fn dashboard(st: &AppState, projects: &[(Project, Status)]) -> Markup {
     }
 }
 
-pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str) -> Markup {
+pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str, host: (i64, i64)) -> Markup {
     let env_text: String = p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     let ports_text: String = p.ports.iter().map(|m| m.container.to_string()).collect::<Vec<_>>().join(", ");
     let base = format!("/projects/{}", p.name);
@@ -190,6 +190,7 @@ pub fn project(st: &AppState, p: &Project, s: &Status, mcp_url: &str) -> Markup 
                 }
             }
         }
+        (resources_card(st, p, s, host))
         (domains_card(st, p))
         div.card {
             h3 { "Zone dangereuse" }
@@ -317,6 +318,59 @@ pub fn claude_page(admin_url: Option<&str>, projects: &[(String, String)]) -> Ma
             p.mute { "Pour qu'une conversation Claude ne voie qu'un projet, utilise plutôt son URL dédiée." }
             table {
                 @for (name, url) in projects { tr { td { a href={"/projects/" (name)} { (name) } } td { code { (url) } } } }
+            }
+        }
+    }
+}
+
+fn resources_card(st: &AppState, p: &Project, s: &Status, (ncpu, mem_total): (i64, i64)) -> Markup {
+    let def_mb = st.cfg.memory_bytes / 1_048_576;
+    let def_cpu = st.cfg.nano_cpus as f64 / 1e9;
+    let mem = p.memory_mb.unwrap_or(def_mb);
+    let cpu = p.cpus.unwrap_or(def_cpu);
+    // What all projects are allowed to use together, to spot overcommit.
+    let all = crate::db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
+    let sum_mb: i64 = all.iter().map(|x| x.memory_mb.unwrap_or(def_mb)).sum();
+    let sum_cpu: f64 = all.iter().map(|x| x.cpus.unwrap_or(def_cpu)).sum();
+    let pct = |used: f64, max: f64| if max > 0.0 { (used / max * 100.0).min(100.0) } else { 0.0 };
+    html! {
+        div.card {
+            h3 { "Ressources" }
+            div.grid {
+                div {
+                    span.mute { "RAM utilisée" }
+                    div { b { (fmt_mb(s.mem_used)) } " / " (mem) " Mo" }
+                    div.bar { i style={"width:" (format!("{:.0}", pct(s.mem_used as f64 / 1_048_576.0, mem as f64))) "%"} {} }
+                }
+                div {
+                    span.mute { "CPU utilisé" }
+                    div { b { (format!("{:.1} %", s.cpu_pct)) } " / " (format!("{:.0} %", cpu * 100.0)) }
+                    div.bar { i style={"width:" (format!("{:.0}", pct(s.cpu_pct, cpu * 100.0))) "%"} {} }
+                }
+            }
+            form method="post" action={"/projects/" (p.name) "/resources"} style="margin-top:14px" {
+                div.grid {
+                    label {
+                        span { "RAM max (Mo) — défaut " (def_mb) }
+                        input name="memory_mb" type="number" min="64" max=(mem_total) step="64"
+                            value=[p.memory_mb] placeholder=(def_mb);
+                    }
+                    label {
+                        span { "CPU max (cœurs) — défaut " (def_cpu) }
+                        input name="cpus" type="number" min="0.1" max=(ncpu) step="0.1"
+                            value=[p.cpus] placeholder=(def_cpu);
+                    }
+                }
+                div.row {
+                    button { "Appliquer (sans redémarrage)" }
+                    span.mute { "Laisse vide pour revenir au défaut." }
+                }
+            }
+            p.mute style="margin-bottom:0" {
+                "Serveur : " (ncpu) " cœurs, " (mem_total) " Mo. "
+                "Tous les projets réunis peuvent utiliser jusqu'à " (sum_mb) " Mo et " (format!("{sum_cpu:.1}")) " cœurs"
+                @if sum_mb > mem_total && mem_total > 0 { " ⚠ plus que la RAM du serveur" }
+                "."
             }
         }
     }

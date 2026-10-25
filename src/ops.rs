@@ -27,6 +27,8 @@ pub enum Change {
     /// `port: None` = the project's first port.
     AddDomain { host: String, port: Option<u16> },
     RemoveDomain(String),
+    /// None = back to the server-wide default.
+    Resources { memory_mb: Option<i64>, cpus: Option<f64> },
 }
 
 impl Change {
@@ -43,6 +45,7 @@ impl Change {
             Change::Delete { .. } => "delete",
             Change::AddDomain { .. } => "domain-add",
             Change::RemoveDomain(_) => "domain-remove",
+            Change::Resources { .. } => "resources",
         }
     }
 }
@@ -125,6 +128,8 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         mcp_token: random_token(32),
         created_at: db::now(),
         public: false,
+        memory_mb: None,
+        cpus: None,
     };
     {
         let c = st.db.lock().unwrap();
@@ -225,6 +230,27 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
                 return Err(format!("{host} n'est pas un domaine de {name}"));
             }
             detail = format!("{name} ✕ {host}");
+        }
+        Change::Resources { memory_mb, cpus } => {
+            let (ncpu, mem_total) = docker::host_resources(d).await;
+            if let Some(mb) = memory_mb {
+                if mb < 64 || (mem_total > 0 && mb > mem_total) {
+                    return Err(format!("RAM invalide : entre 64 et {mem_total} Mo"));
+                }
+            }
+            if let Some(c) = cpus {
+                if !(0.1..=ncpu as f64).contains(&c) {
+                    return Err(format!("CPU invalide : entre 0.1 et {ncpu}"));
+                }
+            }
+            p.memory_mb = memory_mb;
+            p.cpus = cpus;
+            docker::update_limits(d, &p, &st.limits()).await.map_err(|e| {
+                format!("Docker refuse ces limites ({e:#}). La RAM utilisée dépasse peut-être la nouvelle limite : arrête le projet ou choisis plus haut.")
+            })?;
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+            let show = |v: Option<String>| v.unwrap_or_else(|| "défaut".into());
+            detail = format!("{name} : RAM {} Mo, CPU {}", show(memory_mb.map(|m| m.to_string())), show(cpus.map(|c| c.to_string())));
         }
         Change::Delete { keep_data } => {
             docker::destroy(d, name, keep_data).await.map_err(internal)?;
