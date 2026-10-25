@@ -40,6 +40,9 @@ pub fn layout(title: &str, logged_in: bool, body: Markup) -> Markup {
                 meta name="viewport" content="width=device-width,initial-scale=1";
                 title { (title) " · DevHub" }
                 style { (PreEscaped(CSS)) }
+                // Prefetch panel links on hover so navigation feels instant. Safe: every
+                // action is a POST form, links are side-effect-free GETs.
+                script type="speculationrules" { (PreEscaped(r#"{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":"/*/terminal"}}]},"eagerness":"moderate"}]}"#)) }
             }
             body {
                 header {

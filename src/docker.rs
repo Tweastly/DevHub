@@ -175,6 +175,16 @@ pub struct Status {
     pub mem_limit: u64,
 }
 
+/// Container state only (one fast inspect call, a few ms).
+pub async fn state(d: &Docker, p: &str) -> String {
+    match d.inspect_container(&container_name(p), None::<InspectContainerOptions>).await {
+        Ok(info) => info.state.and_then(|s| s.status).map(|s| s.to_string()).unwrap_or_else(|| "unknown".into()),
+        Err(_) => "absent".into(),
+    }
+}
+
+/// Full status with CPU/memory. Slow (~2 s): Docker waits for two samples to compute CPU,
+/// so only the background collector calls it.
 pub async fn status(d: &Docker, p: &str) -> Status {
     let name = container_name(p);
     let Ok(info) = d.inspect_container(&name, None::<InspectContainerOptions>).await else {

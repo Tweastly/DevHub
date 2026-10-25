@@ -41,6 +41,8 @@ pub struct AppState {
     pub reg_states: Arc<Mutex<HashMap<String, (String, PasskeyRegistration)>>>,
     pub auth_states: Arc<Mutex<HashMap<String, PasskeyAuthentication>>>,
     pub update: Arc<Mutex<updater::Info>>,
+    /// CPU/memory per project, refreshed in the background so pages never wait on `docker stats`.
+    pub stats: Arc<Mutex<HashMap<String, docker::Status>>>,
 }
 
 impl AppState {
@@ -105,12 +107,14 @@ async fn main() -> anyhow::Result<()> {
         reg_states: Default::default(),
         auth_states: Default::default(),
         update: Default::default(),
+        stats: Default::default(),
     };
     if let Some(me) = &st.cfg.self_container {
         let projects = db::list_projects(&st.db.lock().unwrap())?;
         docker::join_all(&st.docker, &projects, me).await;
     }
     updater::spawn_periodic(st.clone());
+    spawn_stats_collector(st.clone());
     if needs_setup {
         let t = random_token(24);
         println!("\n=== DevHub : aucun passkey. SETUP TOKEN : {t} ===\n=== Ouvre {origin}/login pour créer ton passkey ===\n");
@@ -148,6 +152,29 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn spawn_stats_collector(st: AppState) {
+    tokio::spawn(async move {
+        loop {
+            let names: Vec<String> = db::list_projects(&st.db.lock().unwrap())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| p.name)
+                .collect();
+            let all = futures_util::future::join_all(names.iter().map(|n| docker::status(&st.docker, n))).await;
+            *st.stats.lock().unwrap() = names.into_iter().zip(all).collect();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
+}
+
+/// Live state (fast inspect) combined with the latest cached CPU/memory.
+async fn current_status(st: &AppState, name: &str) -> docker::Status {
+    let state = docker::state(&st.docker, name).await;
+    let mut s = if state == "running" { st.stats.lock().unwrap().get(name).cloned().unwrap_or_default() } else { Default::default() };
+    s.state = state;
+    s
+}
+
 type Page = Result<Markup, Response>;
 
 fn page(st: &AppState, jar: &CookieJar, title: &str, body: Markup) -> Page {
@@ -172,11 +199,8 @@ async fn login_page(
 async fn dashboard(State(st): State<AppState>, jar: CookieJar) -> Page {
     auth::require(&st, &jar)?;
     let projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
-    let mut rows = Vec::new();
-    for p in projects {
-        let s = docker::status(&st.docker, &p.name).await;
-        rows.push((p, s));
-    }
+    let statuses = futures_util::future::join_all(projects.iter().map(|p| current_status(&st, &p.name))).await;
+    let rows: Vec<_> = projects.into_iter().zip(statuses).collect();
     page(&st, &jar, "Projets", ui::dashboard(&st, &rows))
 }
 
@@ -328,7 +352,7 @@ fn load(st: &AppState, name: &str) -> Result<db::Project, Response> {
 async fn project_page(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Page {
     auth::require(&st, &jar)?;
     let p = load(&st, &name)?;
-    let s = docker::status(&st.docker, &name).await;
+    let s = current_status(&st, &name).await;
     let url = format!("{}/mcp/{}", st.cfg.origin, p.mcp_token);
     page(&st, &jar, &name, ui::project(&st, &p, &s, &url))
 }
