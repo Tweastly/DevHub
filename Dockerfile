@@ -2,6 +2,7 @@ FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY templates ./templates
 RUN cargo build --release
 
 FROM debian:bookworm-slim
