@@ -69,7 +69,9 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         return next.run(req).await;
     }
     let Some(t) = resolve(&st, &host) else {
-        return (StatusCode::NOT_FOUND, "Aucun projet / port pour ce sous-domaine").into_response();
+        let label = host.split('.').next().unwrap_or("");
+        return error_page(&st, StatusCode::NOT_FOUND, "Introuvable",
+            &format!("Aucun projet ne correspond à « {label} »."), None, None);
     };
     if !t.project.public && !auth::is_logged_in(&st, &CookieJar::from_headers(req.headers())) {
         let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
@@ -79,21 +81,55 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
         return (StatusCode::UNAUTHORIZED, crate::ui::private_project(&t.project.name, &login, base_host(&st))).into_response();
     }
-    let upstream = match &st.cfg.self_container {
-        Some(_) => format!("{}:{}", docker::container_name(&t.project.name), t.container_port),
-        None => format!("127.0.0.1:{}", t.host_port),
+    let owner = auth::is_logged_in(&st, &CookieJar::from_headers(req.headers()));
+    let name = t.project.name.clone();
+    let stream = match connect(&st, &t).await {
+        Ok(s) => s,
+        Err(e) => {
+            let state = docker::state(&st.docker, &name).await;
+            let manage = format!("{}/projects/{name}", st.cfg.origin);
+            return if state != "running" {
+                error_page(&st, StatusCode::SERVICE_UNAVAILABLE, "Projet arrêté",
+                    &format!("<b>{name}</b> n'est pas démarré pour le moment."),
+                    None, owner.then_some(("Ouvrir dans DevHub", manage.as_str())))
+            } else {
+                error_page(&st, StatusCode::BAD_GATEWAY, "Le serveur ne répond pas",
+                    &format!("Rien n'écoute sur le port <b>{}</b> dans <b>{name}</b>. \
+                              Lance ton serveur en écoutant sur <code>0.0.0.0</code>.", t.container_port),
+                    owner.then(|| e.to_string()).as_deref(),
+                    owner.then_some(("Ouvrir dans DevHub", manage.as_str())))
+            };
+        }
     };
-    match forward(req, &upstream, &host, st.cfg.origin.starts_with("https")).await {
+    match forward(req, stream, &host, st.cfg.origin.starts_with("https")).await {
         Ok(r) => r,
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            format!("Le projet '{}' ne répond pas sur le port {} : {e}\n(le serveur écoute-t-il sur 0.0.0.0 ?)", t.project.name, t.container_port),
-        )
-            .into_response(),
+        Err(e) => error_page(&st, StatusCode::BAD_GATEWAY, "Erreur de connexion",
+            &format!("La connexion à <b>{name}</b> a été interrompue."),
+            owner.then(|| e.to_string()).as_deref(), None),
     }
 }
 
-async fn forward(mut req: Request, upstream: &str, host: &str, https: bool) -> anyhow::Result<Response> {
+/// Connects to the project. If the container name doesn't resolve, DevHub has most likely
+/// lost its attachment to the project network (e.g. after being recreated): rejoin and retry once.
+async fn connect(st: &AppState, t: &Target) -> anyhow::Result<tokio::net::TcpStream> {
+    let Some(me) = &st.cfg.self_container else {
+        return Ok(tokio::net::TcpStream::connect(("127.0.0.1", t.host_port)).await?);
+    };
+    let addr = format!("{}:{}", docker::container_name(&t.project.name), t.container_port);
+    match tokio::net::TcpStream::connect(&addr).await {
+        Ok(s) => Ok(s),
+        Err(_) => {
+            docker::join_network(&st.docker, &docker::network_name(&t.project.name), me).await;
+            Ok(tokio::net::TcpStream::connect(&addr).await?)
+        }
+    }
+}
+
+fn error_page(st: &AppState, code: StatusCode, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>) -> Response {
+    (code, crate::ui::error_page(code.as_u16(), title, message, detail, action, base_host(st))).into_response()
+}
+
+async fn forward(mut req: Request, stream: tokio::net::TcpStream, host: &str, https: bool) -> anyhow::Result<Response> {
     let client_upgrade = hyper::upgrade::on(&mut req);
 
     let path = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
@@ -103,7 +139,6 @@ async fn forward(mut req: Request, upstream: &str, host: &str, https: bool) -> a
     h.insert("x-forwarded-host", HeaderValue::from_str(host)?);
     h.insert("x-forwarded-proto", HeaderValue::from_static(if https { "https" } else { "http" }));
 
-    let stream = tokio::net::TcpStream::connect(upstream).await?;
     let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Body>(TokioIo::new(stream)).await?;
     tokio::spawn(async move {
         let _ = conn.with_upgrades().await;

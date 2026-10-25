@@ -368,6 +368,12 @@ input{width:100%;background:transparent;color:var(--fg);border:1px solid var(--l
 input:focus{outline:2px solid var(--ring);outline-offset:1px}
 #msg{min-height:20px;margin:14px 0 0;font-size:13px;color:#ef4444}
 .foot{margin-top:20px;font-size:12px;color:var(--mute)}
+.code{margin:-4px 0 8px;font:600 13px ui-monospace,monospace;color:var(--mute);letter-spacing:.08em}
+.sub code{font:13px ui-monospace,monospace;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--fg)}
+.detail{text-align:left;font:12px/1.5 ui-monospace,monospace;color:var(--mute);background:var(--bg);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;margin:-12px 0 24px;white-space:pre-wrap;overflow-wrap:anywhere}
+.actions{display:flex;flex-direction:column;gap:10px}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
 .foot a{color:inherit}
 "#;
 
@@ -401,6 +407,22 @@ pub fn private_project(project: &str, login_url: &str, footer: &str) -> Markup {
         a.btn href=(login_url) { (PreEscaped(KEY_SVG)) "Se connecter avec un passkey" }
     })
 }
+
+/// Proxy errors (project stopped, nothing listening…). `message` is trusted HTML built by the proxy.
+pub fn error_page(code: u16, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>, footer: &str) -> Markup {
+    auth_shell(&format!("{title} · {code}"), footer, html! {
+        p.code { (code) }
+        h1 { (title) }
+        p.sub { (PreEscaped(message)) }
+        @if let Some(d) = detail { pre.detail { (d) } }
+        div.actions {
+            button.btn onclick="location.reload()" { (PreEscaped(RETRY_SVG)) "Réessayer" }
+            @if let Some((label, href)) = action { a.btn.ghost href=(href) { (label) } }
+        }
+    })
+}
+
+const RETRY_SVG: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>"#;
 
 pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
     let next_js = serde_json::to_string(&next.unwrap_or("/")).unwrap().replace("</", "<\\/");

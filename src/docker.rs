@@ -32,7 +32,7 @@ pub fn image_for(template: &str) -> Option<&'static str> {
 pub fn container_name(p: &str) -> String {
     format!("devhub-{p}")
 }
-fn network_name(p: &str) -> String {
+pub fn network_name(p: &str) -> String {
     format!("devhub-net-{p}")
 }
 fn volume_name(p: &str) -> String {
