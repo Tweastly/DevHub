@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 pub const TEMPLATES: &[(&str, &str, &str)] = &[
+    ("site", "python:3.12-bookworm", "Page web (modèle avec le nom du projet)"),
     ("node", "node:22-bookworm", "Node.js 22 (npm, git)"),
     ("rust", "rust:1-bookworm", "Rust stable (cargo, git)"),
     ("python", "python:3.12-bookworm", "Python 3.12 (pip, git)"),
@@ -94,7 +95,12 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
     let cfg = Config {
         image: Some(p.image.clone()),
         hostname: Some(p.name.clone()),
-        cmd: Some(vec!["sleep".into(), "infinity".into()]),
+        // Runs /workspace/start.sh in the background if the project has one, then idles.
+        cmd: Some(vec![
+            "sh".into(),
+            "-c".into(),
+            "[ -x /workspace/start.sh ] && (cd /workspace && ./start.sh > /tmp/start.log 2>&1 &); exec sleep infinity".into(),
+        ]),
         working_dir: Some("/workspace".into()),
         env: Some(env),
         labels: Some(labels),

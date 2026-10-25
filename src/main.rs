@@ -242,7 +242,10 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
             return Err(bad("URL git invalide"));
         }
     }
-    let wanted = parse_ports(f.ports.as_deref().unwrap_or("")).map_err(bad)?;
+    let mut wanted = parse_ports(f.ports.as_deref().unwrap_or("")).map_err(bad)?;
+    if f.template == "site" && wanted.is_empty() {
+        wanted.push(8000);
+    }
     let ports = map_ports(&st, &[], &wanted).map_err(|e| AppError(e).into_response())?;
     let p = db::Project {
         name: name.clone(),
@@ -272,6 +275,8 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
                 );
                 let r = docker::exec(&st2.docker, &p.name, &cmd, Some("/"), std::time::Duration::from_secs(600)).await?;
                 anyhow::ensure!(r.exit_code == 0, "git clone: {}", r.output);
+            } else if p.template == "site" {
+                seed_site(&st2, &p).await?;
             }
             anyhow::Ok(())
         }
@@ -283,6 +288,21 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
         }
     });
     Ok(Redirect::to(&format!("/projects/{name}")).into_response())
+}
+
+const SITE_TEMPLATE: &str = include_str!("../templates/site.html");
+
+/// Writes the starter page (with the project name) and a start script, then launches it.
+async fn seed_site(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
+    let d = &st.docker;
+    let port = p.ports.first().map(|m| m.container).unwrap_or(8000);
+    let name = maud::html! { (p.name) }.into_string(); // HTML-escaped
+    docker::write_file(d, &p.name, "index.html", SITE_TEMPLATE.replace("{{PROJECT}}", &name).as_bytes()).await?;
+    let start = format!("#!/bin/sh\n# Lancé automatiquement au démarrage du conteneur.\nexec python3 -m http.server {port} --bind 0.0.0.0\n");
+    docker::write_file(d, &p.name, "start.sh", start.as_bytes()).await?;
+    let cmd = "chmod +x start.sh && (nohup ./start.sh > /tmp/start.log 2>&1 &)";
+    docker::exec(d, &p.name, cmd, None, std::time::Duration::from_secs(10)).await?;
+    Ok(())
 }
 
 fn load(st: &AppState, name: &str) -> Result<db::Project, Response> {
