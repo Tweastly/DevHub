@@ -73,7 +73,7 @@ fn access_cell(ctx: &Ctx, r: &Row) -> Markup {
         @else {
             div.row.tight {
                 @if r.s.state == "running" && p.first_http().is_some() { a.link.mono href=(crate::proxy::url_for(&ctx.st, &p.name, None)) target="_blank" style="font-size:12px" { "ouvrir ↗" } }
-                @for m in &p.ports { span.chip { ":" (m.container) @if m.tcp { " tcp" } } }
+                @for m in &p.ports { span.chip { ":" (m.container) @if m.is_public() { " " (m.proto()) } } }
                 @if p.public && p.first_http().is_some() { span.pill.public { "Public" } }
             }
         }
@@ -136,8 +136,8 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
                         span.mono {
                             @if running && p.first_http().is_some() {
                                 (domains.first().map(|(h, _)| h.clone()).unwrap_or_else(|| crate::proxy::url_for(&ctx.st, n, None).split("://").nth(1).unwrap_or("").to_string()))
-                            } @else if let Some(m) = p.tcp_ports().next() {
-                                "tcp · " (crate::proxy::tcp_address(&ctx.st, m.host))
+                            } @else if let Some(m) = p.public_ports().next() {
+                                (m.proto()) " · " (crate::proxy::public_address(&ctx.st, m))
                             } @else { (p.image) }
                         }
                     }
@@ -299,7 +299,7 @@ fn tpl_icon(key: &str) -> &'static str {
         "python" => "python",
         "go" => "go",
         "base" => "terminal",
-        "minecraft" => "cube",
+        "minecraft" | "pocketmine" => "cube",
         _ => "plus-hex",
     }
 }
@@ -312,7 +312,8 @@ fn tpl_label(key: &str) -> (&'static str, &'static str) {
         "python" => ("Python 3.12", "python:3.12"),
         "go" => ("Go 1.23", "golang:1.23"),
         "base" => ("Debian + outils", "git, curl, build-essential"),
-        "minecraft" => ("Minecraft", "Paper · port 25565"),
+        "minecraft" => ("Minecraft Java", "Paper · 25565/tcp"),
+        "pocketmine" => ("Minecraft Bedrock", "PocketMine · 19132/udp"),
         _ => ("Image perso…", "n'importe quelle image"),
     }
 }
@@ -372,7 +373,7 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                             label.field {
                                 span.lbl { "Ports à exposer" }
                                 input.mono-input name="ports" placeholder="3000, 5173" value=(v("ports"));
-                                p.help { "Séparés par des virgules. " code { "3000" } " = site web via sous-domaine HTTPS, " code { "25565/tcp" } " = port TCP public (jeux). « Page web » utilise 8000, « Minecraft » 25565/tcp par défaut." }
+                                p.help { "Séparés par des virgules. " code { "3000" } " = site web via sous-domaine HTTPS, " code { "25565/tcp" } " ou " code { "19132/udp" } " = port TCP ou UDP public (jeux). « Page web » utilise 8000, « Minecraft Java » 25565/tcp, « Minecraft Bedrock » 19132/udp par défaut." }
                             }
                         }
                     }
@@ -392,7 +393,8 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                             tr { td.muted { "HTTPS" } td.num { "automatique" } }
                         }
                         div style="margin:16px 0" data-show-for="other" { (alert("info", html! { "Après création, il faudra rendre le projet public pour que les visiteurs le voient." })) }
-                        div style="margin:16px 0" data-show-for="minecraft" hidden { (alert("warn", html! { "Le port " b { "25565" } " sera ouvert sur Internet pour que les joueurs se connectent. Pense à l'autoriser dans le pare-feu du VPS." })) }
+                        div style="margin:16px 0" data-show-for="minecraft" hidden { (alert("warn", html! { "Le port " b { "25565/tcp" } " sera ouvert sur Internet pour que les joueurs se connectent. Pense à l'autoriser dans le pare-feu du VPS." })) }
+                        div style="margin:16px 0" data-show-for="pocketmine" hidden { (alert("warn", html! { "Le port " b { "19132/udp" } " sera ouvert sur Internet pour que les joueurs Bedrock (mobile, console, Windows) se connectent. Pense à l'autoriser dans le pare-feu du VPS : " code { "ufw allow 19132/udp" } "." })) }
                         button.btn.primary.lg.block { "Créer le projet" }
                         a.btn.ghost.block href="/projects" style="margin-top:10px" { "Annuler" }
                     }

@@ -77,13 +77,13 @@ fn tools() -> Value {
         json!({ "name": "list_templates", "description": "Modèles disponibles pour create_project.",
                 "inputSchema": { "type": "object", "properties": {} } }),
         json!({ "name": "create_project",
-                "description": "Crée un projet (conteneur isolé). template : un modèle de list_templates, ou \"custom\" avec image. Le modèle \"site\" génère une page web servie sur 8000. Le modèle \"minecraft\" crée un serveur Minecraft (Paper) joignable en TCP sur 25565 ; règle TYPE, VERSION, MOTD… avec set_env et la RAM avec set_resources.",
+                "description": "Crée un projet (conteneur isolé). template : un modèle de list_templates, ou \"custom\" avec image. Le modèle \"site\" génère une page web servie sur 8000. Le modèle \"minecraft\" crée un serveur Minecraft Java (Paper) joignable en TCP sur 25565 ; règle TYPE, VERSION, MOTD… avec set_env et la RAM avec set_resources. Le modèle \"pocketmine\" crée un serveur Minecraft Bedrock (PocketMine-MP) joignable en UDP sur 19132 ; ses réglages sont dans /workspace/server.properties et ses plugins (.phar) dans /workspace/plugins (redémarrer après).",
                 "inputSchema": { "type": "object", "properties": {
                     "name": { "type": "string", "description": "a-z, 0-9, -, 32 max" },
                     "template": { "type": "string" },
                     "image": { "type": "string", "description": "Image Docker si template = custom" },
                     "git_url": { "type": "string", "description": "Dépôt cloné dans /workspace (optionnel)" },
-                    "ports": { "type": "array", "items": { "type": ["integer", "string"] }, "description": "Ports du conteneur à exposer : 3000 (web, via sous-domaine HTTPS) ou \"25565/tcp\" (TCP public, pour les jeux)" }
+                    "ports": { "type": "array", "items": { "type": ["integer", "string"] }, "description": "Ports du conteneur à exposer : 3000 (web, via sous-domaine HTTPS), \"25565/tcp\" (TCP public, Minecraft Java) ou \"19132/udp\" (UDP public, Minecraft Bedrock / PocketMine)" }
                 }, "required": ["name", "template"] } }),
         json!({ "name": "project_action", "description": "start, stop, restart ou rebuild (recrée le conteneur, /workspace est conservé).",
                 "inputSchema": { "type": "object", "properties": {
@@ -91,7 +91,7 @@ fn tools() -> Value {
                 }, "required": ["project", "action"] } }),
         json!({ "name": "set_ports", "description": "Remplace la liste des ports exposés (rebuild automatique).",
                 "inputSchema": { "type": "object", "properties": {
-                    "project": p, "ports": { "type": "array", "items": { "type": ["integer", "string"] }, "description": "3000 (web) ou \"25565/tcp\" (TCP public)" }
+                    "project": p, "ports": { "type": "array", "items": { "type": ["integer", "string"] }, "description": "3000 (web), \"25565/tcp\" (TCP public) ou \"19132/udp\" (UDP public)" }
                 }, "required": ["project", "ports"] } }),
         json!({ "name": "set_env", "description": "Remplace toutes les variables d'environnement (rebuild automatique).",
                 "inputSchema": { "type": "object", "properties": {
@@ -234,7 +234,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                 v.iter()
                     .map(|x| match x {
                         Value::String(s) => ops::parse_port(s),
-                        _ => x.as_u64().and_then(|n| u16::try_from(n).ok()).map(|container| ops::PortSpec { container, tcp: false }).ok_or(format!("port invalide : {x}")),
+                        _ => x.as_u64().and_then(|n| u16::try_from(n).ok()).map(ops::PortSpec::http).ok_or(format!("port invalide : {x}")),
                     })
                     .collect()
             })

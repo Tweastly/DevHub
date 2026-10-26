@@ -163,8 +163,8 @@ pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value)
                     .ports
                     .iter()
                     .map(|m| {
-                        if m.tcp {
-                            format!("{}/tcp -> TCP public, joueurs : {}", m.container, proxy::tcp_address(st, m.host))
+                        if m.is_public() {
+                            format!("{}/{} -> {} public, joueurs : {}", m.container, m.proto(), m.proto().to_uppercase(), proxy::public_address(st, m))
                         } else {
                             let main = if Some(m.container) == first_http { format!(" et {}", proxy::url_for(st, &p.name, None)) } else { String::new() };
                             format!("{} -> {}{main}", m.container, proxy::url_for(st, &p.name, Some(m.container)))

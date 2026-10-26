@@ -34,12 +34,17 @@ pub fn safe_next(st: &AppState, next: &str) -> Option<String> {
     (u.scheme() == scheme && (host == base || host.ends_with(&format!(".{base}")))).then(|| u.to_string())
 }
 
-/// What players type to join a public TCP port: the dashboard's domain already points
-/// at the VPS. Override with DEVHUB_PUBLIC_HOST (e.g. "mc.tweastly.com").
-/// Minecraft's default port is implied, so 25565 shows as just the host.
-pub fn tcp_address(st: &AppState, host_port: u16) -> String {
-    let host = std::env::var("DEVHUB_PUBLIC_HOST").ok().filter(|h| !h.is_empty()).unwrap_or_else(|| st.cfg.domain.clone());
-    if host_port == 25565 { host } else { format!("{host}:{host_port}") }
+/// Host players connect to: the dashboard's domain already points at the VPS.
+/// Override with DEVHUB_PUBLIC_HOST (e.g. "mc.tweastly.com").
+pub fn public_host(st: &AppState) -> String {
+    std::env::var("DEVHUB_PUBLIC_HOST").ok().filter(|h| !h.is_empty()).unwrap_or_else(|| st.cfg.domain.clone())
+}
+
+/// What players type to join a public port. Minecraft Java's default port is implied,
+/// so 25565/tcp shows as just the host; UDP (Bedrock asks address and port apart) keeps it.
+pub fn public_address(st: &AppState, m: &crate::db::PortMap) -> String {
+    let host = public_host(st);
+    if m.tcp && m.host == 25565 { host } else { format!("{host}:{}", m.host) }
 }
 
 pub fn url_for(st: &AppState, p: &str, port: Option<u16>) -> String {

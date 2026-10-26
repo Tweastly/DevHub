@@ -185,9 +185,10 @@
         const n = $('[data-recap=count]', np); if (n) n.textContent = np.name.value.length + '/32';
         const custom = tile && tile.value === 'custom';
         np.image.disabled = !custom;
-        if (np.ports) np.ports.placeholder = tile && tile.value === 'site' ? '8000' : tile && tile.value === 'minecraft' ? '25565/tcp' : '3000, 5173';
-        const mc = tile && tile.value === 'minecraft';
-        $$('[data-show-for]', np).forEach(e => { e.hidden = (e.dataset.showFor === 'minecraft') !== mc; });
+        const t = tile ? tile.value : '';
+        if (np.ports) np.ports.placeholder = { site: '8000', minecraft: '25565/tcp', pocketmine: '19132/udp' }[t] || '3000, 5173';
+        const show = t === 'minecraft' || t === 'pocketmine' ? t : 'other';
+        $$('[data-show-for]', np).forEach(e => { e.hidden = e.dataset.showFor !== show; });
       };
       np.addEventListener('input', upd);
       upd();

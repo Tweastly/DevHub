@@ -23,7 +23,8 @@ pub const TEMPLATES: &[(&str, &str, &str)] = &[
     ("python", "python:3.12-bookworm", "Python 3.12 (pip, git)"),
     ("go", "golang:1.23-bookworm", "Go 1.23 (git)"),
     ("base", "buildpack-deps:bookworm", "Debian + outils de build (git, curl)"),
-    ("minecraft", "itzg/minecraft-server", "Serveur Minecraft (Paper par défaut)"),
+    ("minecraft", "itzg/minecraft-server", "Serveur Minecraft Java (Paper par défaut)"),
+    ("pocketmine", "ghcr.io/pmmp/pocketmine-mp", "Serveur Minecraft Bedrock (PocketMine-MP, UDP 19132)"),
 ];
 
 pub fn image_for(template: &str) -> Option<&'static str> {
@@ -146,10 +147,10 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
     let mut exposed = HashMap::new();
     let mut bindings = HashMap::new();
     for m in &p.ports {
-        let key = format!("{}/tcp", m.container);
+        let key = format!("{}/{}", m.container, m.proto());
         exposed.insert(key.clone(), HashMap::new());
-        // Public TCP ports (players) listen on every interface; HTTP ones stay behind the proxy.
-        let ip = if m.tcp { "0.0.0.0".to_string() } else { lim.bind_ip.clone() };
+        // Public TCP/UDP ports (players) listen on every interface; HTTP ones stay behind the proxy.
+        let ip = if m.is_public() { "0.0.0.0".to_string() } else { lim.bind_ip.clone() };
         bindings.insert(key, Some(vec![PortBinding { host_ip: Some(ip), host_port: Some(m.host.to_string()) }]));
     }
     let mut env: Vec<String> = p.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -163,10 +164,12 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         typ: Some(MountTypeEnum::VOLUME),
         ..Default::default()
     }];
-    if p.template == "minecraft" {
-        // The image keeps the world in /data: same volume, so the Files tab shows it.
-        mounts.push(Mount { target: Some("/data".into()), source: Some(volume_name(&p.name)), typ: Some(MountTypeEnum::VOLUME), ..Default::default() });
+    let vol = |target: &str, source: String| Mount { target: Some(target.into()), source: Some(source), typ: Some(MountTypeEnum::VOLUME), ..Default::default() };
+    if p.is_game() {
+        // Both images keep the world in /data: same volume, so the Files tab shows it.
+        mounts.push(vol("/data", volume_name(&p.name)));
     }
+
     let labels = HashMap::from([("devhub.project".to_string(), p.name.clone())]);
 
     let cfg = Config {
@@ -174,14 +177,26 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         hostname: Some(p.name.clone()),
         // Services keep the image's own command. Others run /workspace/start.sh in the
         // background if the project has one, then idle.
-        cmd: (!p.is_service()).then(|| {
+        cmd: if p.template == "pocketmine" {
+            // The image's start command, with plugins kept in the world's volume (/data/plugins,
+            // so the Files tab shows them), without IPv6 (project networks don't have it) and
+            // without ANSI, whose title updates would flood the logs and the console's answers.
+            // $POCKETMINE_ARGS still adds options.
+            Some(vec![
+                "sh".into(),
+                "-c".into(),
+                "cd /opt/pocketmine && exec php PocketMine-MP.phar --no-wizard --disable-ansi --data=/data --plugins=/data/plugins --enable-ipv6=off $POCKETMINE_ARGS".into(),
+            ])
+        } else { (!p.is_service()).then(|| {
             vec![
                 "sh".into(),
                 "-c".into(),
                 "[ -x /workspace/start.sh ] && (cd /workspace && ./start.sh > /tmp/start.log 2>&1 &); exec sleep infinity".into(),
             ]
-        }),
+        }) },
         working_dir: (!p.is_service()).then(|| "/workspace".into()),
+        // PocketMine reads its console on stdin: DevHub sends commands by attaching to it.
+        open_stdin: (p.template == "pocketmine").then_some(true),
         env: Some(env),
         labels: Some(labels),
         exposed_ports: Some(exposed),
@@ -317,6 +332,58 @@ pub async fn port_open(self_container: bool, project: &str, container_port: u16,
         tokio::time::timeout(Duration::from_millis(300), tokio::net::TcpStream::connect(addr)).await,
         Ok(Ok(_))
     )
+}
+
+/// Minecraft Bedrock / PocketMine status from a RakNet "unconnected ping" (UDP).
+pub struct BedrockStatus {
+    pub motd: String,
+    pub version: String,
+    pub online: String,
+    pub max: String,
+}
+
+pub async fn bedrock_ping(self_container: bool, project: &str, container_port: u16, host_port: u16) -> Option<BedrockStatus> {
+    const MAGIC: [u8; 16] = [0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78];
+    let addr = if self_container { format!("{}:{container_port}", container_name(project)) } else { format!("127.0.0.1:{host_port}") };
+    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    sock.connect(&addr).await.ok()?;
+    let mut ping = vec![0x01];
+    ping.extend_from_slice(&(crate::db::now() as u64).to_be_bytes());
+    ping.extend_from_slice(&MAGIC);
+    ping.extend_from_slice(&0x6465_7668_7562_0001u64.to_be_bytes());
+    sock.send(&ping).await.ok()?;
+    let mut buf = [0u8; 2048];
+    let n = tokio::time::timeout(Duration::from_millis(800), sock.recv(&mut buf)).await.ok()?.ok()?;
+    // Pong: 0x1c, time (8), server guid (8), magic (16), length (2), "MCPE;motd;protocol;version;online;max;…".
+    if n < 35 || buf[0] != 0x1c {
+        return None;
+    }
+    let len = u16::from_be_bytes([buf[33], buf[34]]) as usize;
+    let s = String::from_utf8_lossy(buf.get(35..(35 + len).min(n))?).to_string();
+    let f: Vec<&str> = s.split(';').collect();
+    let get = |i: usize| f.get(i).map(|x| x.to_string()).unwrap_or_default();
+    Some(BedrockStatus { motd: get(1), version: get(3), online: get(4), max: get(5) })
+}
+
+/// Writes one line on the main process's stdin (PocketMine's console). The container
+/// must have been created with stdin open.
+pub async fn console_write(d: &Docker, p: &str, line: &str) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let opts = bollard::container::AttachContainerOptions::<String> { stdin: Some(true), stream: Some(true), ..Default::default() };
+    let mut r = d.attach_container(&container_name(p), Some(opts)).await?;
+    r.input.write_all(format!("{line}\n").as_bytes()).await?;
+    r.input.flush().await?;
+    Ok(())
+}
+
+/// Log lines written since `since` (unix seconds), without timestamps.
+pub async fn logs_since(d: &Docker, p: &str, since: i64) -> String {
+    let mut s = d.logs::<String>(&container_name(p), Some(LogsOptions { stdout: true, stderr: true, since, ..Default::default() }));
+    let mut out = String::new();
+    while let Some(Ok(l)) = s.next().await {
+        out.push_str(&l.to_string());
+    }
+    out
 }
 
 /// Container state only (one fast inspect call, a few ms).

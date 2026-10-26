@@ -10,12 +10,22 @@ pub struct PortMap {
     /// subdomain proxy. Its host port is the one players connect to.
     #[serde(default)]
     pub tcp: bool,
+    /// Raw UDP published on all interfaces (Minecraft Bedrock / PocketMine, voice…).
+    #[serde(default)]
+    pub udp: bool,
 }
 
 impl PortMap {
-    /// "25565/tcp" for public TCP ports, "3000" for HTTP ones (the ports field syntax).
+    /// "25565/tcp" / "19132/udp" for public ports, "3000" for HTTP ones (the ports field syntax).
     pub fn spec(&self) -> String {
-        if self.tcp { format!("{}/tcp", self.container) } else { self.container.to_string() }
+        if self.is_public() { format!("{}/{}", self.container, self.proto()) } else { self.container.to_string() }
+    }
+    /// Published as-is on every interface (TCP or UDP), not behind the HTTP proxy.
+    pub fn is_public(&self) -> bool {
+        self.tcp || self.udp
+    }
+    pub fn proto(&self) -> &'static str {
+        if self.udp { "udp" } else { "tcp" }
     }
 }
 
@@ -43,17 +53,22 @@ pub struct Project {
 impl Project {
     /// Ports served over HTTP(S) through the subdomain proxy.
     pub fn http_ports(&self) -> impl Iterator<Item = &PortMap> {
-        self.ports.iter().filter(|m| !m.tcp)
+        self.ports.iter().filter(|m| !m.is_public())
     }
-    pub fn tcp_ports(&self) -> impl Iterator<Item = &PortMap> {
-        self.ports.iter().filter(|m| m.tcp)
+    /// Public TCP and UDP ports (game servers…).
+    pub fn public_ports(&self) -> impl Iterator<Item = &PortMap> {
+        self.ports.iter().filter(|m| m.is_public())
     }
     pub fn first_http(&self) -> Option<&PortMap> {
         self.http_ports().next()
     }
     /// Images that run their own command (game servers) instead of DevHub's idle shell.
     pub fn is_service(&self) -> bool {
-        self.template == "minecraft"
+        self.is_game()
+    }
+    /// Minecraft servers: Java (itzg/minecraft-server) or Bedrock (PocketMine-MP).
+    pub fn is_game(&self) -> bool {
+        matches!(self.template.as_str(), "minecraft" | "pocketmine")
     }
 }
 

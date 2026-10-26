@@ -109,28 +109,41 @@ fn internal(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
-/// A wanted container port: "3000" (HTTP via subdomains) or "25565/tcp" (public TCP).
+/// A wanted container port: "3000" (HTTP via subdomains), "25565/tcp" (public TCP)
+/// or "19132/udp" (public UDP).
 #[derive(Clone, Copy, PartialEq)]
 pub struct PortSpec {
     pub container: u16,
     pub tcp: bool,
+    pub udp: bool,
+}
+
+impl PortSpec {
+    pub fn http(container: u16) -> Self {
+        PortSpec { container, tcp: false, udp: false }
+    }
+    fn same(&self, m: &db::PortMap) -> bool {
+        self.container == m.container && self.tcp == m.tcp && self.udp == m.udp
+    }
 }
 
 pub fn parse_port(x: &str) -> R<PortSpec> {
     let x = x.trim().to_ascii_lowercase();
-    let (num, tcp) = match x.split_once('/') {
-        Some((n, "tcp")) => (n, true),
-        Some(_) => return Err(format!("port invalide : {x} (seul /tcp est accepté)")),
-        None => (x.as_str(), false),
+    let (num, tcp, udp) = match x.split_once('/') {
+        Some((n, "tcp")) => (n, true, false),
+        Some((n, "udp")) => (n, false, true),
+        Some(_) => return Err(format!("port invalide : {x} (/tcp ou /udp)")),
+        None => (x.as_str(), false, false),
     };
     let container = num.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("port invalide : {x}"))?;
-    Ok(PortSpec { container, tcp })
+    Ok(PortSpec { container, tcp, udp })
 }
 
 pub fn parse_ports(s: &str) -> R<Vec<PortSpec>> {
     let v: Vec<PortSpec> = s.split([',', ' ']).filter(|x| !x.is_empty()).map(parse_port).collect::<R<_>>()?;
     for (i, a) in v.iter().enumerate() {
-        if v[..i].iter().any(|b| b.container == a.container) {
+        // The same number may be both TCP and UDP (19132/tcp + 19132/udp), not twice the same.
+        if v[..i].iter().any(|b| b.container == a.container && (b.udp == a.udp || !(a.tcp || a.udp) || !(b.tcp || b.udp))) {
             return Err(format!("le port {} est indiqué deux fois", a.container));
         }
     }
@@ -157,19 +170,19 @@ fn map_ports(st: &AppState, existing: &[db::PortMap], wanted: &[PortSpec]) -> an
     let c = st.db.lock().unwrap();
     let mut out: Vec<db::PortMap> = Vec::new();
     for w in wanted {
-        if let Some(m) = existing.iter().find(|m| m.container == w.container && m.tcp == w.tcp) {
+        if let Some(m) = existing.iter().find(|m| w.same(m)) {
             out.push(m.clone());
             continue;
         }
         let mut taken: Vec<u16> = out.iter().map(|m| m.host).collect();
         // Ports this project currently holds are about to be released: reuse is fine.
-        taken.retain(|h| !existing.iter().any(|m| m.host == *h && !wanted.iter().any(|w| w.container == m.container && w.tcp == m.tcp)));
-        let host = if w.tcp {
+        taken.retain(|h| !existing.iter().any(|m| m.host == *h && !wanted.iter().any(|w| w.same(m))));
+        let host = if w.tcp || w.udp {
             db::allocate_public_port(&c, w.container, &taken, existing)?
         } else {
             db::allocate_port(&c, st.cfg.port_range, &taken)?
         };
-        out.push(db::PortMap { container: w.container, host, tcp: w.tcp });
+        out.push(db::PortMap { container: w.container, host, tcp: w.tcp, udp: w.udp });
     }
     Ok(out)
 }
@@ -203,10 +216,13 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
     }
     let mut wanted = np.ports;
     if np.template == "site" && wanted.is_empty() {
-        wanted.push(PortSpec { container: 8000, tcp: false });
+        wanted.push(PortSpec::http(8000));
     }
     if np.template == "minecraft" && wanted.is_empty() {
-        wanted.push(PortSpec { container: 25565, tcp: true });
+        wanted.push(PortSpec { container: 25565, tcp: true, udp: false });
+    }
+    if np.template == "pocketmine" && wanted.is_empty() {
+        wanted.push(PortSpec { container: 19132, tcp: false, udp: true });
     }
     let mut env = BTreeMap::new();
     if np.template == "minecraft" {
@@ -322,7 +338,7 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             }
             let port = match port {
                 Some(port) if p.http_ports().any(|m| m.container == port) => port,
-                Some(port) if p.tcp_ports().any(|m| m.container == port) => {
+                Some(port) if p.public_ports().any(|m| m.container == port) => {
                     return Err(format!("le port {port} est un port TCP public (jeu) : un sous-domaine HTTPS ne peut pas pointer dessus"))
                 }
                 Some(port) => return Err(format!("le port {port} n'est pas exposé par {name} : ajoute-le d'abord dans ses ports")),

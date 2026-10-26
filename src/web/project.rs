@@ -75,7 +75,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
     };
     let running = x.s.state == "running";
     let on = |t: Tab| if t == tab { "on" } else { "" };
-    let n_addr = addresses(ctx, x).len() + x.p.tcp_ports().count();
+    let n_addr = addresses(ctx, x).len() + x.p.public_ports().count();
     let title_crumb = match tab {
         Tab::Overview => None,
         Tab::Network => Some("Réseau"),
@@ -166,10 +166,10 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         matches!(l.as_str(), "project.restart" | "project.start" | "project.rebuild" | "project.create" | "project_action")
     });
     let self_c = st.cfg.self_container.is_some();
-    let checks = futures_util::future::join_all(x.p.ports.iter().map(|m| docker::port_open(self_c, n, m.container, m.host))).await;
+    let checks = futures_util::future::join_all(x.p.ports.iter().map(|m| async move { m.udp || docker::port_open(self_c, n, m.container, m.host).await })).await;
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 30).await };
     let mcp_url = format!("{}/mcp/{}", st.cfg.origin, x.p.mcp_token);
-    let minecraft = if x.p.template == "minecraft" { Some(minecraft_card(&st, &x, &q).await) } else { None };
+    let minecraft = if x.p.is_game() { Some(minecraft_card(&st, &x, &q).await) } else { None };
     let base = format!("/projects/{n}");
 
     let body = html! {
@@ -197,7 +197,9 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 }
                 div.row.tight style="margin-top:10px" {
                     @for (m, ok) in x.p.ports.iter().zip(&checks) {
-                        span class={"chip " (if *ok { "ok" } else { "bad" })} title=(if *ok { "répond" } else { "ne répond pas" }) { (m.container) " " (if *ok { "✓" } else { "✗" }) }
+                        // UDP can't be probed with a connection: no ✓/✗ for it.
+                        @if m.udp { span.chip title="UDP : pas de test de connexion" { (m.container) " udp" } }
+                        @else { span class={"chip " (if *ok { "ok" } else { "bad" })} title=(if *ok { "répond" } else { "ne répond pas" }) { (m.container) " " (if *ok { "✓" } else { "✗" }) } }
                     }
                 }
                 div.foot {
@@ -292,7 +294,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
     let body = html! {
         @if let Some(m) = q.get("ok") { div.flash { (alert("ok", html! { (m) })) } }
         div.stack {
-            @if x.p.first_http().is_none() && x.p.tcp_ports().next().is_some() {
+            @if x.p.first_http().is_none() && x.p.public_ports().next().is_some() {
                 (alert("info", html! { "Ce projet n'a pas de site web : le réglage privé/public ne concerne que les adresses HTTPS. Ses ports TCP publics sont ouverts à tous, c'est le jeu qui gère ses accès (whitelist, mot de passe…)." }))
             } @else {
             div.card {
@@ -335,15 +337,15 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             @for m in &x.p.ports {
                                 tr {
                                     td {
-                                        span.chip { (m.container) @if m.tcp { " TCP" } }
-                                        @if Some(m.container) == first_http && !m.tcp { span.dim style="margin-left:8px;font-size:12px" { "principal" } }
+                                        span.chip { (m.container) @if m.is_public() { " " (m.proto().to_uppercase()) } }
+                                        @if Some(m.container) == first_http && !m.is_public() { span.dim style="margin-left:8px;font-size:12px" { "principal" } }
                                     }
-                                    @if m.tcp {
+                                    @if m.is_public() {
                                         td {
                                             div.row.tight {
-                                                span.pill.warn.plain { "TCP public" }
-                                                code style="font-size:12.5px" { (proxy::tcp_address(&st, m.host)) }
-                                                button.icon-btn.bare type="button" data-copy=(proxy::tcp_address(&st, m.host)) title="Copier" { (icon_c("copy", "sm")) }
+                                                span.pill.public { (m.proto().to_uppercase()) " public" }
+                                                code style="font-size:12.5px" { (proxy::public_address(&st, m)) }
+                                                button.icon-btn.bare type="button" data-copy=(proxy::public_address(&st, m)) title="Copier" { (icon_c("copy", "sm")) }
                                             }
                                             div.help style="margin-top:4px" { "Ouvert sur Internet, sans HTTPS ni passkey : le jeu gère ses propres accès." }
                                         }
@@ -362,7 +364,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                 div.card-f {
                     form.row method="post" action={(base) "/ports"} style="flex-wrap:nowrap" onsubmit="return confirm('Changer les ports recrée le conteneur. Continuer ?')" {
                         (back_field(&here))
-                        label.field style="flex:1" { span.lbl { "Ports conteneur " span.dim { "(séparés par des virgules)" } } input.mono-input name="ports" value=(ports_text) placeholder="3000, 5173"; p.help { code { "3000" } " = site web (sous-domaine HTTPS) · " code { "25565/tcp" } " = port TCP public, pour un serveur de jeu" } }
+                        label.field style="flex:1" { span.lbl { "Ports conteneur " span.dim { "(séparés par des virgules)" } } input.mono-input name="ports" value=(ports_text) placeholder="3000, 5173"; p.help { code { "3000" } " = site web (sous-domaine HTTPS) · " code { "25565/tcp" } " / " code { "19132/udp" } " = port TCP ou UDP public, pour un serveur de jeu" } }
                         button.btn style="align-self:flex-end" { (icon("wrench")) "Appliquer (rebuild)" }
                     }
                 }
@@ -676,39 +678,60 @@ async fn mc_status(st: &AppState, name: &str) -> Option<McStatus> {
     Some(McStatus { version: field("version"), online: field("online"), max: field("max"), motd })
 }
 
+/// Server card at the top of a game project: address to share, players, console.
+/// Java (itzg/minecraft-server, TCP, RCON) and Bedrock (PocketMine-MP, UDP, stdin console).
 async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Markup {
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let running = x.s.state == "running";
-    let status = if running { mc_status(st, n).await } else { None };
-    let addr = x.p.tcp_ports().next().map(|m| proxy::tcp_address(st, m.host));
+    let bedrock = x.p.template == "pocketmine";
+    let port = x.p.public_ports().find(|m| m.udp == bedrock).cloned();
+    let status = match (&port, running, bedrock) {
+        (_, false, _) => None,
+        (Some(m), true, true) => docker::bedrock_ping(st.cfg.self_container.is_some(), n, m.container, m.host)
+            .await
+            .map(|s| McStatus { version: s.version, online: s.online, max: s.max, motd: s.motd }),
+        (_, true, true) => None,
+        (_, true, false) => mc_status(st, n).await,
+    };
+    let host = proxy::public_host(st);
     let env = |k: &str| x.p.env.get(k).cloned().unwrap_or_else(|| "?".into());
+    let (proto, default_port) = if bedrock { ("udp", 19132) } else { ("tcp", 25565) };
+    let suggestions: &[&str] = if bedrock { &["list", "save-all", "whitelist add Pseudo", "op Pseudo"] } else { &["list", "save-all", "whitelist list", "op Pseudo"] };
     html! {
-        div.card.glow style="margin-bottom:20px" {
+        div.card style="margin-bottom:20px" {
             div.card-h {
-                span.hero-ic style="width:32px;height:32px;border-radius:9px" { (icon_c("cube", "sm")) }
-                h3 { "Serveur Minecraft" }
-                span.sub { (env("TYPE").to_lowercase()) " · " (env("VERSION").to_lowercase()) }
+                h3 { @if bedrock { "Serveur Minecraft Bedrock" } @else { "Serveur Minecraft Java" } }
+                span.sub { @if bedrock { "PocketMine-MP" } @else { (env("TYPE").to_lowercase()) " · " (env("VERSION").to_lowercase()) } }
                 div.end {
                     @if let Some(s) = &status { span.pill.running { (s.online) " / " (s.max) " joueurs" } }
                     @else if running { span.pill.absent { "démarrage…" } }
-                    @else { span.pill.exited { "arrêté" } }
+                    @else { span.pill.exited { "Arrêté" } }
                 }
             }
             div.card-b {
                 div.grid2 {
                     div {
-                        span.lbl style="display:block;font-weight:650;font-size:13px;margin-bottom:7px" { "Adresse à partager" }
-                        @if let Some(a) = &addr { div.copy { code style="font-size:14px;font-weight:600" { (a) } (copy_btn(a)) } }
-                        @else { p.muted { "Aucun port TCP public : ajoute " code { "25565/tcp" } " dans Réseau." } }
+                        span.lbl style="display:block;font-weight:500;font-size:12px;color:var(--text-2);margin-bottom:7px" { "À donner aux joueurs" }
+                        @if let Some(m) = &port {
+                            @if bedrock {
+                                // Bedrock asks for the address and the port in two fields.
+                                div.copy { code style="font-size:14px" { (host) } (copy_btn(&host)) }
+                                div.copy style="margin-top:8px" { code style="font-size:14px" { "port " (m.host) } (copy_btn(&m.host.to_string())) }
+                            } @else {
+                                @let a = proxy::public_address(st, m);
+                                div.copy { code style="font-size:14px" { (a) } (copy_btn(&a)) }
+                            }
+                        } @else { p.muted { "Aucun port public : ajoute " code { (default_port) "/" (proto) } " dans Réseau." } }
                         p.help {
-                            "Dans Minecraft : Multijoueur → Ajouter un serveur. "
+                            @if bedrock { "Dans Minecraft (mobile, console, Windows) : Jouer → Serveurs → Ajouter un serveur. " }
+                            @else { "Dans Minecraft : Multijoueur → Ajouter un serveur. " }
                             @if let Some(s) = &status { "Version " b { (s.version) } @if !s.motd.is_empty() { " · « " (s.motd) " »" } "." }
-                            @else if running { "Le serveur démarre (le premier lancement télécharge le jeu, 1 à 3 min) : suis-le dans Terminal & logs." }
+                            @else if running { "Le serveur démarre : suis-le dans Terminal & journaux." }
                         }
                     }
                     div {
-                        span.lbl style="display:block;font-weight:650;font-size:13px;margin-bottom:7px" { "Console" }
+                        span.lbl style="display:block;font-weight:500;font-size:12px;color:var(--text-2);margin-bottom:7px" { "Console" }
                         form method="post" action={(base) "/mc-command"} {
                             (back_field(&base))
                             div.ig {
@@ -716,7 +739,7 @@ async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Ma
                                 input.mono-input name="cmd" required placeholder="whitelist add Pseudo" autocomplete="off" disabled[!running];
                             }
                             div.row.tight style="margin-top:8px" {
-                                @for c in ["list", "save-all", "whitelist list", "op Pseudo"] {
+                                @for c in suggestions {
                                     button.btn.sm.ghost type="button" disabled[!running] onclick={"this.form.cmd.value='" (c) "';this.form.cmd.focus()"} { (c) }
                                 }
                                 span.spacer {}
@@ -727,11 +750,16 @@ async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Ma
                         @if let Some(e) = q.get("err") { p.err-text { (icon_c("error", "sm")) (e) } }
                     }
                 }
-                p.help.row style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)" {
+                p.help.row style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)" {
                     (icon_c("info", "sm"))
-                    "Réglages du jeu (type Paper/Vanilla/Fabric, version, MOTD, difficulté, whitelist…) dans "
-                    a.link href={(base) "/settings#env"} { "Paramètres → Variables" }
-                    ". Le port TCP doit être autorisé dans le pare-feu du VPS (" code { "ufw allow 25565/tcp" } ")."
+                    @if bedrock {
+                        "Réglages du jeu (nom, mode, difficulté, whitelist…) dans " code { "server.properties" } ", et plugins " code { ".phar" } " dans le dossier " code { "plugins" } " : "
+                        a.link href={(base) "/files"} { "Fichiers" } ", puis redémarre. "
+                    } @else {
+                        "Réglages du jeu (type Paper/Vanilla/Fabric, version, MOTD, difficulté, whitelist…) dans "
+                        a.link href={(base) "/settings#env"} { "Paramètres → Variables" } ". "
+                    }
+                    "Le port doit être autorisé dans le pare-feu du VPS (" code { "ufw allow " (port.as_ref().map(|m| m.host).unwrap_or(default_port)) "/" (proto) } ")."
                 }
             }
         }
@@ -744,14 +772,41 @@ pub async fn mc_command(st: &AppState, name: &str, cmd: &str) -> Result<String, 
     if cmd.is_empty() || cmd.len() > 300 || cmd.contains(['\n', '\r']) {
         return Err("commande invalide".into());
     }
-    let quoted = format!("'{}'", cmd.replace('\'', "'\\''"));
-    let r = docker::exec(&st.docker, name, &format!("rcon-cli {quoted}"), Some("/"), std::time::Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+    let pocketmine = crate::ops::load(st, name).map(|p| p.template == "pocketmine").unwrap_or(false);
+    let r = if pocketmine {
+        // PocketMine reads commands on its stdin; its answer shows up in the logs.
+        let since = db::now();
+        docker::console_write(&st.docker, name, cmd).await.map_err(|e| format!("console indisponible (recrée le conteneur) : {e:#}"))?;
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let out = docker::logs_since(&st.docker, name, since).await;
+        // Drop our own echoed command and PocketMine's "Command output | " prefix.
+        let out: String = out
+            .lines()
+            .map(|l| l.trim_start_matches('\r'))
+            .filter(|l| !l.trim_start().starts_with('>'))
+            .map(|l| l.split_once("Command output | ").map(|x| x.1).unwrap_or(l))
+            .map(|l| l.trim_end_matches("Command output |"))
+            .filter(|l| !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        docker::ExecResult { exit_code: 0, output: out, timed_out: false }
+    } else {
+        let quoted = format!("'{}'", cmd.replace('\'', "'\\''"));
+        docker::exec(&st.docker, name, &format!("rcon-cli {quoted}"), Some("/"), std::time::Duration::from_secs(10))
+            .await
+            .map_err(|e| format!("{e:#}"))?
+    };
     let mut out = String::new();
     let mut chars = r.output.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '\x1b' {
+        if c == '\x1b' && chars.peek() == Some(&']') {
+            // Skip "ESC ] … BEL" (terminal title).
+            for d in chars.by_ref() {
+                if d == '\x07' {
+                    break;
+                }
+            }
+        } else if c == '\x1b' {
             // Skip "ESC [ … letter".
             for d in chars.by_ref() {
                 if d.is_ascii_alphabetic() {
