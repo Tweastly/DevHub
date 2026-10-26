@@ -56,8 +56,43 @@ pub async fn pull(docker: &Docker, image: &str) -> anyhow::Result<()> {
 /// Without news from the registry for this long, a download is considered stuck.
 const PULL_STALL: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// "repo" → "repo:latest". The Engine API pulls EVERY tag of an image named without one
+/// (unlike `docker pull`): gigabytes for itzg/minecraft-server or pocketmine-mp.
+pub fn with_tag(image: &str) -> String {
+    let last = image.rsplit('/').next().unwrap_or(image);
+    if image.contains('@') || last.contains(':') { image.to_string() } else { format!("{image}:latest") }
+}
+
+/// Untags the extra versions an untagged pull brought for the game templates (fixed since),
+/// keeping `latest` and anything a container uses. Run once at startup.
+pub async fn prune_template_tags(d: &Docker) {
+    use bollard::image::{ListImagesOptions, RemoveImageOptions};
+    let repos: Vec<String> = TEMPLATES.iter().filter(|t| !t.1.rsplit('/').next().unwrap_or("").contains(':')).map(|t| t.1.to_string()).collect();
+    let used: Vec<String> = d
+        .list_containers(Some(bollard::container::ListContainersOptions::<String> { all: true, ..Default::default() }))
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|c| c.image)
+        .collect();
+    for repo in repos {
+        let filters = HashMap::from([("reference".to_string(), vec![repo.clone()])]);
+        let Ok(images) = d.list_images(Some(ListImagesOptions { filters, ..Default::default() })).await else { continue };
+        for tag in images.iter().flat_map(|i| i.repo_tags.iter()) {
+            if tag.ends_with(":latest") || used.contains(tag) {
+                continue;
+            }
+            if d.remove_image(tag, Some(RemoveImageOptions { force: false, noprune: false }), None).await.is_ok() {
+                tracing::info!("image inutile retirée : {tag}");
+            }
+        }
+    }
+}
+
 /// Pulls `image`, reporting "7/12 couches · 312 Mo" style progress along the way.
 pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(String)) -> anyhow::Result<()> {
+    let tagged = with_tag(image);
+    let image = tagged.as_str();
     let mut s = docker.create_image(
         Some(CreateImageOptions { from_image: image, ..Default::default() }),
         None,
@@ -70,7 +105,14 @@ pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(String)) 
             .await
             .map_err(|_| anyhow::anyhow!("téléchargement de {image} bloqué depuis 5 min (réseau ou registre)"))?;
         let Some(r) = next else { break };
-        let info = r.map_err(|e| anyhow::anyhow!("téléchargement de {image} : {}", pull_error(&e.to_string())))?;
+        let info = r.map_err(|e| {
+            // DockerStreamError's Display is just "Docker stream error": show the registry's message.
+            let msg = match &e {
+                bollard::errors::Error::DockerStreamError { error } => error.clone(),
+                e => e.to_string(),
+            };
+            anyhow::anyhow!("téléchargement de {image} : {}", pull_error(&msg))
+        })?;
         let (Some(id), Some(status)) = (info.id, info.status) else { continue };
         if id == image || id.contains(':') {
             continue; // image-level lines, not layers
@@ -281,9 +323,12 @@ pub async fn restart(d: &Docker, p: &str) -> anyhow::Result<()> {
 }
 
 pub async fn destroy(d: &Docker, p: &str, keep_data: bool) -> anyhow::Result<()> {
-    let _ = d
-        .remove_container(&container_name(p), Some(RemoveContainerOptions { force: true, ..Default::default() }))
-        .await;
+    // A container that can't be removed (Docker unreachable…) keeps the project in DevHub:
+    // otherwise it would keep running, and holding its ports, with nothing to manage it.
+    match d.remove_container(&container_name(p), Some(RemoveContainerOptions { force: true, ..Default::default() })).await {
+        Ok(()) | Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {}
+        Err(e) => anyhow::bail!("conteneur impossible à supprimer : {e}"),
+    }
     let _ = d.remove_network(&network_name(p)).await;
     if !keep_data {
         let _ = d.remove_volume(&volume_name(p), None).await;

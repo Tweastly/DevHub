@@ -139,6 +139,10 @@ async fn main() -> anyhow::Result<()> {
     }
     updater::spawn_periodic(st.clone());
     spawn_stats_collector(st.clone());
+    tokio::spawn({
+        let d = st.docker.clone();
+        async move { docker::prune_template_tags(&d).await }
+    });
     if needs_setup {
         let t = random_token(24);
         println!("\n=== DevHub : aucun passkey. SETUP TOKEN : {t} ===\n=== Ouvre {origin}/login pour créer ton passkey ===\n");
