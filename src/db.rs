@@ -6,6 +6,17 @@ use std::collections::BTreeMap;
 pub struct PortMap {
     pub container: u16,
     pub host: u16,
+    /// Raw TCP published on all interfaces (game servers…) instead of HTTP behind the
+    /// subdomain proxy. Its host port is the one players connect to.
+    #[serde(default)]
+    pub tcp: bool,
+}
+
+impl PortMap {
+    /// "25565/tcp" for public TCP ports, "3000" for HTTP ones (the ports field syntax).
+    pub fn spec(&self) -> String {
+        if self.tcp { format!("{}/tcp", self.container) } else { self.container.to_string() }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -27,6 +38,23 @@ pub struct Project {
     pub pinned: bool,
     /// Last call on the project's own MCP URL.
     pub mcp_last_used: Option<i64>,
+}
+
+impl Project {
+    /// Ports served over HTTP(S) through the subdomain proxy.
+    pub fn http_ports(&self) -> impl Iterator<Item = &PortMap> {
+        self.ports.iter().filter(|m| !m.tcp)
+    }
+    pub fn tcp_ports(&self) -> impl Iterator<Item = &PortMap> {
+        self.ports.iter().filter(|m| m.tcp)
+    }
+    pub fn first_http(&self) -> Option<&PortMap> {
+        self.http_ports().next()
+    }
+    /// Images that run their own command (game servers) instead of DevHub's idle shell.
+    pub fn is_service(&self) -> bool {
+        self.template == "minecraft"
+    }
 }
 
 pub fn open(path: &str) -> anyhow::Result<Connection> {
@@ -134,6 +162,18 @@ pub fn delete_project(c: &Connection, name: &str) -> anyhow::Result<()> {
     c.execute("DELETE FROM projects WHERE name=?1", [name])?;
     c.execute("DELETE FROM domains WHERE project=?1", [name])?;
     Ok(())
+}
+
+/// Host port for a public TCP port: the container port itself if no project uses it,
+/// else the next free one above. `releasing` = this project's current ports, reusable.
+pub fn allocate_public_port(c: &Connection, wanted: u16, extra_used: &[u16], releasing: &[PortMap]) -> anyhow::Result<u16> {
+    let mut used: Vec<u16> = extra_used.to_vec();
+    for p in list_projects(c)? {
+        used.extend(p.ports.iter().map(|m| m.host).filter(|h| !releasing.iter().any(|r| r.host == *h)));
+    }
+    (wanted..=u16::MAX)
+        .find(|p| !used.contains(p))
+        .ok_or_else(|| anyhow::anyhow!("aucun port libre au-dessus de {wanted}"))
 }
 
 /// Lowest free host port in the range, ignoring ports already handed out.

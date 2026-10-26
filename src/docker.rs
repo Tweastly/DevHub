@@ -23,6 +23,7 @@ pub const TEMPLATES: &[(&str, &str, &str)] = &[
     ("python", "python:3.12-bookworm", "Python 3.12 (pip, git)"),
     ("go", "golang:1.23-bookworm", "Go 1.23 (git)"),
     ("base", "buildpack-deps:bookworm", "Debian + outils de build (git, curl)"),
+    ("minecraft", "itzg/minecraft-server", "Serveur Minecraft (Paper par défaut)"),
 ];
 
 pub fn image_for(template: &str) -> Option<&'static str> {
@@ -90,24 +91,40 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
     for m in &p.ports {
         let key = format!("{}/tcp", m.container);
         exposed.insert(key.clone(), HashMap::new());
-        bindings.insert(
-            key,
-            Some(vec![PortBinding { host_ip: Some(lim.bind_ip.clone()), host_port: Some(m.host.to_string()) }]),
-        );
+        // Public TCP ports (players) listen on every interface; HTTP ones stay behind the proxy.
+        let ip = if m.tcp { "0.0.0.0".to_string() } else { lim.bind_ip.clone() };
+        bindings.insert(key, Some(vec![PortBinding { host_ip: Some(ip), host_port: Some(m.host.to_string()) }]));
     }
-    let env: Vec<String> = p.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let mut env: Vec<String> = p.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    if p.template == "minecraft" && !p.env.contains_key("MEMORY") {
+        // Java heap at ~75 % of the container limit, the rest for the JVM itself.
+        env.push(format!("MEMORY={}M", memory_bytes(p, lim) / 1_048_576 * 3 / 4));
+    }
+    let mut mounts = vec![Mount {
+        target: Some("/workspace".into()),
+        source: Some(volume_name(&p.name)),
+        typ: Some(MountTypeEnum::VOLUME),
+        ..Default::default()
+    }];
+    if p.template == "minecraft" {
+        // The image keeps the world in /data: same volume, so the Files tab shows it.
+        mounts.push(Mount { target: Some("/data".into()), source: Some(volume_name(&p.name)), typ: Some(MountTypeEnum::VOLUME), ..Default::default() });
+    }
     let labels = HashMap::from([("devhub.project".to_string(), p.name.clone())]);
 
     let cfg = Config {
         image: Some(p.image.clone()),
         hostname: Some(p.name.clone()),
-        // Runs /workspace/start.sh in the background if the project has one, then idles.
-        cmd: Some(vec![
-            "sh".into(),
-            "-c".into(),
-            "[ -x /workspace/start.sh ] && (cd /workspace && ./start.sh > /tmp/start.log 2>&1 &); exec sleep infinity".into(),
-        ]),
-        working_dir: Some("/workspace".into()),
+        // Services keep the image's own command. Others run /workspace/start.sh in the
+        // background if the project has one, then idle.
+        cmd: (!p.is_service()).then(|| {
+            vec![
+                "sh".into(),
+                "-c".into(),
+                "[ -x /workspace/start.sh ] && (cd /workspace && ./start.sh > /tmp/start.log 2>&1 &); exec sleep infinity".into(),
+            ]
+        }),
+        working_dir: (!p.is_service()).then(|| "/workspace".into()),
         env: Some(env),
         labels: Some(labels),
         exposed_ports: Some(exposed),
@@ -121,12 +138,7 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
             security_opt: Some(vec!["no-new-privileges".into()]),
             cap_drop: Some(vec!["NET_RAW".into(), "SYS_ADMIN".into(), "SYS_PTRACE".into()]),
             restart_policy: Some(RestartPolicy { name: Some(RestartPolicyNameEnum::UNLESS_STOPPED), ..Default::default() }),
-            mounts: Some(vec![Mount {
-                target: Some("/workspace".into()),
-                source: Some(volume_name(&p.name)),
-                typ: Some(MountTypeEnum::VOLUME),
-                ..Default::default()
-            }]),
+            mounts: Some(mounts),
             ..Default::default()
         }),
         ..Default::default()

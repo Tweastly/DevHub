@@ -34,6 +34,14 @@ pub fn safe_next(st: &AppState, next: &str) -> Option<String> {
     (u.scheme() == scheme && (host == base || host.ends_with(&format!(".{base}")))).then(|| u.to_string())
 }
 
+/// What players type to join a public TCP port: the dashboard's domain already points
+/// at the VPS. Override with DEVHUB_PUBLIC_HOST (e.g. "mc.tweastly.com").
+/// Minecraft's default port is implied, so 25565 shows as just the host.
+pub fn tcp_address(st: &AppState, host_port: u16) -> String {
+    let host = std::env::var("DEVHUB_PUBLIC_HOST").ok().filter(|h| !h.is_empty()).unwrap_or_else(|| st.cfg.domain.clone());
+    if host_port == 25565 { host } else { format!("{host}:{host_port}") }
+}
+
 pub fn url_for(st: &AppState, p: &str, port: Option<u16>) -> String {
     let scheme = st.cfg.origin.split_once("://").map(|x| x.0).unwrap_or("https");
     match port {
@@ -52,13 +60,14 @@ pub fn resolve(st: &AppState, host: &str) -> Option<Target> {
     // "<name>-<port>" if <port> is one of the project's ports, else plain "<name>".
     if let Some((name, port)) = label.rsplit_once('-') {
         if let (Ok(port), Ok(Some(p))) = (port.parse::<u16>(), db::get_project(&c, name)) {
-            if let Some(m) = p.ports.iter().find(|m| m.container == port).cloned() {
+            let found = p.http_ports().find(|m| m.container == port).cloned();
+            if let Some(m) = found {
                 return Some(Target { project: p, container_port: m.container, host_port: m.host });
             }
         }
     }
     let p = db::get_project(&c, label).ok()??;
-    let m = p.ports.first()?.clone();
+    let m = p.first_http()?.clone();
     Some(Target { project: p, container_port: m.container, host_port: m.host })
 }
 
@@ -67,7 +76,7 @@ pub fn resolve_custom(st: &AppState, host: &str) -> Option<Target> {
     let c = st.db.lock().unwrap();
     let (project, port) = db::domain(&c, &host.to_ascii_lowercase())?;
     let p = db::get_project(&c, &project).ok()??;
-    let m = p.ports.iter().find(|m| m.container == port)?.clone();
+    let m = p.http_ports().find(|m| m.container == port)?.clone();
     Some(Target { project: p, container_port: m.container, host_port: m.host })
 }
 

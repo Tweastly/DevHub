@@ -170,7 +170,9 @@
         const n = $('[data-recap=count]', np); if (n) n.textContent = np.name.value.length + '/32';
         const custom = tile && tile.value === 'custom';
         np.image.disabled = !custom;
-        if (np.ports && tile && tile.value === 'site' && !np.ports.value) np.ports.placeholder = '8000';
+        if (np.ports) np.ports.placeholder = tile && tile.value === 'site' ? '8000' : tile && tile.value === 'minecraft' ? '25565/tcp' : '3000, 5173';
+        const mc = tile && tile.value === 'minecraft';
+        $$('[data-show-for]', np).forEach(e => { e.hidden = (e.dataset.showFor === 'minecraft') !== mc; });
       };
       np.addEventListener('input', upd);
       upd();

@@ -41,10 +41,10 @@ pub async fn load(ctx: &Ctx, name: &str) -> Result<P, Response> {
 /// Every public address of the project: automatic subdomains, then custom ones.
 pub fn addresses(ctx: &Ctx, x: &P) -> Vec<(String, u16)> {
     let mut v = Vec::new();
-    if let Some(first) = x.p.ports.first() {
+    if let Some(first) = x.p.first_http() {
         v.push((proxy::url_for(&ctx.st, &x.p.name, None), first.container));
     }
-    for m in &x.p.ports {
+    for m in x.p.http_ports() {
         v.push((proxy::url_for(&ctx.st, &x.p.name, Some(m.container)), m.container));
     }
     let scheme = if ctx.st.cfg.origin.starts_with("https") { "https" } else { "http" };
@@ -55,7 +55,7 @@ pub fn addresses(ctx: &Ctx, x: &P) -> Vec<(String, u16)> {
 }
 
 fn main_url(ctx: &Ctx, x: &P) -> Option<String> {
-    x.p.ports.first().map(|_| proxy::url_for(&ctx.st, &x.p.name, None))
+    x.p.first_http().map(|_| proxy::url_for(&ctx.st, &x.p.name, None))
 }
 
 pub fn back_field(v: &str) -> Markup {
@@ -75,7 +75,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
     };
     let running = x.s.state == "running";
     let on = |t: Tab| if t == tab { "on" } else { "" };
-    let n_addr = addresses(ctx, x).len();
+    let n_addr = addresses(ctx, x).len() + x.p.tcp_ports().count();
     let title_crumb = match tab {
         Tab::Overview => None,
         Tab::Network => Some("Réseau"),
@@ -90,7 +90,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                 div.row {
                     h1 { (n) }
                     (state_pill(n, &x.s.state))
-                    @if tab == Tab::Overview || tab == Tab::Network {
+                    @if (tab == Tab::Overview || tab == Tab::Network) && x.p.first_http().is_some() {
                         @if x.p.public { span.pill.public { "public" } } @else { span.pill.private { (icon_c("lock", "sm")) "privé" } }
                     }
                     form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
@@ -163,10 +163,12 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let checks = futures_util::future::join_all(x.p.ports.iter().map(|m| docker::port_open(self_c, n, m.container, m.host))).await;
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 30).await };
     let mcp_url = format!("{}/mcp/{}", st.cfg.origin, x.p.mcp_token);
+    let minecraft = if x.p.template == "minecraft" { Some(minecraft_card(&st, &x, &q).await) } else { None };
     let base = format!("/projects/{n}");
 
     let body = html! {
-        (flash(&q))
+        @if minecraft.is_none() { (flash(&q)) }
+        @if let Some(m) = minecraft { (m) }
         div.grid3 style="margin-bottom:20px" {
             div.card.kpi {
                 div.kpi-h { "CPU" span.end { "limite " (cpu_lim) " cœur" @if cpu_lim > 1.0 { "s" } } }
@@ -219,7 +221,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     div.card-b {
                         @let addrs = addresses(&ctx, &x);
                         @if addrs.is_empty() { p.muted { "Aucun port exposé. Ajoute-en un dans " a.link href={(base) "/network"} { "Réseau" } "." } }
-                        @for (u, _) in addrs.iter().skip(if x.p.ports.len() == 1 { 1 } else { 0 }) {
+                        @for (u, _) in addrs.iter().skip(if x.p.http_ports().count() == 1 { 1 } else { 0 }) {
                             div.addr { a href=(u) target="_blank" { (u) } button.icon-btn.bare type="button" data-copy=(u) title="Copier" { (icon("copy")) } }
                         }
                         @if !addrs.is_empty() {
@@ -277,11 +279,15 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
         Some(a) => dns_status(a).await,
         None => None,
     };
-    let ports_text = x.p.ports.iter().map(|m| m.container.to_string()).collect::<Vec<_>>().join(", ");
+    let ports_text = x.p.ports.iter().map(|m| m.spec()).collect::<Vec<_>>().join(", ");
+    let first_http = x.p.first_http().map(|m| m.container);
     let err = q.get("err");
     let body = html! {
         @if let Some(m) = q.get("ok") { div.flash { (alert("ok", html! { (m) })) } }
         div.stack {
+            @if x.p.first_http().is_none() && x.p.tcp_ports().next().is_some() {
+                (alert("info", html! { "Ce projet n'a pas de site web : le réglage privé/public ne concerne que les adresses HTTPS. Ses ports TCP publics sont ouverts à tous, c'est le jeu qui gère ses accès (whitelist, mot de passe…)." }))
+            } @else {
             div.card {
                 div.card-h { h3 { "Qui peut voir ce projet ?" } span.sub { "le réglage le plus important de cette page" } }
                 div.card-b {
@@ -311,6 +317,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                     }
                 }
             }
+            }
             div.card {
                 div.card-h { h3 { "Ports & adresses automatiques" } span.sub { "HTTPS automatique sur *." (proxy::base_host(&st)) } }
                 @if x.p.ports.is_empty() { div.card-b.muted { "Aucun port exposé pour l'instant." } }
@@ -318,12 +325,26 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                     table.tbl.cards {
                         thead { tr { th { "Port conteneur" } th { "Adresses" } th.num { "Port hôte" } } }
                         tbody {
-                            @for (i, m) in x.p.ports.iter().enumerate() {
+                            @for m in &x.p.ports {
                                 tr {
-                                    td { span.chip { (m.container) } @if i == 0 { span.dim style="margin-left:8px;font-size:12px" { "principal" } } }
-                                    td.mono style="font-size:12px;line-height:1.9" {
-                                        @if i == 0 { a.link href=(proxy::url_for(&st, n, None)) target="_blank" { (proxy::url_for(&st, n, None)) } br; }
-                                        a.link href=(proxy::url_for(&st, n, Some(m.container))) target="_blank" { (proxy::url_for(&st, n, Some(m.container))) }
+                                    td {
+                                        span.chip { (m.container) @if m.tcp { " TCP" } }
+                                        @if Some(m.container) == first_http && !m.tcp { span.dim style="margin-left:8px;font-size:12px" { "principal" } }
+                                    }
+                                    @if m.tcp {
+                                        td {
+                                            div.row.tight {
+                                                span.pill.warn.plain { "TCP public" }
+                                                code style="font-size:12.5px" { (proxy::tcp_address(&st, m.host)) }
+                                                button.icon-btn.bare type="button" data-copy=(proxy::tcp_address(&st, m.host)) title="Copier" { (icon_c("copy", "sm")) }
+                                            }
+                                            div.help style="margin-top:4px" { "Ouvert sur Internet, sans HTTPS ni passkey : le jeu gère ses propres accès." }
+                                        }
+                                    } @else {
+                                        td.mono style="font-size:12px;line-height:1.9" {
+                                            @if Some(m.container) == first_http { a.link href=(proxy::url_for(&st, n, None)) target="_blank" { (proxy::url_for(&st, n, None)) } br; }
+                                            a.link href=(proxy::url_for(&st, n, Some(m.container))) target="_blank" { (proxy::url_for(&st, n, Some(m.container))) }
+                                        }
                                     }
                                     td.num.mono.dim.hide-m { (m.host) }
                                 }
@@ -334,7 +355,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                 div.card-f {
                     form.row method="post" action={(base) "/ports"} style="flex-wrap:nowrap" onsubmit="return confirm('Changer les ports recrée le conteneur. Continuer ?')" {
                         (back_field(&here))
-                        label.field style="flex:1" { span.lbl { "Ports conteneur " span.dim { "(séparés par des virgules)" } } input.mono-input name="ports" value=(ports_text) placeholder="3000, 5173"; }
+                        label.field style="flex:1" { span.lbl { "Ports conteneur " span.dim { "(séparés par des virgules)" } } input.mono-input name="ports" value=(ports_text) placeholder="3000, 5173"; p.help { code { "3000" } " = site web (sous-domaine HTTPS) · " code { "25565/tcp" } " = port TCP public, pour un serveur de jeu" } }
                         button.btn style="align-self:flex-end" { (icon("wrench")) "Appliquer (rebuild)" }
                     }
                 }
@@ -365,7 +386,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             }
                         }
                     }
-                    @if x.p.ports.is_empty() { p.muted { "Ajoute d'abord un port au projet." } }
+                    @if first_http.is_none() { p.muted { "Ajoute d'abord un port web (HTTP) au projet. Les ports TCP publics n'ont pas de sous-domaine." } }
                     @else {
                         form method="post" action={(base) "/domain-add"} {
                             (back_field(&here))
@@ -379,7 +400,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                                 } @else {
                                     input.mono-input name="host" placeholder="app.example.com" required style="flex:1;max-width:460px" value=[q.get("host")];
                                 }
-                                select.sel name="port" style="width:auto" aria-label="Port" { @for m in &x.p.ports { option value=(m.container) { "port " (m.container) } } }
+                                select.sel name="port" style="width:auto" aria-label="Port" { @for m in x.p.http_ports() { option value=(m.container) { "port " (m.container) } } }
                                 button.btn.primary { (icon("plus")) "Ajouter" }
                             }
                             @if let Some(e) = err { p.err-text { (icon_c("error", "sm")) (e) } }
@@ -599,4 +620,125 @@ pub async fn logs_download(State(st): State<AppState>, jar: CookieJar, Path(name
         logs,
     )
         .into_response())
+}
+
+// ---------- Minecraft ----------
+
+/// `mc-monitor status` (bundled with itzg/minecraft-server):
+/// "localhost:25565 : version=1.21.4 online=2 max=20 motd='…'".
+struct McStatus {
+    version: String,
+    online: String,
+    max: String,
+    motd: String,
+}
+
+async fn mc_status(st: &AppState, name: &str) -> Option<McStatus> {
+    let r = docker::exec(&st.docker, name, "mc-monitor status --host 127.0.0.1 --port 25565 2>&1", Some("/"), std::time::Duration::from_secs(4)).await.ok()?;
+    if r.exit_code != 0 || !r.output.contains("online=") {
+        return None;
+    }
+    // Values can contain spaces ("version=Paper 26.3"): read up to the next " key=".
+    let field = |k: &str| {
+        let rest = r.output.split(&format!("{k}=")).nth(1).unwrap_or("?");
+        let end = ["version=", "online=", "max=", "motd="].iter().filter_map(|n| rest.find(&format!(" {n}"))).min().unwrap_or(rest.len());
+        rest[..end].trim().trim_matches('\'').to_string()
+    };
+    let motd = r.output.split("motd=").nth(1).map(|m| m.trim().trim_matches('\'').to_string()).unwrap_or_default();
+    Some(McStatus { version: field("version"), online: field("online"), max: field("max"), motd })
+}
+
+async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Markup {
+    let n = &x.p.name;
+    let base = format!("/projects/{n}");
+    let running = x.s.state == "running";
+    let status = if running { mc_status(st, n).await } else { None };
+    let addr = x.p.tcp_ports().next().map(|m| proxy::tcp_address(st, m.host));
+    let env = |k: &str| x.p.env.get(k).cloned().unwrap_or_else(|| "?".into());
+    html! {
+        div.card.glow style="margin-bottom:20px" {
+            div.card-h {
+                span.hero-ic style="width:32px;height:32px;border-radius:9px" { (icon_c("cube", "sm")) }
+                h3 { "Serveur Minecraft" }
+                span.sub { (env("TYPE").to_lowercase()) " · " (env("VERSION").to_lowercase()) }
+                div.end {
+                    @if let Some(s) = &status { span.pill.running { (s.online) " / " (s.max) " joueurs" } }
+                    @else if running { span.pill.absent { "démarrage…" } }
+                    @else { span.pill.exited { "arrêté" } }
+                }
+            }
+            div.card-b {
+                div.grid2 {
+                    div {
+                        span.lbl style="display:block;font-weight:650;font-size:13px;margin-bottom:7px" { "Adresse à partager" }
+                        @if let Some(a) = &addr { div.copy { code style="font-size:14px;font-weight:600" { (a) } (copy_btn(a)) } }
+                        @else { p.muted { "Aucun port TCP public : ajoute " code { "25565/tcp" } " dans Réseau." } }
+                        p.help {
+                            "Dans Minecraft : Multijoueur → Ajouter un serveur. "
+                            @if let Some(s) = &status { "Version " b { (s.version) } @if !s.motd.is_empty() { " · « " (s.motd) " »" } "." }
+                            @else if running { "Le serveur démarre (le premier lancement télécharge le jeu, 1 à 3 min) : suis-le dans Terminal & logs." }
+                        }
+                    }
+                    div {
+                        span.lbl style="display:block;font-weight:650;font-size:13px;margin-bottom:7px" { "Console" }
+                        form method="post" action={(base) "/mc-command"} {
+                            (back_field(&base))
+                            div.ig {
+                                span.pre { "/" }
+                                input.mono-input name="cmd" required placeholder="whitelist add Pseudo" autocomplete="off" disabled[!running];
+                            }
+                            div.row.tight style="margin-top:8px" {
+                                @for c in ["list", "save-all", "whitelist list", "op Pseudo"] {
+                                    button.btn.sm.ghost type="button" disabled[!running] onclick={"this.form.cmd.value='" (c) "';this.form.cmd.focus()"} { (c) }
+                                }
+                                span.spacer {}
+                                button.btn.sm.primary disabled[!running] { "Envoyer" }
+                            }
+                        }
+                        @if let Some(out) = q.get("mc") { pre.logs.short data-ready="1" style="margin-top:12px;border-radius:10px;max-height:160px" { (out) } }
+                        @if let Some(e) = q.get("err") { p.err-text { (icon_c("error", "sm")) (e) } }
+                    }
+                }
+                p.help.row style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)" {
+                    (icon_c("info", "sm"))
+                    "Réglages du jeu (type Paper/Vanilla/Fabric, version, MOTD, difficulté, whitelist…) dans "
+                    a.link href={(base) "/settings#env"} { "Paramètres → Variables" }
+                    ". Le port TCP doit être autorisé dans le pare-feu du VPS (" code { "ufw allow 25565/tcp" } ")."
+                }
+            }
+        }
+    }
+}
+
+/// Sends one console command through RCON and returns its output, ANSI codes removed.
+pub async fn mc_command(st: &AppState, name: &str, cmd: &str) -> Result<String, String> {
+    let cmd = cmd.trim().trim_start_matches('/');
+    if cmd.is_empty() || cmd.len() > 300 || cmd.contains(['\n', '\r']) {
+        return Err("commande invalide".into());
+    }
+    let quoted = format!("'{}'", cmd.replace('\'', "'\\''"));
+    let r = docker::exec(&st.docker, name, &format!("rcon-cli {quoted}"), Some("/"), std::time::Duration::from_secs(10))
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let mut out = String::new();
+    let mut chars = r.output.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip "ESC [ … letter".
+            for d in chars.by_ref() {
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else if c == '§' {
+            chars.next(); // Minecraft colour code
+        } else {
+            out.push(c);
+        }
+    }
+    let out = out.trim().to_string();
+    if r.exit_code != 0 {
+        return Err(if out.is_empty() { "le serveur ne répond pas encore (RCON)".into() } else { out });
+    }
+    Ok(if out.is_empty() { "(commande exécutée, pas de réponse)".into() } else { out })
 }

@@ -329,6 +329,16 @@ async fn project_action(
     let back = back_to(&form, &name);
     let field = |k: &str| form.get(k).map(String::as_str).unwrap_or("");
     let fail = |e: String| Redirect::to(&with_param(&back, "err", &e));
+    if action == "mc-command" {
+        // Minecraft console: not a project change, just a command run in the container.
+        ops::load(&st, &name).map_err(|e| fail(e).into_response())?;
+        let cmd = field("cmd");
+        db::audit(&st.db.lock().unwrap(), "owner", &format!("{name}:minecraft"), cmd);
+        return Ok(match web::project::mc_command(&st, &name, cmd).await {
+            Ok(out) => Redirect::to(&with_param(&back, "mc", &format!("> {cmd}\n{out}"))),
+            Err(e) => fail(e),
+        });
+    }
     let change = match action.as_str() {
         "start" => ops::Change::Start,
         "stop" => ops::Change::Stop,

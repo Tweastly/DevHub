@@ -11,7 +11,7 @@ pub struct NewProject {
     pub template: String,
     pub image: Option<String>,
     pub git_url: Option<String>,
-    pub ports: Vec<u16>,
+    pub ports: Vec<PortSpec>,
 }
 
 pub enum Change {
@@ -21,7 +21,7 @@ pub enum Change {
     Rebuild,
     RotateToken,
     SetPublic(bool),
-    Ports(Vec<u16>),
+    Ports(Vec<PortSpec>),
     Env(BTreeMap<String, String>),
     Delete { keep_data: bool },
     /// `port: None` = the project's first port.
@@ -58,11 +58,32 @@ fn internal(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
-pub fn parse_ports(s: &str) -> R<Vec<u16>> {
-    s.split([',', ' '])
-        .filter(|x| !x.is_empty())
-        .map(|x| x.parse::<u16>().map_err(|_| format!("port invalide : {x}")))
-        .collect()
+/// A wanted container port: "3000" (HTTP via subdomains) or "25565/tcp" (public TCP).
+#[derive(Clone, Copy, PartialEq)]
+pub struct PortSpec {
+    pub container: u16,
+    pub tcp: bool,
+}
+
+pub fn parse_port(x: &str) -> R<PortSpec> {
+    let x = x.trim().to_ascii_lowercase();
+    let (num, tcp) = match x.split_once('/') {
+        Some((n, "tcp")) => (n, true),
+        Some(_) => return Err(format!("port invalide : {x} (seul /tcp est accepté)")),
+        None => (x.as_str(), false),
+    };
+    let container = num.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("port invalide : {x}"))?;
+    Ok(PortSpec { container, tcp })
+}
+
+pub fn parse_ports(s: &str) -> R<Vec<PortSpec>> {
+    let v: Vec<PortSpec> = s.split([',', ' ']).filter(|x| !x.is_empty()).map(parse_port).collect::<R<_>>()?;
+    for (i, a) in v.iter().enumerate() {
+        if v[..i].iter().any(|b| b.container == a.container) {
+            return Err(format!("le port {} est indiqué deux fois", a.container));
+        }
+    }
+    Ok(v)
 }
 
 pub fn parse_env(s: &str) -> BTreeMap<String, String> {
@@ -73,17 +94,26 @@ pub fn parse_env(s: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Keeps existing host ports for container ports already mapped, allocates the rest.
-fn map_ports(st: &AppState, existing: &[db::PortMap], wanted: &[u16]) -> anyhow::Result<Vec<db::PortMap>> {
+/// Keeps existing host ports for unchanged ports, allocates the rest. A public TCP port
+/// gets the same host port as inside the container when it's free (25565 → 25565),
+/// otherwise the next free one (a second Minecraft server lands on 25566).
+fn map_ports(st: &AppState, existing: &[db::PortMap], wanted: &[PortSpec]) -> anyhow::Result<Vec<db::PortMap>> {
     let c = st.db.lock().unwrap();
     let mut out: Vec<db::PortMap> = Vec::new();
-    for &cp in wanted {
-        if let Some(m) = existing.iter().find(|m| m.container == cp) {
+    for w in wanted {
+        if let Some(m) = existing.iter().find(|m| m.container == w.container && m.tcp == w.tcp) {
             out.push(m.clone());
-        } else {
-            let taken: Vec<u16> = out.iter().map(|m| m.host).collect();
-            out.push(db::PortMap { container: cp, host: db::allocate_port(&c, st.cfg.port_range, &taken)? });
+            continue;
         }
+        let mut taken: Vec<u16> = out.iter().map(|m| m.host).collect();
+        // Ports this project currently holds are about to be released: reuse is fine.
+        taken.retain(|h| !existing.iter().any(|m| m.host == *h && !wanted.iter().any(|w| w.container == m.container && w.tcp == m.tcp)));
+        let host = if w.tcp {
+            db::allocate_public_port(&c, w.container, &taken, existing)?
+        } else {
+            db::allocate_port(&c, st.cfg.port_range, &taken)?
+        };
+        out.push(db::PortMap { container: w.container, host, tcp: w.tcp });
     }
     Ok(out)
 }
@@ -117,7 +147,18 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
     }
     let mut wanted = np.ports;
     if np.template == "site" && wanted.is_empty() {
-        wanted.push(8000);
+        wanted.push(PortSpec { container: 8000, tcp: false });
+    }
+    if np.template == "minecraft" && wanted.is_empty() {
+        wanted.push(PortSpec { container: 25565, tcp: true });
+    }
+    let mut env = BTreeMap::new();
+    if np.template == "minecraft" {
+        // Sensible defaults, all editable in Paramètres → Variables.
+        for (k, v) in [("EULA", "TRUE"), ("TYPE", "PAPER"), ("VERSION", "LATEST"), ("DIFFICULTY", "normal"), ("MAX_PLAYERS", "20")] {
+            env.insert(k.to_string(), v.to_string());
+        }
+        env.insert("MOTD".into(), format!("{name} · hébergé avec DevHub"));
     }
     let ports = map_ports(st, &[], &wanted).map_err(internal)?;
     let p = db::Project {
@@ -126,7 +167,7 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         image,
         git_url,
         ports,
-        env: BTreeMap::new(),
+        env,
         mcp_token: random_token(32),
         created_at: db::now(),
         public: false,
@@ -170,7 +211,7 @@ const SITE_TEMPLATE: &str = include_str!("../templates/site.html");
 /// Writes the starter page (with the project name) and a start script, then launches it.
 async fn seed_site(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
     let d = &st.docker;
-    let port = p.ports.first().map(|m| m.container).unwrap_or(8000);
+    let port = p.first_http().map(|m| m.container).unwrap_or(8000);
     let name = maud::html! { (p.name) }.into_string(); // HTML-escaped
     docker::write_file(d, &p.name, "index.html", SITE_TEMPLATE.replace("{{PROJECT}}", &name).replace("{{PORT}}", &port.to_string()).as_bytes()).await?;
     let start = format!("#!/bin/sh\n# Lancé automatiquement au démarrage du conteneur.\nexec python3 -m http.server {port} --bind 0.0.0.0\n");
@@ -217,9 +258,12 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
                 return Err(format!("{host} est déjà géré automatiquement (sous-domaine de {base})"));
             }
             let port = match port {
-                Some(port) if p.ports.iter().any(|m| m.container == port) => port,
+                Some(port) if p.http_ports().any(|m| m.container == port) => port,
+                Some(port) if p.tcp_ports().any(|m| m.container == port) => {
+                    return Err(format!("le port {port} est un port TCP public (jeu) : un sous-domaine HTTPS ne peut pas pointer dessus"))
+                }
                 Some(port) => return Err(format!("le port {port} n'est pas exposé par {name} : ajoute-le d'abord dans ses ports")),
-                None => p.ports.first().map(|m| m.container).ok_or("ce projet n'expose aucun port")?,
+                None => p.first_http().map(|m| m.container).ok_or("ce projet n'expose aucun port web")?,
             };
             let c = st.db.lock().unwrap();
             if let Some((other, _)) = db::domain(&c, &host) {
@@ -249,9 +293,13 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             }
             p.memory_mb = memory_mb;
             p.cpus = cpus;
-            docker::update_limits(d, &p, &st.limits()).await.map_err(|e| {
-                format!("Docker refuse ces limites ({e:#}). La RAM utilisée dépasse peut-être la nouvelle limite : arrête le projet ou choisis plus haut.")
-            })?;
+            if p.template == "minecraft" && !p.env.contains_key("MEMORY") {
+                docker::create(d, &p, &st.limits()).await.map_err(internal)?;
+            } else {
+                docker::update_limits(d, &p, &st.limits()).await.map_err(|e| {
+                    format!("Docker refuse ces limites ({e:#}). La RAM utilisée dépasse peut-être la nouvelle limite : arrête le projet ou choisis plus haut.")
+                })?;
+            }
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
             let show = |v: Option<String>| v.unwrap_or_else(|| "défaut".into());
             detail = format!("{name} : RAM {} Mo, CPU {}", show(memory_mb.map(|m| m.to_string())), show(cpus.map(|c| c.to_string())));

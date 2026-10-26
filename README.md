@@ -20,6 +20,8 @@ Claude Desktop ──https://domaine/mcp/<jeton>──┘                      �
 - **Isolation** : chaque projet a son réseau, une limite RAM/CPU/PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker. Le code vit dans un volume (`/workspace`) qui survit aux rebuilds.
 - **Sous-domaines** : `projet.dev.tweastly.com` pointe vers le premier port du projet, `projet-5173.dev.tweastly.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
 - **Sous-domaines personnalisés** : sers un projet sur `<nom>.tweastly.com` (tape juste `new`) depuis sa page ou via Claude. Le domaine racine se déduit de `DEVHUB_DOMAIN` (`dev.tweastly.com` → `tweastly.com`), ou se force avec `DEVHUB_APPS_DOMAIN`. Le HTTPS est automatique. Les projets privés restent protégés par ton passkey, grâce à un passage de session à usage unique (le cookie du dashboard n'est jamais partagé).
+- **Serveurs Minecraft** : modèle « Minecraft » (image `itzg/minecraft-server`, Paper par défaut, EULA acceptée). Le port `25565` est publié en **TCP public** sur l'IP du VPS (un 2ᵉ serveur prend `25566`). La mémoire Java suit la limite RAM du projet (75 %). La page du projet donne l'adresse à partager, les joueurs en ligne et une console (commandes RCON). Le monde est dans `/data`, visible dans l'onglet Fichiers. Réglages via les variables (`TYPE`, `VERSION`, `MOTD`, `DIFFICULTY`, `WHITELIST`…).
+- **Ports TCP publics** : dans le champ des ports, `25565/tcp` publie un port brut sur Internet (jeux) au lieu d'un site web derrière un sous-domaine HTTPS. Pense à l'ouvrir dans le pare-feu (`ufw allow 25565/tcp`).
 - **Fichiers** : explorateur de `/workspace` avec éditeur de texte (Ctrl+S), envoi de fichiers (200 Mo max par envoi), création de fichiers et dossiers, renommage, suppression et téléchargement.
 - **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
 - **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
@@ -72,6 +74,7 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 | `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés (`<nom>.tweastly.com`) |
 | `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour la mise à jour (dépôt privé) |
 | `DEVHUB_REPO` | `/repo` | où le dépôt est monté dans le conteneur |
+| `DEVHUB_PUBLIC_HOST` | `DEVHUB_DOMAIN` | nom affiché pour rejoindre les ports TCP (ex. `mc.tweastly.com`) |
 
 ## Dev local
 

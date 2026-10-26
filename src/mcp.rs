@@ -158,22 +158,27 @@ pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value)
                 text(r.output, r.exit_code != 0)
             }
             "project_info" => {
+                let first_http = p.first_http().map(|m| m.container);
                 let ports: Vec<String> = p
                     .ports
                     .iter()
-                    .enumerate()
-                    .map(|(i, m)| {
-                        let main = if i == 0 { format!(" et {}", proxy::url_for(st, &p.name, None)) } else { String::new() };
-                        format!("{} -> {}{main}", m.container, proxy::url_for(st, &p.name, Some(m.container)))
+                    .map(|m| {
+                        if m.tcp {
+                            format!("{}/tcp -> TCP public, joueurs : {}", m.container, proxy::tcp_address(st, m.host))
+                        } else {
+                            let main = if Some(m.container) == first_http { format!(" et {}", proxy::url_for(st, &p.name, None)) } else { String::new() };
+                            format!("{} -> {}{main}", m.container, proxy::url_for(st, &p.name, Some(m.container)))
+                        }
                     })
                     .collect();
                 let env: Vec<&String> = p.env.keys().collect();
                 text(
                     format!(
-                        "projet: {}\nimage: {}\ngit: {}\naccès: {}\nports (conteneur -> URL publique):\n  {}\nenv: {:?}\nPense à écouter sur 0.0.0.0 dans le conteneur.",
+                        "projet: {}\nimage: {}\ngit: {}\naccès: {}\nports (conteneur -> URL publique):\n  {}\nenv: {:?}\nPense à écouter sur 0.0.0.0 dans le conteneur.{}",
                         p.name, p.image, p.git_url.clone().unwrap_or_default(),
                         if p.public { "public" } else { "privé (passkey requis)" },
-                        ports.join("\n  "), env
+                        ports.join("\n  "), env,
+                        if p.template == "minecraft" { "\nServeur Minecraft (image itzg/minecraft-server) : le monde est dans /data, la console via `rcon-cli <commande>`." } else { "" }
                     ),
                     false,
                 )
