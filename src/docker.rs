@@ -49,15 +49,72 @@ pub struct Limits {
 }
 
 pub async fn pull(docker: &Docker, image: &str) -> anyhow::Result<()> {
+    pull_with(docker, image, |_| {}).await
+}
+
+/// Without news from the registry for this long, a download is considered stuck.
+const PULL_STALL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Pulls `image`, reporting "7/12 couches · 312 Mo" style progress along the way.
+pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(String)) -> anyhow::Result<()> {
     let mut s = docker.create_image(
         Some(CreateImageOptions { from_image: image, ..Default::default() }),
         None,
         None,
     );
-    while let Some(r) = s.next().await {
-        r.with_context(|| format!("pull {image}"))?;
+    // Layer id → (bytes downloaded, layer size, downloaded, extracted).
+    let mut layers: HashMap<String, (i64, i64, bool, bool)> = HashMap::new();
+    loop {
+        let next = tokio::time::timeout(PULL_STALL, s.next())
+            .await
+            .map_err(|_| anyhow::anyhow!("téléchargement de {image} bloqué depuis 5 min (réseau ou registre)"))?;
+        let Some(r) = next else { break };
+        let info = r.map_err(|e| anyhow::anyhow!("téléchargement de {image} : {}", pull_error(&e.to_string())))?;
+        let (Some(id), Some(status)) = (info.id, info.status) else { continue };
+        if id == image || id.contains(':') {
+            continue; // image-level lines, not layers
+        }
+        let l = layers.entry(id).or_insert((0, 0, false, false));
+        let detail = info.progress_detail.unwrap_or_default();
+        match status.as_str() {
+            "Downloading" => {
+                l.0 = detail.current.unwrap_or(l.0);
+                l.1 = detail.total.unwrap_or(l.1).max(l.1);
+            }
+            "Download complete" | "Verifying Checksum" => l.2 = true,
+            "Extracting" => {
+                l.2 = true;
+                l.1 = detail.total.unwrap_or(l.1).max(l.1);
+            }
+            "Pull complete" | "Already exists" => (l.2, l.3) = (true, true),
+            _ => {}
+        }
+        let n = layers.len();
+        let got: i64 = layers.values().map(|l| if l.2 { l.1.max(l.0) } else { l.0 }).sum();
+        let total: i64 = layers.values().map(|l| l.1.max(l.0)).sum();
+        let mb = |b: i64| b / 1_048_576;
+        progress(if layers.values().all(|l| l.2) {
+            format!("décompression {}/{n} couches", layers.values().filter(|l| l.3).count())
+        } else {
+            format!("{}/{n} couches · {} / {} Mo", layers.values().filter(|l| l.2).count(), mb(got), mb(total))
+        });
     }
     Ok(())
+}
+
+/// Turns the registry's most common refusals into something actionable.
+fn pull_error(e: &str) -> String {
+    if e.contains("toomanyrequests") || e.contains("rate limit") {
+        "Docker Hub limite les téléchargements anonymes (trop de requêtes). Réessaie dans quelques heures, ou connecte le serveur à un compte Docker Hub (docker login).".into()
+    } else if e.contains("no such host") || e.contains("lookup ") {
+        format!("le serveur n'arrive pas à résoudre le registre (DNS). {e}")
+    } else if e.contains("no space left") {
+        "disque plein sur le serveur.".into()
+    } else if e.contains("not found") || e.contains("manifest unknown") || e.contains("denied") {
+        format!("image introuvable ou privée. {e}")
+    } else {
+        e.to_string()
+    }
 }
 
 /// (Re)creates the project container. The /workspace volume survives recreation.

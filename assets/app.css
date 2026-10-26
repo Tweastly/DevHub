@@ -630,3 +630,26 @@ textarea { font-family: var(--mono); font-size: 13px; line-height: 1.7; min-heig
 .term > .logs:last-child { border-radius: 0 0 calc(var(--r) - 1px) calc(var(--r) - 1px); }
 .kpi-v.txt { font: 600 22px/1.2 var(--sans); letter-spacing: -.01em; }
 @media (max-width: 900px) { .tabs { flex-wrap: nowrap; margin: 0 -16px; padding: 0 16px; } }
+/* Build without container: failed (red dot) or interrupted (empty ring). */
+.pill.failed::before, .dot.failed { background: var(--err); }
+.pill.missing { color: var(--text-2); }
+.pill.missing::before { background: transparent; border: 1.5px solid var(--faint); }
+.dot.missing { background: transparent; border: 1.5px solid var(--faint); }
+.note.build-err { color: var(--text-body); overflow-wrap: anywhere; }
+.note.build-err b { color: var(--err); font-weight: 600; }
+.build-line { display: block; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--text-2); }
+.build-line.err { color: var(--err); }
+/* Projects table: keep the action buttons on one line without overflowing the card. */
+.tbl th, .tbl td { padding-left: 16px; padding-right: 16px; }
+.tbl .cell-p .mono { max-width: 190px; }
+.tbl .mem { min-width: 120px; max-width: 190px; }
+.tbl .build-line { max-width: 190px; }
+@media (max-width: 1360px) { .tbl td .row.end { flex-wrap: wrap; } }
+/* Medium screens: drop the CPU and access columns of the projects table rather than overflow. */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .ptbl th:nth-child(3), .ptbl td:nth-child(3), .ptbl th:nth-child(5), .ptbl td:nth-child(5) { display: none; }
+}
+@media (min-width: 901px) and (max-width: 1060px) {
+  .app { grid-template-columns: 208px minmax(0, 1fr); }
+  .ptbl th:nth-child(4), .ptbl td:nth-child(4) { display: none; }
+}

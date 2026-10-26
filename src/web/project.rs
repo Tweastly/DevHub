@@ -88,7 +88,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
             a.back href="/projects" { "← Tous les projets" }
             div.phead {
                 h1 { (n) }
-                (state_pill(n, &x.s.state))
+                (state_pill(ctx, n, &x.s.state))
                 @if (tab == Tab::Overview || tab == Tab::Network) && x.p.first_http().is_some() {
                     @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
                 }
@@ -105,6 +105,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                     } @else if x.s.state != "absent" {
                         form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { "Démarrer" } }
                     }
+                    @if x.s.state == "absent" { (build_button(ctx, n, &here, "")) }
                     @if x.s.state != "absent" {
                         form.inline method="post" action={(base) "/rebuild"} onsubmit="return confirm('Recréer le conteneur ? /workspace est conservé.')" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { "Recréer" } }
                     }
@@ -168,6 +169,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
 
     let body = html! {
         @if minecraft.is_none() { (flash(&q)) }
+        @if x.s.state == "absent" { div.card.card-b style="margin-bottom:24px" { (build_note(&ctx, n)) } }
         @if let Some(m) = minecraft { (m) }
         div.grid3 style="margin-bottom:20px" {
             div.card.kpi {
@@ -186,7 +188,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 div.kpi-h { "Disponibilité" }
                 div.kpi-v {
                     @if running { @if let Some(t) = x.d.started_at { (crate::timefmt::duration(db::now() - t)) } @else { "—" } }
-                    @else { small { (state_label(&x.s.state)) } }
+                    @else { small { (state_label(&crate::ops::shown_state(&ctx.st, n, &x.s.state))) } }
                 }
                 div.row.tight style="margin-top:10px" {
                     @for (m, ok) in x.p.ports.iter().zip(&checks) {

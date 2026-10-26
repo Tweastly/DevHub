@@ -54,6 +54,8 @@ pub struct AppState {
     pub handoffs: Arc<Mutex<HashMap<String, (String, i64)>>>,
     /// The VPS itself (CPU, RAM, disk), refreshed by the collector.
     pub host: Arc<Mutex<host::Host>>,
+    /// Background builds (image download + container creation) in progress or failed, by project.
+    pub builds: Arc<Mutex<HashMap<String, ops::Build>>>,
     pub data_dir: Arc<String>,
 }
 
@@ -127,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
         stats: Default::default(),
         handoffs: Default::default(),
         host: Default::default(),
+        builds: Default::default(),
         data_dir: Arc::new(data_dir.clone()),
     };
     if let Some(me) = &st.cfg.self_container {

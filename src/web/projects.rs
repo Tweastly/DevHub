@@ -47,7 +47,7 @@ pub fn sort_by_activity(ctx: &Ctx, rows: &mut [Row]) {
     rows.sort_by_key(|r| std::cmp::Reverse(act.get(&r.p.name).copied().unwrap_or(r.p.created_at)));
 }
 
-fn mem_cell(r: &Row) -> Markup {
+fn mem_cell(ctx: &Ctx, r: &Row) -> Markup {
     let n = &r.p.name;
     let used = mb(r.s.mem_used);
     let max = mb(r.s.mem_limit);
@@ -57,7 +57,7 @@ fn mem_cell(r: &Row) -> Markup {
                 span.mono { span data-live={(n) ":mem"} { (used) } " / " span data-live={(n) ":memmax"} { (max) } " Mo" }
                 (bar(pct(used as f64, max as f64), Some(format!("{n}:membar")), ""))
             } @else if r.s.state == "absent" {
-                span.mono.dim { "image en cours de téléchargement…" }
+                (build_line(ctx, n))
             } @else {
                 span.mono.dim { "— / " (max) " Mo" }
                 div.bar {}
@@ -80,7 +80,7 @@ fn access_cell(ctx: &Ctx, r: &Row) -> Markup {
     }
 }
 
-fn row_actions(r: &Row, back: &str) -> Markup {
+fn row_actions(ctx: &Ctx, r: &Row, back: &str) -> Markup {
     let base = format!("/projects/{}", r.p.name);
     html! {
         @if r.s.state == "running" {
@@ -89,7 +89,7 @@ fn row_actions(r: &Row, back: &str) -> Markup {
                 form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value=(back); button.btn.sm { "Redémarrer" } }
             }
         } @else if r.s.state == "absent" {
-            div.row.end { button.btn.sm.disabled disabled { "Démarrer" } }
+            div.row.end { (build_button(ctx, &r.p.name, back, "sm")) }
         } @else {
             div.row.end { form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value=(back); button.btn.sm.primary { "Démarrer" } } }
         }
@@ -98,17 +98,17 @@ fn row_actions(r: &Row, back: &str) -> Markup {
 
 pub fn table(ctx: &Ctx, rows: &[Row], back: &str) -> Markup {
     html! {
-        table.tbl.cards {
+        table.tbl.cards.ptbl {
             thead { tr { th { "Projet" } th { "État" } th.num { "CPU" } th { "Mémoire" } th { "Accès" } th.num { "Actions" } } }
             tbody {
                 @for r in rows {
                     tr {
                         td { a.cell-p href={"/projects/" (r.p.name)} { (avatar(&r.p.name, "")) span { b { (r.p.name) } span.mono { (r.p.image) } } } }
-                        td { (state_pill(&r.p.name, &r.s.state)) }
+                        td { (state_pill(ctx, &r.p.name, &r.s.state)) }
                         td.num.mono { span data-live={(r.p.name) ":cpu"} { @if r.s.state == "running" { (format!("{:.1} %", r.s.cpu_pct)) } @else { "—" } } }
-                        td.hide-m { (mem_cell(r)) }
+                        td.hide-m { (mem_cell(ctx, r)) }
                         td.hide-m { (access_cell(ctx, r)) }
-                        td { (row_actions(r, back)) }
+                        td { (row_actions(ctx, r, back)) }
                     }
                 }
             }
@@ -139,10 +139,10 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
                             } @else { (p.image) }
                         }
                     }
-                    (state_pill(n, &r.s.state))
+                    (state_pill(ctx, n, &r.s.state))
                 }
                 @if r.s.state == "absent" {
-                    p.note { "Téléchargement de l'image et création du conteneur…" }
+                    (build_note(ctx, n))
                 } @else {
                     div.metrics {
                         div.metric {
@@ -185,8 +185,8 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
                     form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Redémarrer" } }
                     a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
                 } @else if r.s.state == "absent" {
-                    button.btn.disabled disabled { "Démarrer" }
-                    a.btn href={"/audit?project=" (n)} { "Pourquoi ?" }
+                    (build_button(ctx, n, "/projects", ""))
+                    a.btn href={"/audit?project=" (n)} { "Journal" }
                 } @else {
                     form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Démarrer" } }
                     a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }

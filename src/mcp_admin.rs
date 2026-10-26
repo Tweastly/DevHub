@@ -142,7 +142,7 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         .map(|m| json!({ "container": m.container, "url": proxy::url_for(st, &p.name, Some(m.container)) }))
         .collect();
     let mut v = json!({
-        "name": p.name, "state": s.state, "template": p.template, "image": p.image, "git_url": p.git_url,
+        "name": p.name, "state": crate::ops::shown_state(st, &p.name, &s.state), "build": crate::ops::build_text(st, &p.name), "template": p.template, "image": p.image, "git_url": p.git_url,
         "public": p.public, "ports": ports,
         "url": p.ports.first().map(|_| proxy::url_for(st, &p.name, None)),
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,

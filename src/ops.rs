@@ -5,6 +5,57 @@ use crate::{db, docker, random_token, AppState};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+/// A background build: the step it is at, or why it failed.
+#[derive(Clone)]
+pub struct Build {
+    pub step: String,
+    pub error: Option<String>,
+}
+
+fn set_step(st: &AppState, name: &str, step: String) {
+    st.builds.lock().unwrap().insert(name.to_string(), Build { step, error: None });
+}
+
+/// Builds the project's container in the background (pulling an image can take minutes),
+/// keeping `st.builds` up to date so the panel can show progress, then the error or nothing.
+pub fn spawn_build(st: &AppState, p: db::Project) {
+    set_step(st, &p.name, "Préparation".into());
+    let st = st.clone();
+    tokio::spawn(async move {
+        let res = build(&st, &p).await;
+        let c = st.db.lock().unwrap();
+        match res {
+            Ok(()) => {
+                st.builds.lock().unwrap().remove(&p.name);
+                db::audit(&c, "system", "project.ready", &p.name);
+            }
+            Err(e) => {
+                let msg = format!("{e:#}");
+                st.builds.lock().unwrap().insert(p.name.clone(), Build { step: String::new(), error: Some(msg.clone()) });
+                db::audit(&c, "system", "project.error", &format!("{}: {msg}", p.name));
+            }
+        }
+    });
+}
+
+/// What to show for a project without a container: "absent" while it builds,
+/// "failed" when the build failed, "missing" when nothing is going on (e.g. DevHub restarted mid-build).
+pub fn shown_state(st: &AppState, name: &str, state: &str) -> String {
+    if state != "absent" {
+        return state.to_string();
+    }
+    match st.builds.lock().unwrap().get(name) {
+        Some(b) if b.error.is_some() => "failed".into(),
+        Some(_) => "absent".into(),
+        None => "missing".into(),
+    }
+}
+
+/// Current build step or error text for a project, if any.
+pub fn build_text(st: &AppState, name: &str) -> Option<String> {
+    st.builds.lock().unwrap().get(name).map(|b| b.error.clone().unwrap_or_else(|| b.step.clone()))
+}
+
 pub struct NewProject {
     pub name: String,
     /// A key of `docker::TEMPLATES`, or "custom" together with `image`.
@@ -181,21 +232,21 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         db::save_project(&c, &p).map_err(internal)?;
         db::audit(&c, actor, "project.create", &format!("{} ({})", p.name, p.image));
     }
-    let st2 = st.clone();
-    let p2 = p.clone();
-    tokio::spawn(async move {
-        let res = build(&st2, &p2).await;
-        let c = st2.db.lock().unwrap();
-        match res {
-            Ok(()) => db::audit(&c, "system", "project.ready", &p2.name),
-            Err(e) => db::audit(&c, "system", "project.error", &format!("{}: {e:#}", p2.name)),
-        }
-    });
+    spawn_build(st, p.clone());
     Ok(p)
 }
 
 async fn build(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
+    if st.docker.inspect_image(&p.image).await.is_err() {
+        set_step(st, &p.name, format!("Téléchargement de {}", p.image));
+        let (st2, name, image) = (st.clone(), p.name.clone(), p.image.clone());
+        docker::pull_with(&st.docker, &p.image, move |prog| set_step(&st2, &name, format!("Téléchargement de {image} · {prog}"))).await?;
+    }
+    set_step(st, &p.name, "Création du conteneur".into());
     docker::create(&st.docker, p, &st.limits()).await?;
+    if p.git_url.is_some() {
+        set_step(st, &p.name, "Clonage du dépôt Git".into());
+    }
     if let Some(url) = &p.git_url {
         let cmd = format!("if [ -z \"$(ls -A /workspace)\" ]; then git clone '{}' /workspace; fi", url.replace('\'', ""));
         let r = docker::exec(&st.docker, &p.name, &cmd, Some("/"), Duration::from_secs(600)).await?;
@@ -230,6 +281,13 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
         Change::Start => docker::start(d, name).await.map_err(internal)?,
         Change::Stop => docker::stop(d, name).await.map_err(internal)?,
         Change::Restart => docker::restart(d, name).await.map_err(internal)?,
+        Change::Rebuild if docker::state(d, name).await == "absent" => {
+            if st.builds.lock().unwrap().get(name).is_some_and(|b| b.error.is_none()) {
+                return Err("construction déjà en cours".into());
+            }
+            spawn_build(st, p.clone());
+            detail = format!("{name} (nouvelle tentative)");
+        }
         Change::Rebuild => docker::create(d, &p, &st.limits()).await.map_err(internal)?,
         Change::RotateToken => {
             p.mcp_token = random_token(32);

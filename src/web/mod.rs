@@ -219,13 +219,58 @@ pub fn state_label(state: &str) -> &str {
         "paused" => "En pause",
         "dead" => "En échec",
         "absent" => "Construction",
+        "failed" => "Échec",
+        "missing" => "Pas de conteneur",
         s => s,
     }
 }
 
-/// State pill wired to the live stream.
-pub fn state_pill(project: &str, state: &str) -> Markup {
-    html! { span class={"pill " (state)} data-live={(project) ":state"} { (state_label(state)) } }
+/// State pill wired to the live stream. A project without container shows whether it is
+/// building, failed or idle (see ops::shown_state).
+pub fn state_pill(ctx: &Ctx, project: &str, state: &str) -> Markup {
+    let state = crate::ops::shown_state(&ctx.st, project, state);
+    html! { span class={"pill " (state)} data-live={(project) ":state"} { (state_label(&state)) } }
+}
+
+/// For a project without container: the build step (live), or the error.
+pub fn build_note(ctx: &Ctx, project: &str) -> Markup {
+    let state = crate::ops::shown_state(&ctx.st, project, "absent");
+    let text = crate::ops::build_text(&ctx.st, project);
+    html! {
+        @match state.as_str() {
+            "failed" => p.note.build-err { b { "La construction a échoué : " } span data-live={(project) ":build"} { (text.unwrap_or_default()) } },
+            "missing" => p.note { "Aucun conteneur : la construction a été interrompue (redémarrage de DevHub ?). Relance-la." },
+            _ => p.note { span data-live={(project) ":build"} { (text.unwrap_or_else(|| "Préparation".into())) } "…" },
+        }
+    }
+}
+
+/// One-line version for tables; the full text is in the tooltip and on the project page.
+pub fn build_line(ctx: &Ctx, project: &str) -> Markup {
+    let state = crate::ops::shown_state(&ctx.st, project, "absent");
+    let text = crate::ops::build_text(&ctx.st, project).unwrap_or_default();
+    html! {
+        @match state.as_str() {
+            "failed" => span.build-line.err title=(text) { "échec — " (text) },
+            "missing" => span.build-line { "construction interrompue" },
+            _ => span.build-line data-live={(project) ":build"} title=(text) { (text) },
+        }
+    }
+}
+
+/// Retry button for a failed or interrupted build; a disabled "Démarrer" while it builds.
+pub fn build_button(ctx: &Ctx, project: &str, back: &str, class: &str) -> Markup {
+    let state = crate::ops::shown_state(&ctx.st, project, "absent");
+    html! {
+        @if state == "absent" {
+            button class={"btn disabled " (class)} disabled { "Démarrer" }
+        } @else {
+            form.inline method="post" action={"/projects/" (project) "/rebuild"} {
+                input type="hidden" name="back" value=(back);
+                button class={"btn primary " (class)} { (if state == "failed" { "Réessayer" } else { "Construire" }) }
+            }
+        }
+    }
 }
 
 /// Gauge: neutral while normal, amber from 80 %, red from 92 % (app.js applies the same thresholds live).
@@ -500,11 +545,11 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                     @for p in &pinned {
                         @let s = ctx.status(&p.name);
                         a class=(if nav == Nav::Project(&p.name) { "on" } else { "" }) href={"/projects/" (p.name)} {
-                            span class={"dot " (s.state)} data-live={(p.name) ":dot"} {}
+                            span class={"dot " (crate::ops::shown_state(&ctx.st, &p.name, &s.state))} data-live={(p.name) ":dot"} {}
                             (p.name)
                             span.end {
                                 @if s.state == "running" { @if let Some(m) = p.ports.first() { ":" (m.container) } }
-                                @else { (state_label(&s.state).to_lowercase()) }
+                                @else { (state_label(&crate::ops::shown_state(&ctx.st, &p.name, &s.state)).to_lowercase()) }
                             }
                         }
                     }

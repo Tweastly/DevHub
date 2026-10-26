@@ -24,7 +24,8 @@ async fn snapshot(st: &AppState) -> String {
         .zip(statuses)
         .map(|(p, s)| {
             (p.name.clone(), json!({
-                "state": s.state,
+                "state": crate::ops::shown_state(st, &p.name, &s.state),
+                "build": crate::ops::build_text(st, &p.name),
                 "cpu": (s.cpu_pct * 10.0).round() / 10.0,
                 "cpu_max": p.cpus.unwrap_or(def_cpu) * 100.0,
                 "mem": s.mem_used / 1_048_576,

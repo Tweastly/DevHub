@@ -105,7 +105,7 @@
   let es = null;
   const pct = (a, b) => (b ? Math.min(100, a / b * 100) : 0) + '%';
   // Same table as web::state_label.
-  const LABEL = { running: 'En marche', exited: 'Arrêté', restarting: 'Redémarre', created: 'Créé', paused: 'En pause', dead: 'En échec', absent: 'Construction' };
+  const LABEL = { running: 'En marche', exited: 'Arrêté', restarting: 'Redémarre', created: 'Créé', paused: 'En pause', dead: 'En échec', absent: 'Construction', failed: 'Échec', missing: 'Pas de conteneur' };
   // Gauge fill + level: neutral, amber from 80 %, red from 92 % (as web::bar).
   const fill = (el, w) => {
     el.style.width = w;
@@ -119,9 +119,15 @@
       const s = d[k.slice(0, i)];
       if (!s) return;
       switch (k.slice(i + 1)) {
-        case 'state': el.textContent = LABEL[s.state] || s.state; el.className = el.className.replace(/\b(running|exited|absent|created|restarting|paused|dead|unknown)\b/g, '').trim() + ' ' + s.state; break;
+        case 'state': el.textContent = LABEL[s.state] || s.state; el.className = el.className.replace(/\b(running|exited|absent|created|restarting|paused|dead|unknown|failed|missing)\b/g, '').trim() + ' ' + s.state; break;
         case 'dot': el.className = 'dot ' + s.state; break;
         case 'cpu': el.textContent = k.startsWith('_host') ? Math.round(s.cpu) + ' %' : s.state === 'running' ? s.cpu.toFixed(1) + ' %' : '—'; break;
+        // Build step / error of a project without container; once it has one, reload to show it.
+        case 'build':
+          if (!['absent', 'failed', 'missing'].includes(s.state)) { location.reload(); return; }
+          if (s.build) el.textContent = s.build;
+          if (s.state === 'failed' && !el.closest('.build-err')) { location.reload(); return; }
+          break;
         case 'cpuint': el.textContent = Math.round(s.cpu); break;
         case 'mem': el.textContent = s.mem; break;
         case 'memgb': el.textContent = s.mem_gb.toFixed(1); break;

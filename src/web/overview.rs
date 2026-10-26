@@ -80,7 +80,10 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 div.kpi-h { span.ic { (icon("box")) } "Projets en ligne" }
                 div.kpi-v { (online) small { " / " (all.len()) } }
                 div.row.tight style="margin-top:10px" {
-                    @for r in down.iter().take(3) { span class={"pill " (r.s.state)} { (r.p.name) @if r.s.state == "absent" { " · construction" } } }
+                    @for r in down.iter().take(3) {
+                        @let s = crate::ops::shown_state(&ctx.st, &r.p.name, &r.s.state);
+                        span class={"pill " (s)} { (r.p.name) " · " (state_label(&s).to_lowercase()) }
+                    }
                     @if down.is_empty() && !all.is_empty() { span.muted style="font-size:12px" { "Tout tourne." } }
                 }
             }
