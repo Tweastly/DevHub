@@ -274,8 +274,12 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     ports: ports("ports")?,
                 };
                 let p = ops::create(st, np, "claude-admin").await?;
-                text(format!("Projet {} créé, construction en cours. URL : {}", p.name,
-                    p.ports.first().map(|_| proxy::url_for(st, &p.name, None)).unwrap_or_else(|| "(aucun port)".into())), false)
+                let addr = match (p.first_http(), p.public_ports().next()) {
+                    (Some(_), _) => format!("URL : {}", proxy::url_for(st, &p.name, None)),
+                    (None, Some(m)) => format!("adresse des joueurs : {} ({})", proxy::public_address(st, m), m.proto().to_uppercase()),
+                    _ => "aucun port".into(),
+                };
+                text(format!("Projet {} créé, construction en cours. {addr}", p.name), false)
             }
             "project_action" => {
                 let c = match s("action").as_str() {
