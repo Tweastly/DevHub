@@ -84,43 +84,43 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
         Tab::Settings => Some("Paramètres"),
     };
     let head = html! {
-        div.phead {
-            (avatar(n, "lg"))
-            div style="min-width:0" {
-                div.row {
-                    h1 { (n) }
-                    (state_pill(n, &x.s.state))
-                    @if (tab == Tab::Overview || tab == Tab::Network) && x.p.first_http().is_some() {
-                        @if x.p.public { span.pill.public { "public" } } @else { span.pill.private { (icon_c("lock", "sm")) "privé" } }
+        div.pband {
+            a.back href="/projects" { "← Tous les projets" }
+            div.phead {
+                h1 { (n) }
+                (state_pill(n, &x.s.state))
+                @if (tab == Tab::Overview || tab == Tab::Network) && x.p.first_http().is_some() {
+                    @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
+                }
+                form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
+                    (back_field(&here))
+                    button class={"icon-btn bare pin" (if x.p.pinned { " on" } else { "" })} title=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler dans la barre latérale" }) aria-label=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler" }) { (icon("pin")) }
+                }
+                div.acts {
+                    @if running && tab == Tab::Overview {
+                        @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" { "Ouvrir le site ↗" } }
                     }
-                    form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
-                        (back_field(&here))
-                        button class={"icon-btn bare pin" (if x.p.pinned { " on" } else { "" })} title=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler dans la barre latérale" }) { (icon("pin")) }
+                    @if running {
+                        form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.btn { "Redémarrer" } }
+                    } @else if x.s.state != "absent" {
+                        form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { "Démarrer" } }
+                    }
+                    @if x.s.state != "absent" {
+                        form.inline method="post" action={(base) "/rebuild"} onsubmit="return confirm('Recréer le conteneur ? /workspace est conservé.')" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { "Recréer" } }
+                    }
+                    @if running {
+                        form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { (back_field(&here)) button.btn.danger-outline { "Arrêter" } }
                     }
                 }
-                div.meta { (subtitle) }
             }
-            div.acts {
-                @if running {
-                    form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { (back_field(&here)) button.btn { (icon("stop")) "Stop" } }
-                    form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.btn { (icon("restart")) "Restart" } }
-                } @else if x.s.state != "absent" {
-                    form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { (icon("play")) "Start" } }
-                }
-                @if x.s.state != "absent" {
-                    form.inline method="post" action={(base) "/rebuild"} onsubmit="return confirm('Recréer le conteneur ? /workspace est conservé.')" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { (icon("wrench")) "Rebuild" } }
-                }
-                @if running && tab == Tab::Overview {
-                    @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" { (icon("external")) "Ouvrir le site" } }
-                }
+            div.phead-meta { (subtitle) }
+            nav.tabs aria-label="Sections du projet" {
+                a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
+                a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" span.count { (n_addr) } }
+                a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
+                a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal & journaux" }
+                a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" }
             }
-        }
-        nav.tabs {
-            a class=(on(Tab::Overview)) href=(base) { (icon("grid")) "Aperçu" }
-            a class=(on(Tab::Network)) href={(base) "/network"} { (icon("globe")) "Réseau" span.count { (n_addr) } }
-            a class=(on(Tab::Files)) href={(base) "/files"} { (icon("folder")) "Fichiers" }
-            a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload { (icon("terminal")) "Terminal & logs" }
-            a class=(on(Tab::Settings)) href={(base) "/settings"} { (icon("sliders")) "Paramètres" }
         }
     };
     let mut crumbs = vec![("DevHub".to_string(), Some("/".to_string())), ("Projets".into(), Some("/projects".into())), (n.clone(), Some(base.clone()))];
@@ -132,9 +132,9 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
 
 fn default_subtitle(ctx: &Ctx, x: &P) -> Markup {
     html! {
-        span.chip { (x.p.image) }
-        @if let Some(u) = main_url(ctx, x) { a.link href=(u) target="_blank" { (u) " ↗" } }
-        @if x.s.state == "running" { @if let Some(t) = x.d.started_at { span { "· démarré " (ago(t).replace("il y a", "il y a")) } } }
+        span { (x.p.image) }
+        @if let Some(u) = main_url(ctx, x) { span { "·" } a.link href=(u) target="_blank" { (u.trim_start_matches("https://")) " ↗" } }
+        @if x.s.state == "running" { @if let Some(t) = x.d.started_at { span { "· démarré " (ago(t)) } } }
     }
 }
 
@@ -186,7 +186,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 div.kpi-h { "Disponibilité" }
                 div.kpi-v {
                     @if running { @if let Some(t) = x.d.started_at { (crate::timefmt::duration(db::now() - t)) } @else { "—" } }
-                    @else { small { (x.s.state) } }
+                    @else { small { (state_label(&x.s.state)) } }
                 }
                 div.row.tight style="margin-top:10px" {
                     @for (m, ok) in x.p.ports.iter().zip(&checks) {
@@ -201,9 +201,9 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         }
         div.split {
             div.stack {
-                div.card {
-                    div.card-h { span.live-tag #logtag-ov { "Logs en direct" } div.end { a.btn.sm.ghost href={(base) "/terminal#logs"} data-reload { "Tout voir →" } } }
-                    @if x.s.state == "absent" { div.card-b.muted { "Le conteneur n'existe pas encore." } }
+                div.term {
+                    div.term-h { span { "Journaux · " (n) } span.end { span.live-tag #logtag-ov { "flux actif" } a.btn.sm href={(base) "/terminal#logs"} data-reload { "Tout voir" } } }
+                    @if x.s.state == "absent" { div.logs.short { "Le conteneur n'existe pas encore." } }
                     @else { pre.logs.short data-stream={(base) "/logs/stream"} data-tag="#logtag-ov" data-max="200" { (logs) } }
                 }
                 div.card {
@@ -232,8 +232,8 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         }
                     }
                 }
-                div.card.glow {
-                    div.card-h { span.hero-ic style="width:30px;height:30px;border-radius:8px" { (icon_c("sparkles", "sm")) } h3 { "Connecter Claude Desktop" } }
+                div.card {
+                    div.card-h { h3 { "Connecter Claude Desktop" } span.tag.mono { "MCP" } }
                     div.card-b {
                         p.muted style="margin-bottom:12px" { "Dans Claude Desktop : " b { "Réglages → Connecteurs → Ajouter un connecteur personnalisé" } ", colle cette URL :" }
                         div.copy { code { (mcp_url) } (copy_btn(&mcp_url)) }
@@ -421,7 +421,7 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 400).await };
-    let subtitle = html! { span.chip { "root@" (n) ":/workspace" } };
+    let subtitle = html! { span { "root@" (n) ":/workspace" } };
     let body = html! {
         div.row style="margin-bottom:18px" {
             div.seg { a.on href="#terminal" { "Terminal" } a href="#logs" { "Logs" } }
@@ -429,7 +429,7 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             span.pill.absent #tstate { "connexion…" }
         }
         div.term #terminal {
-            div.term-h { span.lights { i {} i {} i {} } span { "Terminal · " (n) } span.end #tsize { "bash" } }
+            div.term-h { span { "bash · root@" (n) } span.end #tsize { "bash" } }
             div.term-body #term {}
             div.keys #keys {
                 @for (label, seq) in [("Tab", "\t"), ("Ctrl", "CTRL"), ("Échap", "\x1b"), ("←", "\x1b[D"), ("↑", "\x1b[A"), ("↓", "\x1b[B"), ("→", "\x1b[C"), ("|", "|"), ("~", "~"), ("/", "/"), ("Ctrl C", "\x03")] {
@@ -441,17 +441,20 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             @if x.s.state != "running" { "Le projet n'est pas démarré : démarre-le pour ouvrir un terminal. " }
             "Déconnecté ? Le bandeau passe en rouge : « déconnecté — recharge la page ». La barre de touches n'apparaît que sur écran tactile."
         }
-        div.card #logs {
-            div.card-h {
-                h3 { "Logs · " (n) } span.live-tag #logtag { "en direct" }
-                div.end.row.tight {
-                    button.fchip.on type="button" data-logfilter="all" data-target="#logpre" style="height:30px" { "Tout" }
-                    button.fchip type="button" data-logfilter="err" data-target="#logpre" style="height:30px" { "Erreurs " span.n data-errcount="#logpre" { "0" } }
-                    a.btn.sm.ghost href={(base) "/logs/download"} download { (icon("download")) "Télécharger" }
-                }
-            }
-            @if x.s.state == "absent" { div.card-b.muted { "Le conteneur n'existe pas encore." } }
+        div.row #logs style="margin-bottom:14px" {
+            span.label { "Journaux" }
+            span.spacer {}
+            button.fchip.on type="button" data-logfilter="all" data-target="#logpre" { "Tout" }
+            button.fchip type="button" data-logfilter="err" data-target="#logpre" { "Erreurs " span.n data-errcount="#logpre" { "0" } }
+        }
+        div.term {
+            div.term-h { span { "docker logs --tail 400 -f " (n) } span.end { span.live-tag #logtag { "flux actif" } } }
+            @if x.s.state == "absent" { div.logs { "Le conteneur n'existe pas encore." } }
             @else { pre.logs #logpre data-stream={(base) "/logs/stream"} data-tag="#logtag" { (logs) } }
+            div.term-f {
+                span { "400 dernières lignes · " span data-errcount="#logpre" { "0" } " erreur(s)" }
+                div.end style="margin-left:auto" { a.btn.sm href={(base) "/logs/download"} download { "Télécharger" } }
+            }
         }
         link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css";
         script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" {}
@@ -464,7 +467,7 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
 const TERMINAL_JS: &str = r#"
 (()=>{
 const box=document.getElementById('term');if(!box||!window.Terminal)return;
-const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'ui-monospace,SF Mono,Menlo,monospace',theme:{background:'#0b0b0e',foreground:'#e4e4e7',cursor:'#b78cff',selectionBackground:'#6ea8ff55'}});
+const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'JetBrains Mono,ui-monospace,SF Mono,Menlo,monospace',theme:{background:'#141413',foreground:'#f2f1ed',cursor:'#e08350',selectionBackground:'#e0835055'}});
 const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(box);fit.fit();
 const state=document.getElementById('tstate'),size=document.getElementById('tsize');
 const set=(t,c)=>{state.textContent=t;state.className='pill '+c};
@@ -518,7 +521,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     } else {
         None
     };
-    let subtitle = html! { span.chip { (x.p.image) } span { "créé le " (crate::timefmt::date_short(x.p.created_at)) } };
+    let subtitle = html! { span { (x.p.image) } span { "· créé le " (crate::timefmt::date_short(x.p.created_at)) } };
     let body = html! {
         (flash(&q))
         div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:26px;align-items:start" class="settings-grid" {

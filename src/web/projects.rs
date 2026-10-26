@@ -73,8 +73,8 @@ fn access_cell(ctx: &Ctx, r: &Row) -> Markup {
         @else {
             div.row.tight {
                 @if r.s.state == "running" && p.first_http().is_some() { a.link.mono href=(crate::proxy::url_for(&ctx.st, &p.name, None)) target="_blank" style="font-size:12px" { "ouvrir ↗" } }
-                @for m in &p.ports { span.chip { (m.container) @if m.tcp { " TCP" } } }
-                @if p.public && p.first_http().is_some() { span.pill.public { "public" } }
+                @for m in &p.ports { span.chip { ":" (m.container) @if m.tcp { " tcp" } } }
+                @if p.public && p.first_http().is_some() { span.pill.public { "Public" } }
             }
         }
     }
@@ -85,13 +85,13 @@ fn row_actions(r: &Row, back: &str) -> Markup {
     html! {
         @if r.s.state == "running" {
             div.row.tight.end {
-                form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { input type="hidden" name="back" value=(back); button.btn.sm { "Stop" } }
-                form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value=(back); button.btn.sm.ghost { "Restart" } }
+                form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { input type="hidden" name="back" value=(back); button.btn.sm.danger-outline { "Arrêter" } }
+                form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value=(back); button.btn.sm { "Redémarrer" } }
             }
         } @else if r.s.state == "absent" {
-            div.row.end { button.btn.sm.disabled disabled { "Start" } }
+            div.row.end { button.btn.sm.disabled disabled { "Démarrer" } }
         } @else {
-            div.row.end { form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value=(back); button.btn.sm.primary { (icon_c("play", "sm")) "Start" } } }
+            div.row.end { form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value=(back); button.btn.sm.primary { "Démarrer" } } }
         }
     }
 }
@@ -122,74 +122,76 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
     let base = format!("/projects/{n}");
     let mem_max = mb(r.s.mem_limit);
     let mem_used = mb(r.s.mem_used);
-    let cpu_max = p.cpus.unwrap_or(ctx.default_cpus()) * 100.0;
     let mem_pct = pct(mem_used as f64, mem_max as f64);
     let domains = db::domains_of(&ctx.st.db.lock().unwrap(), n);
     let running = r.s.state == "running";
     html! {
-        div.card.pcard.lift {
+        article.card.pcard.lift {
             div.top {
                 div.hd {
-                    (avatar(n, ""))
-                    a href=(base) { b { (n) } span.mono { (p.image) @if p.template == "site" { " · Page web" } } }
+                    a href=(base) {
+                        b { (n) }
+                        span.mono {
+                            @if running && p.first_http().is_some() {
+                                (domains.first().map(|(h, _)| h.clone()).unwrap_or_else(|| crate::proxy::url_for(&ctx.st, n, None).split("://").nth(1).unwrap_or("").to_string()))
+                            } @else if let Some(m) = p.tcp_ports().next() {
+                                "tcp · " (crate::proxy::tcp_address(&ctx.st, m.host))
+                            } @else { (p.image) }
+                        }
+                    }
                     (state_pill(n, &r.s.state))
                 }
-                @if running {
-                    @if p.first_http().is_some() {
-                        @let url = domains.first().map(|(h, _)| format!("https://{h}")).unwrap_or_else(|| crate::proxy::url_for(&ctx.st, n, None));
-                        a.url href=(url) target="_blank" { (url.split("://").nth(1).unwrap_or(&url)) " ↗" }
-                    } @else if let Some(m) = p.tcp_ports().next() {
-                        span.url style="color:var(--text-2)" { "TCP · " (crate::proxy::tcp_address(&ctx.st, m.host)) }
-                    } @else { p.note { "aucun port exposé" } }
-                } @else if r.s.state == "absent" {
+                @if r.s.state == "absent" {
                     p.note { "Téléchargement de l'image et création du conteneur…" }
                 } @else {
-                    p.note {
-                        "Arrêté"
-                        @if let Some(t) = r.d.finished_at { " " (ago(t)) }
-                        @if let Some(c) = r.d.exit_code { " · code de sortie " (c) }
+                    div.metrics {
+                        div.metric {
+                            span.k { "Uptime" }
+                            span.v { @if running { @if let Some(t) = r.d.started_at { (crate::timefmt::duration(db::now() - t)) } @else { "—" } } @else { "—" } }
+                        }
+                        div.metric {
+                            span.k { "CPU" }
+                            span.v data-live={(n) ":cpu"} { @if running { (format!("{:.1} %", r.s.cpu_pct)) } @else { "—" } }
+                        }
+                        div.metric {
+                            span.k { "Mémoire" }
+                            span.v { @if running { span data-live={(n) ":mem"} { (mem_used) } " / " (mem_max) " Mo" } @else { "—" } }
+                        }
+                        div.metric {
+                            span.k { "Ports" }
+                            span.v { @if p.ports.is_empty() { "—" } @else { @for (i, m) in p.ports.iter().enumerate() { @if i > 0 { " " } ":" (m.container) } } }
+                        }
+                    }
+                    @if !running {
+                        p.note {
+                            "Arrêté"
+                            @if let Some(t) = r.d.finished_at { " " (ago(t)) }
+                            @if let Some(c) = r.d.exit_code { " · code de sortie " span.mono { (c) } }
+                        }
                     }
                 }
-                @if r.s.state != "absent" {
-                    div.gauges {
-                        div.g {
-                            div.row { span { "CPU" } b data-live={(n) ":cpu"} { @if running { (format!("{:.1} %", r.s.cpu_pct)) } @else { "—" } } }
-                            (bar(pct(r.s.cpu_pct, cpu_max), Some(format!("{n}:cpubar")), ""))
+                @if p.first_http().is_some() || !domains.is_empty() || (running && mem_pct >= 80.0) {
+                    div.chips {
+                        @if p.first_http().is_some() {
+                            @if p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
                         }
-                        div.g {
-                            div.row { span { "RAM" } b { span data-live={(n) ":mem"} { @if running { (mem_used) } @else { "—" } } " / " (mem_max) } }
-                            (bar(mem_pct, Some(format!("{n}:membar")), ""))
-                        }
+                        @if !domains.is_empty() { span.tag { "+" (domains.len()) " domaine" @if domains.len() > 1 { "s" } } }
+                        @if running && mem_pct >= 80.0 { span.pill.warn { "RAM à " (format!("{mem_pct:.0}")) " %" } }
                     }
-                } @else {
-                    div.bar style="margin-top:6px" { i style="width:35%" {} }
-                }
-                div.chips {
-                    @for m in &p.ports { span.chip { (m.container) @if m.tcp { " TCP" } } }
-                    @if p.first_http().is_some() {
-                        @if p.public { span.pill.public { "public" } } @else { span.pill.private { (icon_c("lock", "sm")) "privé" } }
-                    }
-                    @if !domains.is_empty() { span.chip { "+" (domains.len()) " domaine" @if domains.len() > 1 { "s" } } }
-                    @if running && mem_pct >= 70.0 { span.pill.warn { "RAM à " (format!("{mem_pct:.0}")) " %" } }
                 }
             }
             div.ft {
                 @if running {
-                    form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { input type="hidden" name="back" value="/projects"; button.btn.sm { "Stop" } }
-                    form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value="/projects"; button.btn.sm.ghost { "Restart" } }
+                    form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Redémarrer" } }
+                    a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
                 } @else if r.s.state == "absent" {
-                    button.btn.sm.disabled disabled { "Start" }
-                    a.btn.sm.ghost href={"/audit?project=" (n)} style="margin-left:auto" { "Pourquoi ?" }
+                    button.btn.disabled disabled { "Démarrer" }
+                    a.btn href={"/audit?project=" (n)} { "Pourquoi ?" }
                 } @else {
-                    form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.sm.primary { (icon_c("play", "sm")) "Start" } }
-                    a.btn.sm.ghost href={(base) "/terminal#logs"} { "Voir les logs" }
+                    form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Démarrer" } }
+                    a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
                 }
-                @if r.s.state != "absent" {
-                    div.end {
-                        a.icon-btn href={(base) "/files"} title="Fichiers" { (icon("folder")) }
-                        @if running { a.icon-btn href={(base) "/terminal"} title="Terminal" { (icon("terminal")) } }
-                    }
-                }
+                div.end { a.link href=(base) { "Détail" } }
             }
         }
     }
@@ -251,7 +253,7 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             }
             div.acts {
                 div.seg.hide-m { a class=(if view != "list" { "on" } else { "" }) href=(link("view", "cards")) { "Cartes" } a class=(if view == "list" { "on" } else { "" }) href=(link("view", "list")) { "Liste" } }
-                a.btn.primary.lg href="/projects/new" { (icon("plus")) "Nouveau projet" }
+                a.btn.primary.only-m href="/projects/new" { "Nouveau projet" }
             }
         }
         div.filters {

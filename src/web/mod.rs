@@ -64,7 +64,10 @@ pub fn head_at(title: &str, origin: &str) -> Markup {
         meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover";
         meta name="color-scheme" content="light dark";
         title { (title) }
-        link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%236ea8ff'/%3E%3Cstop offset='1' stop-color='%23b78cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M16 8l7 4v8l-7 4-7-4v-8z' fill='white'/%3E%3C/svg%3E";
+        link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23b4541f'/%3E%3C/svg%3E";
+        link rel="preconnect" href="https://fonts.googleapis.com";
+        link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
+        link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap";
         link rel="stylesheet" href={(origin) "/assets/app.css?v=" (v)};
         script src={(origin) "/assets/app.js?v=" (v)} defer {}
         // Prefetch panel links on hover. Safe: every action is a POST form.
@@ -155,12 +158,9 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
     }
 }
 
+/// The mark: a plain terracotta square.
 pub fn logo(size: u32) -> Markup {
-    html! {
-        span.logo style={"width:" (size) "px;height:" (size) "px"} {
-            svg viewBox="0 0 24 24" width="55%" height="55%" fill="#fff" aria-hidden="true" { path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" {} }
-        }
-    }
+    html! { span.logo style={"width:" (size) "px;height:" (size) "px"} aria-hidden="true" {} }
 }
 
 // ---------- Formatting ----------
@@ -202,20 +202,36 @@ fn hue(name: &str) -> usize {
 
 /// Colour slot (g0…g5) of a project, shared by its avatar and its allocation segment.
 pub fn color_of(name: &str) -> &'static str {
-    ["#7c9cff", "#4cc9d8", "#d4d84a", "#d39cfb", "#fb8a7a", "#a8b3c4"][hue(name)]
+    ["#b4541f", "#56524b", "#c99b6b", "#8c877f", "#7d5a3c", "#d8c6b2"][hue(name)]
 }
 
 pub fn avatar(name: &str, class: &str) -> Markup {
     html! { span class={"avatar g" (hue(name)) " " (class)} { (initials(name)) } }
 }
 
-/// State pill wired to the live stream.
-pub fn state_pill(project: &str, state: &str) -> Markup {
-    html! { span class={"pill " (state)} data-live={(project) ":state"} { (state) } }
+/// Docker state → label shown next to the dot (app.js keeps the same table for live updates).
+pub fn state_label(state: &str) -> &str {
+    match state {
+        "running" => "En marche",
+        "exited" => "Arrêté",
+        "restarting" => "Redémarre",
+        "created" => "Créé",
+        "paused" => "En pause",
+        "dead" => "En échec",
+        "absent" => "Construction",
+        s => s,
+    }
 }
 
+/// State pill wired to the live stream.
+pub fn state_pill(project: &str, state: &str) -> Markup {
+    html! { span class={"pill " (state)} data-live={(project) ":state"} { (state_label(state)) } }
+}
+
+/// Gauge: neutral while normal, amber from 80 %, red from 92 % (app.js applies the same thresholds live).
 pub fn bar(pct: f64, live: Option<String>, class: &str) -> Markup {
-    let cls = if pct >= 85.0 && class.is_empty() { "bar err".to_string() } else if pct >= 70.0 && class.is_empty() { "bar warn".to_string() } else { format!("bar {class}") };
+    let level = if pct >= 92.0 { " err" } else if pct >= 80.0 { " warn" } else { "" };
+    let cls = format!("bar {class}{level}");
     html! { div class=(cls) { i style={"width:" (format!("{pct:.0}")) "%"} data-live=[live] {} } }
 }
 
@@ -397,33 +413,48 @@ pub struct Shell<'a> {
 }
 
 pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
+    // Pages outside a project get a "← parent" link when their parent is a real page.
+    let back = match sh.nav {
+        Nav::Project(_) => None,
+        _ => sh.crumbs.len().checked_sub(2).and_then(|i| sh.crumbs[i].1.as_ref().filter(|l| *l != "/").map(|l| (l.clone(), sh.crumbs[i].0.clone()))),
+    };
+    let h = &ctx.host;
     html! {
         (DOCTYPE)
         html lang="fr" data-theme=[ctx.theme] {
             head { (head(&format!("{} · DevHub", sh.title))) }
             body {
                 div.app {
+                    header.topbar {
+                        a.brand href="/" { (logo(22)) span { "DevHub" } span.ver title="Version installée" { (ctx.version()) } }
+                        div.srv-chip title="Serveur" {
+                            span class={"dot " (if h.mem_total_mb > 0 { "running" } else { "unknown" })} {}
+                            (ctx.host_name()) " · " (h.ncpu) " vCPU / " (format!("{:.0}", h.mem_total_mb as f64 / 1024.0)) " Go"
+                        }
+                        form.search method="get" action="/projects" role="search" {
+                            label.sr for="q" { "Filtrer les projets" }
+                            input #q type="search" name="q" placeholder="Filtrer les projets…";
+                            kbd { "/" }
+                        }
+                        div.acts {
+                            (update_pill(ctx))
+                            (sh.actions)
+                            a.btn.primary href="/projects/new" { "Nouveau projet" }
+                        }
+                    }
                     (sidebar(ctx, sh.nav))
                     div.main {
-                        header.topbar {
-                            nav.crumbs aria-label="Fil d'Ariane" {
-                                @for (i, (label, link)) in sh.crumbs.iter().enumerate() {
-                                    @if i > 0 { span.sep { "/" } }
-                                    @if i + 1 == sh.crumbs.len() { b { (label) } }
-                                    @else if let Some(l) = link { a href=(l) { (label) } }
-                                    @else { span { (label) } }
-                                }
-                            }
-                            div.acts { (update_pill(ctx)) (sh.actions) }
-                        }
                         header.mobile-head {
-                            (logo(30)) span { "DevHub" }
+                            (logo(22)) span { "DevHub" }
                             div.end {
-                                @if ctx.update.available() { a.icon-btn href="/update" title="Mise à jour disponible" { (icon("refresh")) } }
-                                button.icon-btn type="button" data-theme-toggle title="Thème" { (icon("sun")) }
+                                @if ctx.update.available() { a.icon-btn href="/update" title="Mise à jour disponible" aria-label="Mise à jour disponible" { (icon("refresh")) } }
+                                button.icon-btn type="button" data-theme-toggle title="Thème" aria-label="Changer de thème" { (icon("sun")) }
                             }
                         }
-                        main.content { (body) }
+                        main.content {
+                            @if let Some((l, label)) = back { a.back href=(l) { "← " (label) } }
+                            (body)
+                        }
                     }
                     (bottom_nav(sh.nav))
                 }
@@ -436,10 +467,10 @@ fn update_pill(ctx: &Ctx) -> Markup {
     let u = &ctx.update;
     html! {
         @if u.running {
-            a.update-pill href="/update" { (icon_c("refresh", "sm")) "Mise à jour en cours…" span.go { "Suivre" } }
+            a.update-pill href="/update" { "Mise à jour en cours…" span.go { "Suivre" } }
         } @else if u.available() {
             form.update-pill method="post" action="/update/apply" onsubmit="return confirm('Mettre à jour DevHub maintenant ? Il redémarrera.')" {
-                b { (u.pending.len()) } span.hide-m { " nouvelle" @if u.pending.len() > 1 { "s" } " version" @if u.pending.len() > 1 { "s" } " sur GitHub" }
+                b { (u.pending.len()) } span.hide-m { " nouvelle" @if u.pending.len() > 1 { "s" } " version" @if u.pending.len() > 1 { "s" } }
                 button { "Mettre à jour" }
             }
         }
@@ -450,20 +481,20 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
     let on = |n: Nav| if n == nav { "on" } else { "" };
     let pinned: Vec<&Project> = ctx.projects.iter().filter(|p| p.pinned).collect();
     let h = &ctx.host;
-    let (pk_id, pk_name) = ctx.passkey.clone().unwrap_or((0, "passkey".into()));
-    let _ = pk_id;
+    let pk_name = ctx.passkey.as_ref().map(|p| p.1.clone()).unwrap_or_else(|| "passkey".into());
+    let mem_pct = pct(h.mem_used_mb as f64, h.mem_total_mb as f64);
     html! {
         aside.sidebar {
-            div.brand { (logo(32)) span.name { "DevHub" } span.ver title="Version installée" { (ctx.version()) } }
-            form.search method="get" action="/projects" role="search" {
-                (icon("search"))
-                input name="q" placeholder="Rechercher un projet…" aria-label="Rechercher un projet";
-                kbd { "/" }
-            }
-            nav.nav {
-                div.nav-label { "Général" }
-                a class=(on(Nav::Overview)) href="/" { (icon("grid")) "Vue d'ensemble" }
-                a class=(if matches!(nav, Nav::Projects) { "on" } else { "" }) href="/projects" { (icon("box")) "Projets" span.count { (ctx.projects.len()) } }
+            nav.nav aria-label="Sections" {
+                a class=(on(Nav::Overview)) href="/" { "Vue d'ensemble" }
+                a class=(if matches!(nav, Nav::Projects) { "on" } else { "" }) href="/projects" { "Projets" span.count { (ctx.projects.len()) } }
+                a class=(on(Nav::Claude)) href="/claude" { "Claude" @if ctx.admin { span.tag-admin { "admin" } } }
+                a class=(on(Nav::Passkeys)) href="/security" { "Passkeys" span.count { (ctx.passkey_count) } }
+                a class=(on(Nav::Audit)) href="/audit" { "Journal" }
+                a class=(on(Nav::Update)) href="/update" {
+                    "Mise à jour"
+                    @if ctx.update.available() { span.count.solid { (ctx.update.pending.len()) } }
+                }
                 @if !pinned.is_empty() {
                     div.nav-label { "Épinglés" }
                     @for p in &pinned {
@@ -473,35 +504,34 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                             (p.name)
                             span.end {
                                 @if s.state == "running" { @if let Some(m) = p.ports.first() { ":" (m.container) } }
-                                @else if s.state == "exited" { "arrêté" } @else { (s.state) }
+                                @else { (state_label(&s.state).to_lowercase()) }
                             }
                         }
                     }
                 }
-                div.nav-label { "Intelligence" }
-                a class=(on(Nav::Claude)) href="/claude" { (icon("sparkles")) "Claude" @if ctx.admin { span.tag-admin { "admin" } } }
-                div.nav-label { "Sécurité" }
-                a class=(on(Nav::Passkeys)) href="/security" { (icon("key")) "Passkeys" span.count { (ctx.passkey_count) } }
-                a class=(on(Nav::Audit)) href="/audit" { (icon("list")) "Journal" }
-                div.nav-label { "Système" }
-                a class=(on(Nav::Update)) href="/update" {
-                    (icon("refresh")) "Mise à jour"
-                    @if ctx.update.available() { span.count.solid { (ctx.update.pending.len()) } }
-                }
             }
             div.side-foot {
                 div.srv {
-                    div.srv-h { (icon_c("server", "sm")) (ctx.host_name()) span.dim { (h.ncpu) " cœurs · " (format!("{:.0}", h.mem_total_mb as f64 / 1024.0)) " Go" } }
-                    div.srv-r { span { "CPU" } (bar(h.cpu_pct, Some("_host:cpubar".into()), "")) b data-live="_host:cpu" { (format!("{:.0}", h.cpu_pct)) " %" } }
-                    div.srv-r { span { "RAM" } (bar(pct(h.mem_used_mb as f64, h.mem_total_mb as f64), Some("_host:membar".into()), "")) b { span data-live="_host:memgb" { (gb(h.mem_used_mb)) } " Go" } }
-                    div.srv-r { span { "Disque" } (bar(h.disk_pct(), Some("_host:diskbar".into()), "warn")) b { span data-live="_host:disk" { (format!("{:.0}", h.disk_pct())) } " %" } }
+                    div.srv-h { span.nav-label style="padding:0" { "Serveur" } span.dim { (h.ncpu) " cœurs" } }
+                    div.meter {
+                        div.meter-h { "Processeur" b data-live="_host:cpu" { (format!("{:.0}", h.cpu_pct)) " %" } }
+                        (bar(h.cpu_pct, Some("_host:cpubar".into()), ""))
+                    }
+                    div.meter {
+                        div.meter-h { "Mémoire" b { span data-live="_host:memgb" { (gb(h.mem_used_mb)) } " / " (gb(h.mem_total_mb)) " Go" } }
+                        (bar(mem_pct, Some("_host:membar".into()), ""))
+                    }
+                    div.meter {
+                        div.meter-h { "Disque" b { span data-live="_host:disk" { (format!("{:.0}", h.disk_pct())) } " %" } }
+                        (bar(h.disk_pct(), Some("_host:diskbar".into()), ""))
+                    }
                 }
                 div.me {
-                    span.avatar.round.g0.sm { (pk_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "P".into())) }
-                    div.who { "Propriétaire" span { @if ctx.passkey.is_some() { (pk_name) " · passkey" } @else { "connecté par passkey" } } }
+                    span.avatar.round.sm { (pk_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "P".into())) }
+                    div.who { "Propriétaire" span { @if ctx.passkey.is_some() { (pk_name) } @else { "connecté par passkey" } } }
                     div.row {
-                        button.icon-btn type="button" data-theme-toggle title="Changer de thème" aria-label="Changer de thème" { (icon("sun")) }
-                        form.inline method="post" action="/logout" { button.icon-btn title="Déconnexion" aria-label="Déconnexion" { (icon("logout")) } }
+                        button.icon-btn.bare type="button" data-theme-toggle title="Changer de thème" aria-label="Changer de thème" { (icon("sun")) }
+                        form.inline method="post" action="/logout" { button.icon-btn.bare title="Déconnexion" aria-label="Déconnexion" { (icon("logout")) } }
                     }
                 }
             }
@@ -542,9 +572,9 @@ pub async fn menu(axum::extract::State(st): axum::extract::State<AppState>, jar:
 
 pub fn ill(kind: &str) -> Markup {
     let svg = match kind {
-        "projects" => r##"<svg class="ill" viewBox="0 0 120 90" fill="none" stroke-width="2" stroke-linejoin="round"><defs><linearGradient id="ga" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6ea8ff"/><stop offset="1" stop-color="#b78cff"/></linearGradient></defs><path d="M60 10l20 11v22L60 54 40 43V21z" stroke="url(#ga)"/><path d="M40 21l20 11 20-11M60 32v22" stroke="url(#ga)"/><path d="M22 52l9 5v10l-9 5-9-5V57zM98 50l9 5v10l-9 5-9-5V55z" stroke="currentColor" opacity=".45"/><path d="M60 66v10M55 71h10" stroke="#6ea8ff"/></svg>"##,
-        "folder" => r##"<svg class="ill" viewBox="0 0 120 90" fill="none" stroke-width="2"><defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6ea8ff"/><stop offset="1" stop-color="#b78cff"/></linearGradient></defs><path d="M28 28a4 4 0 0 1 4-4h16l6 6h34a4 4 0 0 1 4 4v30a4 4 0 0 1-4 4H32a4 4 0 0 1-4-4z" stroke="url(#gb)"/><path d="M52 48h4M60 48h4M68 48h4" stroke="currentColor" opacity=".6"/><circle cx="98" cy="18" r="3" fill="#b78cff"/><circle cx="22" cy="70" r="2" fill="#6ea8ff"/></svg>"##,
-        _ => r##"<svg class="ill" viewBox="0 0 120 90" fill="none" stroke-width="2"><defs><linearGradient id="gc" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6ea8ff"/><stop offset="1" stop-color="#b78cff"/></linearGradient></defs><rect x="36" y="10" width="44" height="58" rx="5" stroke="url(#gc)"/><path d="M45 26h26M45 35h20M45 44h14" stroke="currentColor" opacity=".55"/><circle cx="78" cy="62" r="9" stroke="url(#gc)"/><path d="m85 69 8 8" stroke="#b78cff"/></svg>"##,
+        "projects" => r##"<svg class="ill" viewBox="0 0 120 90" fill="none" stroke-width="2" stroke-linejoin="round"><path d="M60 10l20 11v22L60 54 40 43V21z" stroke="#b4541f"/><path d="M40 21l20 11 20-11M60 32v22" stroke="#b4541f"/><path d="M22 52l9 5v10l-9 5-9-5V57zM98 50l9 5v10l-9 5-9-5V55z" stroke="currentColor" opacity=".45"/><path d="M60 66v10M55 71h10" stroke="currentColor"/></svg>"##,
+        "folder" => r##"<svg class="ill" viewBox="0 0 120 90" fill="none" stroke-width="2"><path d="M28 28a4 4 0 0 1 4-4h16l6 6h34a4 4 0 0 1 4 4v30a4 4 0 0 1-4 4H32a4 4 0 0 1-4-4z" stroke="#b4541f"/><path d="M52 48h4M60 48h4M68 48h4" stroke="currentColor" opacity=".6"/><circle cx="98" cy="18" r="3" fill="#b4541f"/><circle cx="22" cy="70" r="2" fill="currentColor"/></svg>"##,
+        _ => r##"<svg class="ill" viewBox="0 0 120 90" fill="none" stroke-width="2"><rect x="36" y="10" width="44" height="58" rx="5" stroke="currentColor"/><path d="M45 26h26M45 35h20M45 44h14" stroke="currentColor" opacity=".55"/><circle cx="78" cy="62" r="9" stroke="currentColor"/><path d="m85 69 8 8" stroke="#b4541f"/></svg>"##,
     };
     PreEscaped(svg.to_string())
 }

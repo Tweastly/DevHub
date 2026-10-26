@@ -104,7 +104,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             div.card.kpi {
                 div.kpi-h { span.ic.warn { (icon("disk")) } "Disque" }
                 div.kpi-v { span data-live="_host:disk" { (format!("{:.0}", h.disk_pct())) } small { " %" } }
-                (bar(h.disk_pct(), Some("_host:diskbar".into()), "warn thick"))
+                (bar(h.disk_pct(), Some("_host:diskbar".into()), "thick"))
                 div.foot { (size(h.disk_total - h.disk_used)) " libres sur " (size(h.disk_total)) @if h.images_bytes > 0 { " · images Docker : " (size(h.images_bytes as u64)) } }
             }
         }
@@ -167,6 +167,6 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         title: "Vue d'ensemble",
         nav: Nav::Overview,
         crumbs: vec![("DevHub".into(), Some("/".into())), ("Vue d'ensemble".into(), None)],
-        actions: html! { a.btn.primary.hide-m href="/projects/new" { (icon("plus")) "Nouveau projet" } },
+        actions: html! {},
     }, body))
 }

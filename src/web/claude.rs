@@ -59,7 +59,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
         div.page-head {
             div {
                 div.row.tight {
-                    h1 { "Claude " span.grad-text { "dans ton serveur" } }
+                    h1 { "Claude dans ton serveur" }
                     @if enabled { span.pill.running { "accès complet activé" } } @else { span.pill.absent.plain { "accès complet désactivé" } }
                 }
                 p.lead { "Connecte Claude Desktop via MCP. Tu choisis jusqu'où il peut aller, et tu peux tout couper en un clic." }
@@ -70,7 +70,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
         div.grid3 style="margin-bottom:20px" {
             div.card.kpi {
                 div.kpi-h { span.ic { (icon("shield")) } "Niveau d'accès" }
-                div.kpi-v style="font-size:22px" { (["Aucun accès", "Projet par projet", "Tout le panel"][level as usize - 1]) }
+                div.kpi-v.txt { (["Aucun accès", "Projet par projet", "Tout le panel"][level as usize - 1]) }
                 (power(level))
             }
             div.card.kpi {
@@ -80,7 +80,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
             }
             div.card.kpi {
                 div.kpi-h { span.ic { (icon("refresh")) } "Dernière utilisation" }
-                div.kpi-v style="font-size:22px" { @if let Some((t, _)) = &last { (ago(*t)) } @else { "jamais" } }
+                div.kpi-v.txt { @if let Some((t, _)) = &last { (ago(*t)) } @else { "jamais" } }
                 div.foot { @if let Some((_, w)) = &last { "via " b { (w) } } @else { "Aucune URL n'a encore servi." } }
             }
         }

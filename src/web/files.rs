@@ -139,7 +139,7 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
             div.card { (empty("folder", "Le conteneur ne tourne pas", html! { "Les fichiers se lisent dans le conteneur : démarre le projet pour y accéder." },
                 html! { form method="post" action={"/projects/" (name) "/start"} { input type="hidden" name="back" value={"/projects/" (name) "/files"}; button.btn.primary { (icon("play")) "Démarrer" } } })) }
         };
-        return Ok(frame(&ctx, &x, Tab::Files, html! { span.chip { "/workspace" } }, body));
+        return Ok(frame(&ctx, &x, Tab::Files, html! { span { "/workspace" } }, body));
     }
     let rel = fs::clean(q.get("path").map(String::as_str).unwrap_or(""))?;
     let is_dir = fs::is_dir(&st, &name, &rel).await;
@@ -164,7 +164,7 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
     .ok()
     .filter(|r| !r.timed_out && r.exit_code == 0)
     .map(|r| r.output.replace('K', " Ko").replace('M', " Mo").replace('G', " Go"));
-    let subtitle = html! { span.chip { "/workspace" } @if let Some(s) = stats { span { (s) } } };
+    let subtitle = html! { span { "/workspace" } @if let Some(s) = stats { span { "· " (s) } } };
     let body = html! {
         (flash(&q))
         div.files {
