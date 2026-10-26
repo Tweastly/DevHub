@@ -193,12 +193,18 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
     let ports: Vec<Value> = p
         .ports
         .iter()
-        .map(|m| json!({ "container": m.container, "url": proxy::url_for(st, &p.name, Some(m.container)) }))
+        .map(|m| {
+            if m.is_public() {
+                json!({ "container": m.container, "protocol": m.proto(), "address": proxy::public_address(st, m) })
+            } else {
+                json!({ "container": m.container, "url": proxy::url_for(st, &p.name, Some(m.container)) })
+            }
+        })
         .collect();
     let mut v = json!({
         "name": p.name, "state": crate::ops::shown_state(st, &p.name, &s.state), "build": crate::ops::build_text(st, &p.name), "template": p.template, "image": p.image, "git_url": p.git_url,
         "public": p.public, "ports": ports,
-        "url": p.ports.first().map(|_| proxy::url_for(st, &p.name, None)),
+        "url": p.first_http().map(|_| proxy::url_for(st, &p.name, None)),
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
         "limits": {
             "memory_mb": p.memory_mb.unwrap_or(st.cfg.memory_bytes / 1_048_576),
