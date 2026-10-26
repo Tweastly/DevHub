@@ -11,7 +11,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     let short = |s: &Option<String>| s.as_deref().map(|s| s[..7.min(s.len())].to_string()).unwrap_or_else(|| "?".into());
     let gh = u.repo.as_ref().map(|r| format!("https://github.com/{r}"));
     let body = html! {
-        div.page-head { div { h1 { "Mise à jour" } p.lead { "DevHub vérifie GitHub toutes les 30 min. La mise à jour reconstruit l'image et redémarre le panel ; tes projets continuent de tourner." } } }
+        div.page-head { div { h1 { "Mise à jour" } p.lead { "DevHub vérifie GitHub toutes les 30 min. La mise à jour récupère le binaire compilé par GitHub et redémarre le panel en quelques secondes ; tes projets continuent de tourner." } } }
         @if let Some(e) = &u.error {
             div.flash { (alert("err", html! { b { (e.split(" (").next().unwrap_or(e)) } @if e.contains("TOKEN") { br; "Dépôt privé ? Définis " code { "DEVHUB_GITHUB_TOKEN" } "." } })) }
         } @else if !u.available() && u.checked_at.is_some() {
@@ -23,7 +23,15 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                     div { div.k { "Installée" } div.v { (short(&u.local)) } div.muted style="font-size:12.5px" { "branche " code { (if u.branch.is_empty() { "main" } else { &u.branch }) } @if let Some(r) = &u.repo { " · " (r) } } }
                     @if u.available() {
                         span.dim { (icon("arrow-right")) }
-                        div { div.k { "Disponible" } div.v.new { (u.pending[0].sha) } div.muted style="font-size:12.5px" { (u.pending.len()) " commit" @if u.pending.len() > 1 { "s" } " en avance" } }
+                        div {
+                            div.k { "Disponible" } div.v.new { (u.pending[0].sha) }
+                            div.muted style="font-size:12.5px" { (u.pending.len()) " commit" @if u.pending.len() > 1 { "s" } " en avance" }
+                            @match u.prebuilt {
+                                Some(true) => div.row.tight style="margin-top:6px;font-size:12.5px" { span.dot.running {} "Binaire prêt sur GitHub · moins d'une minute" },
+                                Some(false) => div.row.tight style="margin-top:6px;font-size:12.5px" { span.dot.restarting {} "Binaire pas encore publié (GitHub compile, ~5 min) · sinon compilation sur le serveur" },
+                                None => {},
+                            }
+                        }
                     }
                 }
                 div style="margin-left:auto;text-align:right" {

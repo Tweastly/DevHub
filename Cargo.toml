@@ -27,3 +27,8 @@ tracing-subscriber = "0.3"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 webauthn-rs = "0.5"
+
+[profile.release]
+# Rebuilds on the server (no prebuilt binary yet) only recompile what changed:
+# the target dir lives in a Docker cache mount (see Dockerfile).
+incremental = true

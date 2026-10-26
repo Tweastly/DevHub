@@ -56,6 +56,8 @@ docker compose up -d
 ```
 Le jeton sert à vérifier les versions et à faire le `git pull`. Il n'est jamais écrit sur le disque.
 
+**Mise à jour rapide (moins d'une minute).** À chaque push sur `main`, GitHub Actions compile DevHub (`.github/workflows/binary.yml`, environ 5 min) et publie le binaire sur la release `edge` du dépôt. Le bouton **Mettre à jour** télécharge ce binaire avec le même jeton, et l'image Docker ne fait que le copier : le panel redémarre en 20 à 30 secondes environ. La page Mise à jour indique si le binaire est prêt. S'il ne l'est pas encore (CI en cours, serveur ARM), DevHub compile sur le serveur en réutilisant le cache de compilation, donc seul le code modifié est recompilé. La toute première mise à jour vers cette version compile encore entièrement.
+
 ## Connecter Claude Desktop à un projet
 
 Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages → Connecteurs → Ajouter un connecteur personnalisé**. Colle l'URL. Claude peut alors lire, écrire et exécuter du code, mais seulement dans ce conteneur.

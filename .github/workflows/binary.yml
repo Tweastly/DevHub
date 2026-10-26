@@ -1,0 +1,38 @@
+# Builds the DevHub binary on every push to main and publishes it on the rolling "edge"
+# release as devhub-x86_64-<commit>. DevHub's "Mettre à jour" button downloads it instead of
+# compiling on the VPS, which brings an update down to a few seconds.
+name: binary
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: binary
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Ubuntu 22.04 (glibc 2.35, OpenSSL 3): the binary runs on the debian:bookworm-slim image.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Publish on the edge release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="devhub-x86_64-${GITHUB_SHA}"
+          cp target/release/devhub "$asset"
+          gh release view edge >/dev/null 2>&1 || gh release create edge --prerelease --title "edge" \
+            --notes "Binaire de la dernière version de main, utilisé par le bouton « Mettre à jour » de DevHub."
+          gh release upload edge "$asset" --clobber
+          # Keep the 5 most recent binaries.
+          gh release view edge --json assets --jq '.assets | sort_by(.createdAt) | reverse | .[5:] | .[].name' |
+            while read -r old; do gh release delete-asset edge "$old" -y; done
