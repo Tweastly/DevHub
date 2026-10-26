@@ -215,6 +215,14 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         }
     }
     let mut wanted = np.ports;
+    // Game servers don't serve the web: a bare "19132" / "25565" means the game's protocol.
+    for w in wanted.iter_mut().filter(|w| !w.tcp && !w.udp) {
+        match np.template.as_str() {
+            "pocketmine" => w.udp = true,
+            "minecraft" => w.tcp = true,
+            _ => {}
+        }
+    }
     if np.template == "site" && wanted.is_empty() {
         wanted.push(PortSpec::http(8000));
     }
