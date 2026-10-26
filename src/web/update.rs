@@ -45,6 +45,22 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                 }
             }
         }
+        @let auto = crate::updater::auto_deploy(&st);
+        div.card style="margin-bottom:20px" {
+            div.card-b.row style="flex-wrap:nowrap;gap:16px" {
+                div style="flex:1;min-width:0" {
+                    b { "Déploiement automatique" }
+                    p.muted style="font-size:13px;margin-top:2px" {
+                        "Chaque commit poussé sur " code { (if u.branch.is_empty() { "main" } else { &u.branch }) } " est déployé tout seul, environ 20 s après le push. "
+                        "Le serveur ne recompile que le code modifié."
+                    }
+                }
+                form.inline method="post" action="/update/auto" {
+                    input type="hidden" name="on" value=(if auto { "0" } else { "1" });
+                    button.sw-btn type="submit" aria-pressed=(auto) aria-label="Déploiement automatique" { span class=(if auto { "sw on" } else { "sw" }) {} }
+                }
+            }
+        }
         @if u.running || !u.last_log.is_empty() {
             div.card #update-log style="margin-bottom:20px" data-running=(u.running) {
                 div.card-h {

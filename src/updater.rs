@@ -20,6 +20,14 @@ use std::time::Duration;
 
 const UPDATER: &str = "devhub-updater";
 const UPDATER_IMAGE: &str = "docker:27-cli";
+/// docker:27-cli with git already installed, made once in the background (saves the
+/// `apk add git` of every update).
+const UPDATER_GIT_IMAGE: &str = "devhub-updater:git";
+/// Setting: deploy every new commit of the branch as soon as it is pushed.
+pub const AUTO_SETTING: &str = "auto_deploy";
+/// How often the branch head is polled when automatic deployment is on. Conditional
+/// requests (ETag) answered 304 don't count against GitHub's rate limit.
+const WATCH_EVERY: Duration = Duration::from_secs(20);
 const CHECK_EVERY: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone)]
@@ -234,13 +242,129 @@ async fn refresh_runner(st: &AppState, info: &mut Info) {
     }
 }
 
+pub fn auto_deploy(st: &AppState) -> bool {
+    db::setting(&st.db.lock().unwrap(), AUTO_SETTING).is_some()
+}
+
+/// Full check every 30 min; with automatic deployment, the branch head every 20 s,
+/// and a deployment as soon as it moves.
 pub fn spawn_periodic(st: AppState) {
+    tokio::spawn(prepare_git_image(st.clone()));
     tokio::spawn(async move {
+        let mut last_check = 0;
+        let mut etag: Option<String> = None;
+        let mut remote: Option<String> = None;
+        // A commit whose deployment failed is not retried in a loop: only a newer one is.
+        let mut attempted: Option<String> = None;
         loop {
-            check(&st).await;
-            tokio::time::sleep(CHECK_EVERY).await;
+            if db::now() - last_check >= CHECK_EVERY.as_secs() as i64 {
+                check(&st).await;
+                last_check = db::now();
+            }
+            if auto_deploy(&st) {
+                if let Ok(Some((sha, tag))) = branch_head(etag.as_deref()).await {
+                    remote = Some(sha);
+                    etag = Some(tag);
+                }
+                let local = local_head(&repo_dir()).ok().map(|h| h.0);
+                if let (Some(r), Some(l)) = (&remote, &local) {
+                    if r != l && attempted.as_ref() != Some(r) && !updater_running(&st).await {
+                        attempted = Some(r.clone());
+                        check(&st).await;
+                        last_check = db::now();
+                        match run_update(&st).await {
+                            Ok(()) => db::audit(&st.db.lock().unwrap(), "system", "devhub.autodeploy", &r[..7.min(r.len())]),
+                            Err(e) => db::audit(&st.db.lock().unwrap(), "system", "devhub.autodeploy.error", &format!("{e:#}")),
+                        }
+                    }
+                }
+                tokio::time::sleep(WATCH_EVERY).await;
+            } else {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
         }
     });
+}
+
+/// Head sha of the branch, or Ok(None) when unchanged since `etag` (HTTP 304).
+async fn branch_head(etag: Option<&str>) -> anyhow::Result<Option<(String, String)>> {
+    let dir = repo_dir();
+    let (_, branch) = local_head(&dir)?;
+    let slug = github_slug(&dir).context("dépôt GitHub introuvable")?;
+    let mut req = github(&format!("https://api.github.com/repos/{slug}/commits/{branch}"))
+        .header("Accept", "application/vnd.github.sha")
+        .timeout(Duration::from_secs(10));
+    if let Some(e) = etag {
+        req = req.header("If-None-Match", e);
+    }
+    let resp = req.send().await?;
+    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(None);
+    }
+    let resp = resp.error_for_status()?;
+    let tag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    Ok(Some((resp.text().await?.trim().to_string(), tag)))
+}
+
+async fn updater_running(st: &AppState) -> bool {
+    st.docker
+        .inspect_container(UPDATER, None::<InspectContainerOptions>)
+        .await
+        .ok()
+        .and_then(|c| c.state)
+        .and_then(|s| s.running)
+        .unwrap_or(false)
+}
+
+/// Builds `devhub-updater:git` once: docker:27-cli + git, committed from a throwaway container.
+async fn prepare_git_image(st: AppState) {
+    let d = &st.docker;
+    if st.cfg.self_container.is_none() || d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
+        return;
+    }
+    let res: anyhow::Result<()> = async {
+        if d.inspect_image(UPDATER_IMAGE).await.is_err() {
+            crate::docker::pull(d, UPDATER_IMAGE).await?;
+        }
+        let name = "devhub-updater-prep";
+        let _ = d.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+        let cfg = Config {
+            image: Some(UPDATER_IMAGE.to_string()),
+            cmd: Some(vec!["apk".into(), "add".into(), "-q".into(), "--no-cache".into(), "git".into()]),
+            ..Default::default()
+        };
+        d.create_container(Some(CreateContainerOptions { name, platform: None }), cfg).await?;
+        d.start_container::<String>(name, None).await?;
+        let mut w = d.wait_container(name, None::<bollard::container::WaitContainerOptions<String>>);
+        let code = match w.next().await {
+            Some(Ok(r)) => r.status_code,
+            _ => -1,
+        };
+        if code == 0 {
+            let (repo, tag) = UPDATER_GIT_IMAGE.split_once(':').unwrap();
+            d.commit_container(
+                bollard::image::CommitContainerOptions { container: name, repo, tag, ..Default::default() },
+                Config::<String>::default(),
+            )
+            .await?;
+        }
+        let _ = d.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+        anyhow::ensure!(code == 0, "apk add git a échoué ({code})");
+        Ok(())
+    }
+    .await;
+    if let Err(e) = res {
+        tracing::warn!("image de mise à jour avec git : {e:#}");
+    }
+}
+
+pub async fn set_auto(State(st): State<AppState>, jar: CookieJar, axum::Form(f): axum::Form<std::collections::HashMap<String, String>>) -> Result<Redirect, Response> {
+    let who = auth::require_admin(&st, &jar)?;
+    let on = f.get("on").is_some_and(|v| v == "1");
+    let c = st.db.lock().unwrap();
+    db::set_setting(&c, AUTO_SETTING, on.then_some("1")).map_err(|e| AppError(e).into_response())?;
+    db::audit(&c, &who.actor(), if on { "devhub.autodeploy.on" } else { "devhub.autodeploy.off" }, "");
+    Ok(Redirect::to("/update"))
 }
 
 pub async fn check_now(State(st): State<AppState>, jar: CookieJar) -> Result<Redirect, Response> {
@@ -285,9 +409,16 @@ pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
         }
     }
 
-    if d.inspect_image(UPDATER_IMAGE).await.is_err() {
-        crate::docker::pull(d, UPDATER_IMAGE).await?;
-    }
+    // Never cut an update in progress (it would stop halfway through `docker compose up`).
+    anyhow::ensure!(!updater_running(st).await, "une mise à jour est déjà en cours");
+    let image = if d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
+        UPDATER_GIT_IMAGE
+    } else {
+        if d.inspect_image(UPDATER_IMAGE).await.is_err() {
+            crate::docker::pull(d, UPDATER_IMAGE).await?;
+        }
+        UPDATER_IMAGE
+    };
     let _ = d.remove_container(UPDATER, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
 
     // The token is passed as an env var and turned into an auth header, never written to disk.
@@ -328,7 +459,7 @@ step "terminé""#;
         env.push(format!("TOKEN={t}"));
     }
     let cfg = Config {
-        image: Some(UPDATER_IMAGE.to_string()),
+        image: Some(image.to_string()),
         cmd: Some(vec!["sh".into(), "-c".into(), script.into()]),
         env: Some(env),
         host_config: Some(HostConfig {

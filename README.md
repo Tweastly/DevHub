@@ -56,6 +56,8 @@ docker compose up -d
 ```
 Le jeton sert à vérifier les versions et à faire le `git pull`. Il n'est jamais écrit sur le disque.
 
+**Déploiement automatique.** Sur la page Mise à jour, active « Déploiement automatique » : DevHub surveille la branche toutes les 20 secondes et déploie chaque nouveau commit tout seul. Le serveur ne recompile que le code modifié (cache de compilation conservé entre les builds), donc ton changement est en ligne peu après le push. Un commit dont le déploiement échoue n'est pas retenté en boucle : le suivant le sera.
+
 **Mise à jour rapide (moins d'une minute).** À chaque push sur `main`, GitHub Actions compile DevHub (`.github/workflows/binary.yml`, environ 5 à 8 min, sans action tierce : il marche quelle que soit la politique « actions autorisées » du dépôt) et publie le binaire sur la release `edge` du dépôt. Le bouton **Mettre à jour** télécharge ce binaire avec le même jeton, et l'image Docker ne fait que le copier : le panel redémarre en 20 à 30 secondes environ. La page Mise à jour indique si le binaire est prêt. S'il ne l'est pas encore (CI en cours, serveur ARM), DevHub compile sur le serveur en réutilisant le cache de compilation, donc seul le code modifié est recompilé. La toute première mise à jour vers cette version compile encore entièrement.
 
 ## Connecter Claude Desktop à un projet

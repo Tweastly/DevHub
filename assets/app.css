@@ -678,3 +678,4 @@ textarea { font-family: var(--mono); font-size: 13px; line-height: 1.7; min-heig
 /* An administrator sees every project: the list doesn't apply. */
 form:has(input[name=role][value=admin]:checked) .scope { opacity: .45; pointer-events: none; }
 @media (max-width: 900px) { .roles { grid-template-columns: 1fr; } }
+.sw-btn { all: unset; cursor: pointer; display: inline-flex; border-radius: 999px; } .sw-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
