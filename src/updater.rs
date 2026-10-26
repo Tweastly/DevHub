@@ -159,7 +159,7 @@ async fn refresh_runner(st: &AppState, info: &mut Info) {
     match d.inspect_container(UPDATER, None::<InspectContainerOptions>).await {
         Ok(c) => {
             info.running = c.state.and_then(|s| s.running).unwrap_or(false);
-            let mut s = d.logs::<String>(UPDATER, Some(LogsOptions { stdout: true, stderr: true, tail: "15".into(), ..Default::default() }));
+            let mut s = d.logs::<String>(UPDATER, Some(LogsOptions { stdout: true, stderr: true, tail: "300".into(), ..Default::default() }));
             let mut out = String::new();
             while let Some(Ok(l)) = s.next().await {
                 out.push_str(&l.to_string());
@@ -252,4 +252,44 @@ pub async fn refresh(st: &AppState) {
     let mut cur = st.update.lock().unwrap();
     cur.running = info.running;
     cur.last_log = info.last_log;
+}
+
+/// Live updater logs (SSE). "reset" first (events need non-empty data or browsers drop them), then the whole log followed as it grows
+/// ("log"), then "done" with the exit code. The updater container outlives DevHub's
+/// own restart, so the browser just reconnects and gets the full log again.
+pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    if !auth::is_logged_in(&st, &jar) {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+    let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);
+    tokio::spawn(async move {
+        let d = &st.docker;
+        if d.inspect_container(UPDATER, None::<InspectContainerOptions>).await.is_err() {
+            let _ = tx.send(Event::default().event("idle").data("none")).await;
+            return;
+        }
+        if tx.send(Event::default().event("reset").data("1")).await.is_err() {
+            return;
+        }
+        let opts = LogsOptions::<String> { follow: true, stdout: true, stderr: true, tail: "all".into(), ..Default::default() };
+        let mut logs = d.logs(UPDATER, Some(opts));
+        while let Some(Ok(chunk)) = logs.next().await {
+            if tx.send(Event::default().event("log").data(chunk.to_string())).await.is_err() {
+                return; // browser gone
+            }
+        }
+        // The stream ends when the container exits.
+        let code = d
+            .inspect_container(UPDATER, None::<InspectContainerOptions>)
+            .await
+            .ok()
+            .and_then(|c| c.state)
+            .and_then(|s| s.exit_code)
+            .unwrap_or(-1);
+        st.update.lock().unwrap().running = false;
+        let _ = tx.send(Event::default().event("done").data(code.to_string())).await;
+    });
+    let s = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|e| (Ok::<_, std::convert::Infallible>(e), rx)) });
+    Sse::new(s).keep_alive(KeepAlive::default()).into_response()
 }

@@ -574,3 +574,8 @@ textarea { font-family: var(--mono); font-size: 12.5px; line-height: 1.7; min-he
   .tbl.cards td:last-child { margin-left: auto; }
   .tbl.cards tr.day { display: block; }
 }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.steps li { display: flex; gap: 12px; align-items: flex-start; }
+.steps li b { display: block; font-size: 13.5px; }
+.steps li .muted { font-size: 12.5px; }
+.list-row .t code { max-width: 100%; }

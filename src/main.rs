@@ -159,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/update", get(web::update::page))
         .route("/update/check", post(updater::check_now))
         .route("/update/apply", post(updater::apply))
+        .route("/update/stream", get(updater::stream))
         .route("/claude", get(web::claude::page))
         .route("/claude/admin/{action}", post(mcp_admin::admin_action))
         .route("/projects", get(web::projects::list).post(create_project))

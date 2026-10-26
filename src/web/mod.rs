@@ -496,7 +496,7 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 }
                 div.me {
                     span.avatar.round.g0.sm { (pk_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "P".into())) }
-                    div.who { "Propriétaire" span { (pk_name) " · passkey" } }
+                    div.who { "Propriétaire" span { @if ctx.passkey.is_some() { (pk_name) " · passkey" } @else { "connecté par passkey" } } }
                     div.row {
                         button.icon-btn type="button" data-theme-toggle title="Changer de thème" aria-label="Changer de thème" { (icon("sun")) }
                         form.inline method="post" action="/logout" { button.icon-btn title="Déconnexion" aria-label="Déconnexion" { (icon("logout")) } }

@@ -11,7 +11,6 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     let short = |s: &Option<String>| s.as_deref().map(|s| s[..7.min(s.len())].to_string()).unwrap_or_else(|| "?".into());
     let gh = u.repo.as_ref().map(|r| format!("https://github.com/{r}"));
     let body = html! {
-        @if u.running { meta http-equiv="refresh" content="4"; }
         div.page-head { div { h1 { "Mise à jour" } p.lead { "DevHub vérifie GitHub toutes les 30 min. La mise à jour reconstruit l'image et redémarre le panel ; tes projets continuent de tourner." } } }
         @if let Some(e) = &u.error {
             div.flash { (alert("err", html! { b { (e.split(" (").next().unwrap_or(e)) } @if e.contains("TOKEN") { br; "Dépôt privé ? Définis " code { "DEVHUB_GITHUB_TOKEN" } "." } })) }
@@ -39,10 +38,15 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
             }
         }
         @if u.running || !u.last_log.is_empty() {
-            div.card style="margin-bottom:20px" {
-                div.card-h { @if u.running { span.live-tag { "Mise à jour en cours… DevHub va redémarrer" } } @else { h3 { "Dernière mise à jour" } } }
-                pre.logs.short { (u.last_log) }
+            div.card #update-log style="margin-bottom:20px" data-running=(u.running) {
+                div.card-h {
+                    @if u.running { span.live-tag #upstate { "Mise à jour en cours…" } } @else { h3 { "Dernière mise à jour" } }
+                    div.end { span.muted #uphint style="font-size:12.5px" { @if u.running { "DevHub va redémarrer : la page se reconnecte toute seule." } } }
+                }
+                // data-ready: the generic log widget must not touch it, UPDATE_JS owns it.
+                pre.logs #uplog data-ready=[u.running.then_some("1")] { (u.last_log) }
             }
+            @if u.running { script { (PreEscaped(UPDATE_JS)) } }
         }
         @if u.available() {
             div.card {
@@ -60,3 +64,28 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
         actions: html! {},
     }, body))
 }
+
+/// Follows the updater over SSE. While DevHub restarts the stream drops; EventSource
+/// reconnects on its own and the server replays the whole log ("reset" then "log").
+const UPDATE_JS: &str = r#"
+(()=>{
+const pre=document.getElementById('uplog'),state=document.getElementById('upstate'),hint=document.getElementById('uphint');
+if(!pre)return;
+let restarting=false;
+const set=(t,cls)=>{state.textContent=t;state.className='live-tag'+(cls?' '+cls:'')};
+const add=t=>{const near=pre.scrollHeight-pre.scrollTop-pre.clientHeight<60;
+  t.split('\n').filter(Boolean).forEach(l=>{const s=document.createElement('span');s.className='l'+(/^==|error|Error|ERROR|failed/.test(l)?' err':'');
+    if(l.startsWith('=='))s.style.color='#6ea8ff';s.textContent=l;pre.append(s)});
+  if(near)pre.scrollTop=pre.scrollHeight};
+const es=new EventSource('/update/stream');
+es.addEventListener('reset',()=>{pre.textContent='';if(restarting){set('Reconnecté — suite de la mise à jour');hint.textContent='';}});
+es.addEventListener('log',e=>add(e.data));
+es.addEventListener('done',e=>{es.close();
+  if(e.data==='0'){set('Terminé','');state.style.color='var(--ok)';hint.textContent='Rechargement de la page…';setTimeout(()=>location.reload(),2500)}
+  else{set('Échec (code '+e.data+')','off');hint.textContent='Regarde les logs ci-dessus.'}});
+es.addEventListener('idle',()=>{es.close();set('Aucune mise à jour en cours','off')});
+es.onerror=()=>{if(es.readyState!==2){restarting=true;set('DevHub redémarre… reconnexion','off');hint.textContent='C\'est normal pendant une mise à jour.'}};
+document.addEventListener('devhub:load',()=>es.close(),{once:true});
+pre.scrollTop=pre.scrollHeight;
+})();
+"#;
