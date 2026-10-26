@@ -65,6 +65,19 @@ fn repo_dir() -> String {
 }
 
 /// Reads HEAD without needing git in the image (loose ref, then packed-refs).
+/// Commit this process was started from. The helper pulls before it builds: when the build
+/// fails, the repo is already at the new commit but the old binary keeps running, and must
+/// still offer the update. Read once, at startup (spawn_periodic).
+static RUNNING: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+
+fn running_head() -> anyhow::Result<(String, String)> {
+    if let Some(h) = RUNNING.get() {
+        return Ok(h.clone());
+    }
+    let h = local_head(&repo_dir())?;
+    Ok(RUNNING.get_or_init(|| h).clone())
+}
+
 fn local_head(dir: &str) -> anyhow::Result<(String, String)> {
     let head = std::fs::read_to_string(format!("{dir}/.git/HEAD")).context("dépôt introuvable (monte-le sur /repo)")?;
     let head = head.trim();
@@ -186,7 +199,7 @@ pub async fn check(st: &AppState) {
     info.checked_at = Some(db::now());
     info.error = None;
     let res: anyhow::Result<()> = async {
-        let (local, branch) = local_head(&dir)?;
+        let (local, branch) = running_head()?;
         let slug = github_slug(&dir).context("dépôt GitHub introuvable dans .git/config")?;
         info.local = Some(local.clone());
         info.branch = branch.clone();
@@ -249,6 +262,7 @@ pub fn auto_deploy(st: &AppState) -> bool {
 /// Full check every 30 min; with automatic deployment, the branch head every 20 s,
 /// and a deployment as soon as it moves.
 pub fn spawn_periodic(st: AppState) {
+    let _ = running_head();
     tokio::spawn(prepare_git_image(st.clone()));
     tokio::spawn(async move {
         let mut last_check = 0;
@@ -266,7 +280,7 @@ pub fn spawn_periodic(st: AppState) {
                     remote = Some(sha);
                     etag = Some(tag);
                 }
-                let local = local_head(&repo_dir()).ok().map(|h| h.0);
+                let local = running_head().ok().map(|h| h.0);
                 if let (Some(r), Some(l)) = (&remote, &local) {
                     if r != l && attempted.as_ref() != Some(r) && !updater_running(&st).await {
                         attempted = Some(r.clone());
