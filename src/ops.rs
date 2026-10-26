@@ -137,6 +137,11 @@ pub fn parse_ports(s: &str) -> R<Vec<PortSpec>> {
     Ok(v)
 }
 
+/// POSIX-style variable name: letters, digits and _, not starting with a digit.
+pub fn valid_env_key(k: &str) -> bool {
+    !k.is_empty() && k.len() <= 128 && !k.starts_with(|c: char| c.is_ascii_digit()) && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 pub fn parse_env(s: &str) -> BTreeMap<String, String> {
     s.lines()
         .filter_map(|l| l.trim().split_once('='))

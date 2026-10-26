@@ -192,6 +192,30 @@
       np.addEventListener('input', upd);
       upd();
     }
+    // Environment variables: edit fills the add row; pasting KEY=value splits it,
+    // several lines go to the raw editor.
+    const ek = $('#envkey'), ev = $('#envval'), eb = $('#envbtn');
+    if (ek) {
+      ek.addEventListener('input', () => { const p = ek.selectionStart; ek.value = ek.value.toUpperCase().replace(/[\s-]/g, '_'); ek.setSelectionRange(p, p); });
+      ek.addEventListener('paste', e => {
+        const t = (e.clipboardData || window.clipboardData).getData('text');
+        const lines = t.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#'));
+        if (lines.length > 1) {
+          e.preventDefault();
+          const raw = $('#envraw'); raw.open = true;
+          const ta = $('textarea', raw); ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + lines.join('\n'); ta.focus();
+        } else if (t.includes('=')) {
+          e.preventDefault();
+          const i = t.indexOf('='); ek.value = t.slice(0, i).trim().replace(/^export\s+/, ''); ev.value = t.slice(i + 1).trim().replace(/^["']|["']$/g, ''); ev.focus();
+        }
+      });
+      $$('[data-env-edit]').forEach(b => b.addEventListener('click', () => {
+        ek.value = b.dataset.envEdit; ev.value = b.dataset.envValue ?? '';
+        eb.textContent = 'Enregistrer'; ev.focus(); ev.select();
+        $('#envadd').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }));
+    }
+
     // Settings: warn when the new RAM limit makes the total exceed the server's RAM.
     const rf = $('#res-form');
     if (rf && !rf.dataset.ready) {

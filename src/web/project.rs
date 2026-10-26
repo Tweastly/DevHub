@@ -303,8 +303,8 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             (back_field(&here))
                             button class=(if !x.p.public { "on" } else { "" }) {
                                 span.ic { (icon("lock")) }
-                                span { b { "Privé (passkey)" } span.d { "Seul le propriétaire, connecté, voit le site. Les visiteurs tombent sur « Projet privé »." } }
-                                span class={"sw" (if !x.p.public { " on" } else { "" })} {}
+                                span { b { "Privé (passkey)" } span.d { "Seuls les profils autorisés, connectés, voient le site. Les visiteurs tombent sur « Projet privé »." } }
+                                span.radio {}
                             }
                         }
                         form method="post" action={(base) "/public"} {
@@ -312,7 +312,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             button class=(if x.p.public { "on" } else { "" }) {
                                 span.ic { (icon("globe")) }
                                 span { b { "Public" } span.d { "Tout le monde peut ouvrir les adresses ci-dessous, sans se connecter." } }
-                                span class={"sw" (if x.p.public { " on" } else { "" })} {}
+                                span.radio {}
                             }
                         }
                     }
@@ -572,30 +572,42 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 div.card #env {
                     div.card-h { h3 { "Variables d'environnement" } span.sub { "injectées au démarrage du conteneur" } }
                     @if !x.p.env.is_empty() {
-                        table.tbl {
-                            thead { tr { th { "Clé" } th { "Valeur" } } }
-                            tbody {
-                                @for (k, v) in &x.p.env {
-                                    tr {
-                                        td.mono style="font-weight:650" { (k) @if is_secret(k) { " " span.chip style="font-family:var(--sans)" { "secret" } } }
-                                        td.mono style="font-size:12.5px;word-break:break-all" {
-                                            @if is_secret(k) {
-                                                details { summary style="cursor:pointer;list-style:none" { span.dim { (mask(v)) } " " span.link { "Afficher" } } (v) }
-                                            } @else { (v) }
+                        div.envlist {
+                            @for (k, v) in &x.p.env {
+                                div.envrow {
+                                    span.k { (k) @if is_secret(k) { " " span.tag { "secret" } } }
+                                    span.v {
+                                        @if is_secret(k) {
+                                            details { summary { span.dim { (mask(v)) } " " span.link { "Afficher" } } (v) }
+                                        } @else { (v) }
+                                    }
+                                    span.acts {
+                                        button.btn.sm.ghost type="button" data-env-edit=(k) data-env-value=[(!is_secret(k)).then_some(v.as_str())] { "Modifier" }
+                                        form.inline method="post" action={(base) "/env-remove"} onsubmit={"return confirm('Supprimer " (k) " ? Le conteneur est recréé.')"} {
+                                            (back_field(&format!("{here}#env")))
+                                            input type="hidden" name="key" value=(k);
+                                            button.btn.sm.ghost style="color:var(--err)" { "Supprimer" }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    div.card-b {
+                    form.envadd #envadd method="post" action={(base) "/env-set"} {
+                        (back_field(&format!("{here}#env")))
+                        label.field { span.lbl { "Nom" } input.mono-input #envkey name="key" required placeholder="DATABASE_URL" autocomplete="off" spellcheck="false" pattern="[A-Za-z_][A-Za-z0-9_]*" title="Lettres, chiffres et _"; }
+                        label.field { span.lbl { "Valeur" } input.mono-input #envval name="value" placeholder="postgres://…" autocomplete="off" spellcheck="false"; }
+                        button.btn.primary #envbtn { "Ajouter" }
+                    }
+                    div.card-f {
+                        span.help style="margin:0" { "Astuce : colle une ligne " code { "CLE=valeur" } " dans « Nom », elle se découpe toute seule. Chaque changement recrée le conteneur (" code { "/workspace" } " est conservé)." }
                         form method="post" action={(base) "/env"} onsubmit="return confirm('Appliquer les variables recrée le conteneur. Continuer ?')" {
                             (back_field(&format!("{here}#env")))
-                            details open[x.p.env.is_empty()] {
-                                summary style="cursor:pointer;font-weight:650;font-size:13px;margin-bottom:10px" { (icon_c("pencil", "sm")) " Modifier en texte brut" }
+                            details #envraw style="margin-top:12px" {
+                                summary style="cursor:pointer;font-weight:500;font-size:13px;margin-bottom:10px" { "Modifier en texte brut (coller un .env entier)" }
                                 textarea name="env" spellcheck="false" placeholder="NODE_ENV=production\nPORT=3000" { (env_text) }
                                 p.help { "Une variable par ligne : " code { "CLE=valeur" } ". Les clés contenant SECRET, KEY, TOKEN ou PASSWORD sont masquées à l'affichage." }
-                                button.btn style="margin-top:12px" { (icon("wrench")) "Appliquer (rebuild)" }
+                                button.btn style="margin-top:12px" { "Remplacer toutes les variables" }
                             }
                         }
                     }

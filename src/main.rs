@@ -378,6 +378,20 @@ async fn project_action(
         "unpin" => ops::Change::Pin(false),
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),
         "env" => ops::Change::Env(ops::parse_env(field("env"))),
+        // One variable at a time (the table's add / edit / delete); the same key replaces.
+        "env-set" | "env-remove" => {
+            let key = field("key").trim().to_string();
+            if !ops::valid_env_key(&key) {
+                return Ok(fail("Nom de variable invalide : lettres, chiffres et _ (sans commencer par un chiffre).".into()));
+            }
+            let mut env = ops::load(&st, &name).map_err(|e| fail(e).into_response())?.env;
+            if action == "env-set" {
+                env.insert(key, field("value").to_string());
+            } else {
+                env.remove(&key);
+            }
+            ops::Change::Env(env)
+        }
         "delete" => {
             if field("confirm") != name {
                 return Ok(fail(format!("Tape exactement « {name} » pour confirmer la suppression.")));

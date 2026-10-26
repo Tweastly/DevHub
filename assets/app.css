@@ -679,3 +679,20 @@ textarea { font-family: var(--mono); font-size: 13px; line-height: 1.7; min-heig
 form:has(input[name=role][value=admin]:checked) .scope { opacity: .45; pointer-events: none; }
 @media (max-width: 900px) { .roles { grid-template-columns: 1fr; } }
 .sw-btn { all: unset; cursor: pointer; display: inline-flex; border-radius: 999px; } .sw-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Environment variables: one row per variable, an always-visible add row. */
+.envrow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 16px; align-items: center; padding: 10px 16px 10px 24px; border-bottom: 1px solid var(--line); }
+.envrow .k { font: 500 13px var(--mono); overflow-wrap: anywhere; }
+.envrow .v { font: 13px var(--mono); color: var(--text-body); overflow-wrap: anywhere; min-width: 0; }
+.envrow .v summary { cursor: pointer; list-style: none; }
+.envrow .v summary::-webkit-details-marker { display: none; }
+.envrow .acts { display: flex; gap: 2px; }
+.envadd { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 12px; align-items: end; padding: 18px 24px; }
+.envadd .btn { min-height: 42px; }
+@media (max-width: 900px) {
+  .envrow { grid-template-columns: minmax(0, 1fr) auto; padding-left: 16px; }
+  .envrow .v { grid-column: 1 / -1; grid-row: 2; }
+  .envadd { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+}
+/* Private / public: a radio mark, the selected card keeps its accent border. */
+.access .radio { margin-left: auto; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-2); box-sizing: border-box; }
+.access button.on .radio { border: 5px solid var(--accent); }
