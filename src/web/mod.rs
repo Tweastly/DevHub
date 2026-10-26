@@ -7,6 +7,7 @@ pub mod auth;
 pub mod claude;
 pub mod files;
 pub mod overview;
+pub mod profiles;
 pub mod project;
 pub mod projects;
 pub mod security;
@@ -390,8 +391,11 @@ pub struct Ctx {
     pub update: UpdateInfo,
     pub admin: bool,
     pub passkey: Option<(i64, String)>,
+    /// Passkeys of the signed-in profile.
     pub passkey_count: usize,
     pub theme: Option<&'static str>,
+    /// Who is signed in; `projects` only holds what this profile may see.
+    pub profile: db::Profile,
 }
 
 impl Ctx {
@@ -418,10 +422,11 @@ impl Ctx {
 /// Authenticates and gathers what the shell needs. Statuses come from the collector's
 /// cache, so building the context never waits on Docker.
 pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
-    session::require(st, jar)?;
+    let profile = session::current_profile(st, jar).ok_or_else(|| axum::response::Redirect::to("/login").into_response())?;
     let c = st.db.lock().unwrap();
-    let projects = db::list_projects(&c).unwrap_or_default();
-    let passkey_count = db::passkeys(&c).map(|k| k.len()).unwrap_or(0);
+    let mut projects = db::list_projects(&c).unwrap_or_default();
+    projects.retain(|p| profile.sees(&p.name));
+    let passkey_count = db::passkey_rows(&c).iter().filter(|k| k.profile_id == profile.id).count();
     let admin = db::setting(&c, crate::mcp_admin::SETTING).is_some();
     drop(c);
     Ok(Ctx {
@@ -434,7 +439,39 @@ pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
         passkey_count,
         theme: theme(jar),
         projects,
+        profile,
     })
+}
+
+/// Same as `ctx`, for administrator-only pages.
+pub fn ctx_admin(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
+    let ctx = ctx(st, jar)?;
+    if ctx.profile.admin {
+        Ok(ctx)
+    } else {
+        Err((axum::http::StatusCode::FORBIDDEN, axum::response::Html(forbidden_page())).into_response())
+    }
+}
+
+/// Shown when a profile reaches a page its permissions don't cover.
+pub fn forbidden_page() -> String {
+    html! {
+        (DOCTYPE)
+        html lang="fr" {
+            head { (head("Accès refusé · DevHub")) }
+            body {
+                main.content style="max-width:560px;margin:12vh auto" {
+                    div.card.card-b {
+                        p.label { "403 · accès refusé" }
+                        h1 style="font-size:24px;margin:8px 0" { "Ton profil n'a pas accès à cette page" }
+                        p.muted style="margin-bottom:20px" { "Demande à l'administrateur de DevHub d'élargir les autorisations de ton profil." }
+                        a.btn href="/" { "← Retour au tableau de bord" }
+                    }
+                }
+            }
+        }
+    }
+    .into_string()
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -444,6 +481,7 @@ pub enum Nav<'a> {
     Project(&'a str),
     Claude,
     Passkeys,
+    Profiles,
     Audit,
     Update,
     Menu,
@@ -482,9 +520,9 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
                             kbd { "/" }
                         }
                         div.acts {
-                            (update_pill(ctx))
+                            @if ctx.profile.admin { (update_pill(ctx)) }
                             (sh.actions)
-                            a.btn.primary href="/projects/new" { "Nouveau projet" }
+                            @if ctx.profile.admin { a.btn.primary href="/projects/new" { "Nouveau projet" } }
                         }
                     }
                     (sidebar(ctx, sh.nav))
@@ -492,7 +530,7 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
                         header.mobile-head {
                             (logo(22)) span { "DevHub" }
                             div.end {
-                                @if ctx.update.available() { a.icon-btn href="/update" title="Mise à jour disponible" aria-label="Mise à jour disponible" { (icon("refresh")) } }
+                                @if ctx.profile.admin && ctx.update.available() { a.icon-btn href="/update" title="Mise à jour disponible" aria-label="Mise à jour disponible" { (icon("refresh")) } }
                                 button.icon-btn type="button" data-theme-toggle title="Thème" aria-label="Changer de thème" { (icon("sun")) }
                             }
                         }
@@ -522,24 +560,37 @@ fn update_pill(ctx: &Ctx) -> Markup {
     }
 }
 
+/// Pages of the "Paramètres" category, for this profile: (nav, link, label, badge).
+fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, Option<(String, bool)>)> {
+    let mut v = Vec::new();
+    if ctx.profile.admin {
+        v.push((Nav::Claude, "/claude", "Claude", ctx.admin.then(|| ("admin".to_string(), false))));
+    }
+    v.push((Nav::Passkeys, "/security", "Mes passkeys", Some((ctx.passkey_count.to_string(), false))));
+    if ctx.profile.admin {
+        let n = db::profiles(&ctx.st.db.lock().unwrap()).len();
+        v.push((Nav::Profiles, "/profiles", "Profils", Some((n.to_string(), false))));
+        v.push((Nav::Audit, "/audit", "Journal", None));
+        v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
+    }
+    v
+}
+
+fn is_settings(nav: Nav) -> bool {
+    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Audit | Nav::Update)
+}
+
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
     let on = |n: Nav| if n == nav { "on" } else { "" };
     let pinned: Vec<&Project> = ctx.projects.iter().filter(|p| p.pinned).collect();
     let h = &ctx.host;
-    let pk_name = ctx.passkey.as_ref().map(|p| p.1.clone()).unwrap_or_else(|| "passkey".into());
     let mem_pct = pct(h.mem_used_mb as f64, h.mem_total_mb as f64);
+    let device = ctx.passkey.as_ref().map(|p| p.1.clone());
     html! {
         aside.sidebar {
             nav.nav aria-label="Sections" {
                 a class=(on(Nav::Overview)) href="/" { "Vue d'ensemble" }
                 a class=(if matches!(nav, Nav::Projects) { "on" } else { "" }) href="/projects" { "Projets" span.count { (ctx.projects.len()) } }
-                a class=(on(Nav::Claude)) href="/claude" { "Claude" @if ctx.admin { span.tag-admin { "admin" } } }
-                a class=(on(Nav::Passkeys)) href="/security" { "Passkeys" span.count { (ctx.passkey_count) } }
-                a class=(on(Nav::Audit)) href="/audit" { "Journal" }
-                a class=(on(Nav::Update)) href="/update" {
-                    "Mise à jour"
-                    @if ctx.update.available() { span.count.solid { (ctx.update.pending.len()) } }
-                }
                 @if !pinned.is_empty() {
                     div.nav-label { "Épinglés" }
                     @for p in &pinned {
@@ -556,27 +607,51 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 }
             }
             div.side-foot {
-                div.srv {
-                    div.srv-h { span.nav-label style="padding:0" { "Serveur" } span.dim { (h.ncpu) " cœurs" } }
-                    div.meter {
-                        div.meter-h { "Processeur" b data-live="_host:cpu" { (format!("{:.0}", h.cpu_pct)) " %" } }
-                        (bar(h.cpu_pct, Some("_host:cpubar".into()), ""))
-                    }
-                    div.meter {
-                        div.meter-h { "Mémoire" b { span data-live="_host:memgb" { (gb(h.mem_used_mb)) } " / " (gb(h.mem_total_mb)) " Go" } }
-                        (bar(mem_pct, Some("_host:membar".into()), ""))
-                    }
-                    div.meter {
-                        div.meter-h { "Disque" b { span data-live="_host:disk" { (format!("{:.0}", h.disk_pct())) } " %" } }
-                        (bar(h.disk_pct(), Some("_host:diskbar".into()), ""))
+                @if ctx.profile.admin {
+                    div.srv {
+                        div.srv-h { span.nav-label style="padding:0" { "Serveur" } span.dim { (h.ncpu) " cœurs" } }
+                        div.meter {
+                            div.meter-h { "Processeur" b data-live="_host:cpu" { (format!("{:.0}", h.cpu_pct)) " %" } }
+                            (bar(h.cpu_pct, Some("_host:cpubar".into()), ""))
+                        }
+                        div.meter {
+                            div.meter-h { "Mémoire" b { span data-live="_host:memgb" { (gb(h.mem_used_mb)) } " / " (gb(h.mem_total_mb)) " Go" } }
+                            (bar(mem_pct, Some("_host:membar".into()), ""))
+                        }
+                        div.meter {
+                            div.meter-h { "Disque" b { span data-live="_host:disk" { (format!("{:.0}", h.disk_pct())) } " %" } }
+                            (bar(h.disk_pct(), Some("_host:diskbar".into()), ""))
+                        }
                     }
                 }
-                div.me {
-                    span.avatar.round.sm { (pk_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "P".into())) }
-                    div.who { "Propriétaire" span { @if ctx.passkey.is_some() { (pk_name) } @else { "connecté par passkey" } } }
-                    div.row {
-                        button.icon-btn.bare type="button" data-theme-toggle title="Changer de thème" aria-label="Changer de thème" { (icon("sun")) }
-                        form.inline method="post" action="/logout" { button.icon-btn.bare title="Déconnexion" aria-label="Déconnexion" { (icon("logout")) } }
+                // The profile row opens the "Paramètres" category (open while on one of its pages).
+                details.me-menu open[is_settings(nav)] {
+                    summary.me {
+                        span.avatar.round.sm { (initials(&ctx.profile.name)) }
+                        span.who {
+                            (ctx.profile.name)
+                            span {
+                                @if ctx.profile.name != ctx.profile.role() { (ctx.profile.role()) @if device.is_some() { " · " } }
+                                @if let Some(d) = &device { (d) }
+                            }
+                        }
+                        span.chev aria-hidden="true" { (icon_c("chevron-left", "sm")) }
+                    }
+                    nav.nav.settings aria-label="Paramètres" {
+                        div.nav-label { "Paramètres" }
+                        @for (n, link, label, badge) in settings_links(ctx) {
+                            a class=(on(n)) href=(link) {
+                                (label)
+                                @if let Some((b, solid)) = badge {
+                                    @if b == "admin" { span.tag-admin { "admin" } }
+                                    @else { span class=(if solid { "count solid" } else { "count" }) { (b) } }
+                                }
+                            }
+                        }
+                        div.me-acts {
+                            button.btn.ghost.sm type="button" data-theme-toggle { (icon_c("sun", "sm")) "Thème" }
+                            form.inline method="post" action="/logout" { button.btn.ghost.sm { (icon_c("logout", "sm")) "Déconnexion" } }
+                        }
                     }
                 }
             }
@@ -590,27 +665,31 @@ fn bottom_nav(nav: Nav) -> Markup {
         nav.bottom-nav aria-label="Navigation" {
             a class=(on(nav == Nav::Overview)) href="/" { (icon("grid")) "Accueil" }
             a class=(on(matches!(nav, Nav::Projects | Nav::Project(_)))) href="/projects" { (icon("box")) "Projets" }
-            a class=(on(nav == Nav::Claude)) href="/claude" { (icon("sparkles")) "Claude" }
-            a class=(on(nav == Nav::Audit)) href="/audit" { (icon("list")) "Journal" }
-            a class=(on(matches!(nav, Nav::Menu | Nav::Passkeys | Nav::Update))) href="/menu" { (icon("dots")) "Plus" }
+            a class=(on(matches!(nav, Nav::Menu) || is_settings(nav))) href="/menu" { (icon("sliders")) "Paramètres" }
         }
     }
 }
 
-/// Mobile "Plus" page: everything the bottom bar doesn't fit.
+/// Mobile "Paramètres" page: the category the desktop opens from the profile row.
 pub async fn menu(axum::extract::State(st): axum::extract::State<AppState>, jar: CookieJar) -> Result<Markup, Response> {
     let ctx = ctx(&st, &jar)?;
+    let row = "width:100%;background:none;border:0;border-top:1px solid var(--line);font:inherit;color:inherit;cursor:pointer;text-align:left";
     let body = html! {
-        div.page-head { div { h1 { "Plus" } p.lead { (ctx.host_name()) " · version " (ctx.version()) } } }
+        div.page-head { div { h1 { "Paramètres" } p.lead { (ctx.profile.name) " · " (ctx.profile.role()) } } }
         div.card {
-            a.list-row href="/security" { (icon("key")) span.t { "Passkeys" } span.count { (ctx.passkey_count) } }
-            a.list-row href="/update" { (icon("refresh")) span.t { "Mise à jour" } @if ctx.update.available() { span.count.solid { (ctx.update.pending.len()) } } }
-            a.list-row href="/projects/new" { (icon("plus")) span.t { "Nouveau projet" } }
-            button.list-row type="button" data-theme-toggle style="width:100%;background:none;border:0;border-top:1px solid var(--border);font:inherit;color:inherit;cursor:pointer;text-align:left" { (icon("sun")) span.t { "Changer de thème" } }
-            form method="post" action="/logout" { button.list-row style="width:100%;background:none;border:0;border-top:1px solid var(--border);font:inherit;color:var(--err);cursor:pointer;text-align:left" { (icon("logout")) span.t { "Déconnexion" } } }
+            @for (_, link, label, badge) in settings_links(&ctx) {
+                a.list-row href=(link) {
+                    span.t { (label) }
+                    @if let Some((b, solid)) = badge { @if b == "admin" { span.tag-admin { "admin" } } @else { span class=(if solid { "count solid" } else { "count" }) { (b) } } }
+                }
+            }
+            @if ctx.profile.admin { a.list-row href="/projects/new" { span.t { "Nouveau projet" } } }
+            button.list-row type="button" data-theme-toggle style=(row) { span.t { "Changer de thème" } }
+            form method="post" action="/logout" { button.list-row style={(row) ";color:var(--err)"} { span.t { "Déconnexion" } } }
         }
+        p.help style="margin-top:16px" { (ctx.host_name()) " · version " (ctx.version()) }
     };
-    Ok(render(&ctx, Shell { title: "Plus", nav: Nav::Menu, crumbs: vec![("DevHub".into(), Some("/".into())), ("Plus".into(), None)], actions: html! {} }, body))
+    Ok(render(&ctx, Shell { title: "Paramètres", nav: Nav::Menu, crumbs: vec![("DevHub".into(), Some("/".into())), ("Paramètres".into(), None)], actions: html! {} }, body))
 }
 
 // ---------- Empty-state illustrations ----------

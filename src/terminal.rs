@@ -20,9 +20,10 @@ pub async fn ws(
     Path(name): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    if !auth::is_logged_in(&st, &jar) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
+    let who = match auth::require_project(&st, &jar, &name, auth::Need::Shell) {
+        Ok(w) => w,
+        Err(_) => return StatusCode::FORBIDDEN.into_response(),
+    };
     // Cross-site WebSocket hijacking guard: browsers always send Origin on WS.
     if headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()) != Some(st.cfg.origin.as_str()) {
         return StatusCode::FORBIDDEN.into_response();
@@ -30,7 +31,7 @@ pub async fn ws(
     if db::get_project(&st.db.lock().unwrap(), &name).ok().flatten().is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    db::audit(&st.db.lock().unwrap(), "owner", "terminal.open", &name);
+    db::audit(&st.db.lock().unwrap(), &who.actor(), "terminal.open", &name);
     upgrade.on_upgrade(move |socket| async move {
         if let Err(e) = session(st, name, socket).await {
             tracing::warn!("terminal: {e:#}");

@@ -25,8 +25,8 @@ fn shell(title: &str, origin: &str, footer: &str, lock: bool, body: Markup) -> M
 
 const AUTH_CSS: &str = r#"
 .auth-page{min-height:100vh;display:grid;place-items:center;padding:24px 16px}
-.auth-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:38px 30px 26px;text-align:center;box-shadow:var(--shadow-lift)}
-.auth-card h1{font-size:21px;margin-bottom:8px}
+.auth-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:38px 30px 26px;text-align:center}
+.auth-card h1{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:8px}
 .auth-card .sub{color:var(--text-2);margin-bottom:26px}
 .auth-card .sub code{font-size:12.5px;background:var(--card-2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;color:var(--text)}
 .auth-card .code{font:700 13px var(--mono);color:var(--text-2);letter-spacing:.08em;margin-bottom:10px}
@@ -34,7 +34,7 @@ const AUTH_CSS: &str = r#"
 .auth-card .btn{width:100%;height:44px;font-size:14.5px}
 .auth-card .btn+.btn{margin-top:10px}
 .auth-card .detail{text-align:left;font:12px/1.5 var(--mono);color:var(--text-2);background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:-10px 0 22px;white-space:pre-wrap;overflow-wrap:anywhere}
-.auth-lock{display:grid;place-items:center;width:46px;height:46px;margin:0 auto 22px;border-radius:12px;background:var(--card-2);border:1px solid var(--border);color:var(--warn)}
+.auth-lock{display:grid;place-items:center;width:46px;height:46px;margin:0 auto 22px;border-radius:var(--r-sm);background:var(--card-2);border:1px solid var(--border);color:var(--warn)}
 .auth-lock svg{width:22px;height:22px}
 .auth-foot{margin-top:22px;font-size:12px;color:var(--text-3)}
 #msg{min-height:18px;margin:12px 0 0;justify-content:center}
@@ -49,7 +49,7 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
             p.sub { "Colle le setup token affiché dans les logs du serveur, puis crée ton passkey." }
             label.field { span.lbl { "Setup token" } input #setup.mono-input autocomplete="off" placeholder="xxxxxxxxxxxxxxxx"; }
             label.field { span.lbl { "Nom de l'appareil" } input #pkname value="Mon appareil"; }
-            button.btn.solid onclick="register(pkname.value, setup.value).then(()=>location.href=NEXT)" { (icon("key")) "Créer mon passkey" }
+            button.btn.primary onclick="register(pkname.value, setup.value).then(()=>location.href=NEXT)" { (icon("key")) "Créer mon passkey" }
         } @else {
             h1 { "Se connecter à DevHub" }
             p.sub {
@@ -57,7 +57,7 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
                     "pour accéder à " code { (n.split("://").nth(1).unwrap_or(n).split('/').next().unwrap_or("")) }
                 } @else { "Utilise ton passkey pour continuer." }
             }
-            button.btn.solid onclick="login()" autofocus { (icon("key")) "Se connecter avec un passkey" }
+            button.btn.primary onclick="login()" autofocus { (icon("key")) "Se connecter avec un passkey" }
         }
         p #msg.err-text {}
         script { (PreEscaped(format!("const NEXT={next_js};"))) (PreEscaped(WEBAUTHN_JS)) }
@@ -67,8 +67,27 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
 pub fn private_project(project: &str, login_url: &str, origin: &str, footer: &str) -> Markup {
     shell(&format!("{project} · accès privé"), origin, footer, true, html! {
         h1 { "Projet privé" }
-        p.sub { b style="color:var(--text)" { (project) } " est réservé au propriétaire. Connecte-toi pour continuer." }
-        a.btn.solid href=(login_url) { (icon("key")) "Se connecter avec un passkey" }
+        p.sub { b style="color:var(--text)" { (project) } " est réservé aux profils autorisés. Connecte-toi pour continuer." }
+        a.btn.primary href=(login_url) { (icon("key")) "Se connecter avec un passkey" }
+    })
+}
+
+/// Invitation link: the invited person creates the passkey of their profile on their own device.
+pub fn invite(token: &str, profile: Option<&db::Profile>, footer: &str) -> Markup {
+    let t = serde_json::to_string(token).unwrap().replace("</", "<\\/");
+    shell("Invitation · DevHub", "", footer, false, html! {
+        @if let Some(p) = profile {
+            h1 { "Rejoindre DevHub" }
+            p.sub { "Tu es invité sur le profil " b style="color:var(--text)" { (p.name) } " (" (p.role()) "). Crée ton passkey sur cet appareil : il remplacera tout mot de passe." }
+            label.field { span.lbl { "Nom de l'appareil" } input #pkname value="Mon appareil"; }
+            button.btn.primary onclick="register(pkname.value, null, TOKEN).then(()=>location.href='/')" { (icon("key")) "Créer mon passkey" }
+            p #msg.err-text {}
+            script { (PreEscaped(format!("const TOKEN={t};"))) (PreEscaped(WEBAUTHN_JS)) }
+        } @else {
+            h1 { "Invitation expirée" }
+            p.sub { "Ce lien a déjà servi ou a dépassé 48 h. Demande un nouveau lien à l'administrateur de DevHub." }
+            a.btn href="/login" { "Aller à la connexion" }
+        }
     })
 }
 
@@ -79,7 +98,7 @@ pub fn error_page(code: u16, title: &str, message: &str, detail: Option<&str>, a
         h1 { (title) }
         p.sub { (PreEscaped(message)) }
         @if let Some(d) = detail { pre.detail { (d) } }
-        button.btn.solid onclick="location.reload()" { (icon("refresh")) "Réessayer" }
+        button.btn.primary onclick="location.reload()" { (icon("refresh")) "Réessayer" }
         @if let Some((label, href)) = action { a.btn href=(href) { (label) } }
     })
 }
@@ -90,8 +109,8 @@ const enc=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').
 const msg=t=>{const m=document.getElementById('msg');if(m)m.textContent=t};
 const nice=e=>e.name==='NotAllowedError'?'opération annulée':e.message;
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json()}
-window.register=async function(name,setup_token){try{
-  const {id,options}=await post('/auth/register/start',{name,setup_token:setup_token||null});
+window.register=async function(name,setup_token,invite){try{
+  const {id,options}=await post('/auth/register/start',{name,setup_token:setup_token||null,invite:invite||null});
   const pk=options.publicKey;pk.challenge=dec(pk.challenge);pk.user.id=dec(pk.user.id);
   (pk.excludeCredentials||[]).forEach(c=>c.id=dec(c.id));
   const c=await navigator.credentials.create({publicKey:pk});

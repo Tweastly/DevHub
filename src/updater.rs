@@ -180,7 +180,7 @@ pub fn spawn_periodic(st: AppState) {
 }
 
 pub async fn check_now(State(st): State<AppState>, jar: CookieJar) -> Result<Redirect, Response> {
-    auth::require(&st, &jar)?;
+    auth::require_admin(&st, &jar)?;
     check(&st).await;
     Ok(Redirect::to("/update"))
 }
@@ -188,9 +188,9 @@ pub async fn check_now(State(st): State<AppState>, jar: CookieJar) -> Result<Red
 /// Starts the helper container. It mounts the repo at its *host* path so that
 /// compose's relative bind mounts (./data, ./Caddyfile) keep pointing at the right place.
 pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Response, Response> {
-    auth::require(&st, &jar)?;
+    let who = auth::require_admin(&st, &jar)?;
     run_update(&st).await.map_err(|e| AppError(e).into_response())?;
-    db::audit(&st.db.lock().unwrap(), "owner", "devhub.update", "");
+    db::audit(&st.db.lock().unwrap(), &who.actor(), "devhub.update", "");
     Ok(Redirect::to("/update").into_response())
 }
 
@@ -259,7 +259,7 @@ pub async fn refresh(st: &AppState) {
 /// own restart, so the browser just reconnects and gets the full log again.
 pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
     use axum::response::sse::{Event, KeepAlive, Sse};
-    if !auth::is_logged_in(&st, &jar) {
+    if auth::require_admin(&st, &jar).is_err() {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
     let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);

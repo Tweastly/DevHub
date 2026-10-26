@@ -369,7 +369,10 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
         }
         Change::Delete { keep_data } => {
             docker::destroy(d, name, keep_data).await.map_err(internal)?;
-            db::delete_project(&st.db.lock().unwrap(), name).map_err(internal)?;
+            let c = st.db.lock().unwrap();
+            db::delete_project(&c, name).map_err(internal)?;
+            db::rename_in_profiles(&c, name, None);
+            st.builds.lock().unwrap().remove(name);
         }
     }
     db::audit(&st.db.lock().unwrap(), actor, &format!("project.{label}"), &detail);

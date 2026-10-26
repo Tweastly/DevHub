@@ -30,7 +30,7 @@ fn link(q: &HashMap<String, String>, k: &str, v: Option<&str>) -> String {
 }
 
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
-    let ctx = ctx(&st, &jar)?;
+    let ctx = ctx_admin(&st, &jar)?;
     let (f, days) = filter(&q);
     let page: i64 = q.get("page").and_then(|p| p.parse().ok()).filter(|p| *p >= 1).unwrap_or(1);
     let (rows, total, counts) = {
@@ -121,7 +121,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
 }
 
 pub async fn csv(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Response, Response> {
-    crate::auth::require(&st, &jar)?;
+    crate::auth::require_admin(&st, &jar)?;
     let (f, _) = filter(&q);
     let (rows, _) = db::audit_query(&st.db.lock().unwrap(), &f, 100_000, 0);
     let esc = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));

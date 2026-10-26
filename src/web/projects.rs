@@ -83,7 +83,9 @@ fn access_cell(ctx: &Ctx, r: &Row) -> Markup {
 fn row_actions(ctx: &Ctx, r: &Row, back: &str) -> Markup {
     let base = format!("/projects/{}", r.p.name);
     html! {
-        @if r.s.state == "running" {
+        @if !ctx.profile.manages(&r.p.name) {
+            div.row.end { a.btn.sm href=(base) { "Ouvrir" } }
+        } @else if r.s.state == "running" {
             div.row.tight.end {
                 form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { input type="hidden" name="back" value=(back); button.btn.sm.danger-outline { "Arrêter" } }
                 form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value=(back); button.btn.sm { "Redémarrer" } }
@@ -181,12 +183,14 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
                 }
             }
             div.ft {
-                @if running {
+                @if !ctx.profile.manages(n) {
+                    a.btn href={(base) "/terminal#logs"} data-reload { "Journaux" }
+                } @else if running {
                     form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Redémarrer" } }
                     a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
                 } @else if r.s.state == "absent" {
                     (build_button(ctx, n, "/projects", ""))
-                    a.btn href={"/audit?project=" (n)} { "Journal" }
+                    @if ctx.profile.admin { a.btn href={"/audit?project=" (n)} { "Journal" } }
                 } @else {
                     form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Démarrer" } }
                     a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
@@ -253,7 +257,7 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             }
             div.acts {
                 div.seg.hide-m { a class=(if view != "list" { "on" } else { "" }) href=(link("view", "cards")) { "Cartes" } a class=(if view == "list" { "on" } else { "" }) href=(link("view", "list")) { "Liste" } }
-                a.btn.primary.only-m href="/projects/new" { "Nouveau projet" }
+                @if ctx.profile.admin { a.btn.primary.only-m href="/projects/new" { "Nouveau projet" } }
             }
         }
         div.filters {
@@ -282,7 +286,7 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         } @else {
             div.pgrid { @for r in &shown { (card(&ctx, r)) } }
         }
-        a.newcard href="/projects/new" { (icon("plus")) b { "Nouveau projet" } span.accent.hide-m { " — Node, Rust, Python, Go, Debian, une page web prête à l'emploi ou ton image Docker" } }
+        @if ctx.profile.admin { a.newcard href="/projects/new" { (icon("plus")) b { "Nouveau projet" } span.accent.hide-m { " — Node, Rust, Python, Go, Debian, une page web prête à l'emploi ou ton image Docker" } } }
     };
     Ok(render(&ctx, Shell { title: "Projets", nav: Nav::Projects, crumbs: vec![("DevHub".into(), Some("/".into())), ("Projets".into(), None)], actions: html! {} }, body))
 }
@@ -314,7 +318,7 @@ fn tpl_label(key: &str) -> (&'static str, &'static str) {
 }
 
 pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
-    let ctx = ctx(&st, &jar)?;
+    let ctx = ctx_admin(&st, &jar)?;
     let suffix = format!(".{}", crate::proxy::base_host(&st));
     let v = |k: &str| q.get(k).cloned().unwrap_or_default();
     let chosen = q.get("template").cloned().unwrap_or_else(|| "site".into());

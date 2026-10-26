@@ -15,8 +15,9 @@ use std::time::Duration;
 
 const STATS_EVERY: Duration = Duration::from_secs(2);
 
-async fn snapshot(st: &AppState) -> String {
-    let projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
+async fn snapshot(st: &AppState, who: &db::Profile) -> String {
+    let mut projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
+    projects.retain(|p| who.sees(&p.name));
     let statuses = futures_util::future::join_all(projects.iter().map(|p| crate::current_status(st, &p.name))).await;
     let def_cpu = st.cfg.nano_cpus as f64 / 1e9;
     let map: serde_json::Map<String, serde_json::Value> = projects
@@ -49,23 +50,23 @@ async fn snapshot(st: &AppState) -> String {
 
 /// One event right away, then one every STATS_EVERY until the browser disconnects.
 pub async fn stats(State(st): State<AppState>, jar: CookieJar) -> Response {
-    if !auth::is_logged_in(&st, &jar) {
+    let Some(who) = auth::current_profile(&st, &jar) else {
         return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let s = stream::unfold((st, true), |(st, first)| async move {
+    };
+    let s = stream::unfold((st, who, true), |(st, who, first)| async move {
         if !first {
             tokio::time::sleep(STATS_EVERY).await;
         }
-        let ev = Event::default().event("stats").data(snapshot(&st).await);
-        Some((Ok::<_, Infallible>(ev), (st, false)))
+        let ev = Event::default().event("stats").data(snapshot(&st, &who).await);
+        Some((Ok::<_, Infallible>(ev), (st, who, false)))
     });
     Sse::new(s).keep_alive(KeepAlive::default()).into_response()
 }
 
 /// Follows the container's logs from now on; the page already rendered the backlog.
 pub async fn logs(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Response {
-    if !auth::is_logged_in(&st, &jar) {
-        return StatusCode::UNAUTHORIZED.into_response();
+    if let Err(r) = auth::require_project(&st, &jar, &name, auth::Need::See) {
+        return r;
     }
     if db::get_project(&st.db.lock().unwrap(), &name).ok().flatten().is_none() {
         return StatusCode::NOT_FOUND.into_response();

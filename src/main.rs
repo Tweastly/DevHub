@@ -23,7 +23,7 @@ use rand::Rng;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use webauthn_rs::prelude::{PasskeyAuthentication, PasskeyRegistration, Url};
+use webauthn_rs::prelude::{PasskeyAuthentication, Url};
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
 pub struct Config {
@@ -45,13 +45,13 @@ pub struct AppState {
     pub webauthn: Arc<Webauthn>,
     pub cfg: Arc<Config>,
     pub setup_token: Arc<Mutex<Option<String>>>,
-    pub reg_states: Arc<Mutex<HashMap<String, (String, PasskeyRegistration)>>>,
+    pub reg_states: Arc<Mutex<HashMap<String, auth::PendingRegistration>>>,
     pub auth_states: Arc<Mutex<HashMap<String, PasskeyAuthentication>>>,
     pub update: Arc<Mutex<updater::Info>>,
     /// CPU/memory per project, refreshed in the background so pages never wait on `docker stats`.
     pub stats: Arc<Mutex<HashMap<String, docker::Status>>>,
-    /// One-time session handoff codes for custom domains: code → (host, expiry).
-    pub handoffs: Arc<Mutex<HashMap<String, (String, i64)>>>,
+    /// One-time session handoff codes for custom domains: code → (host, expiry, passkey of the session).
+    pub handoffs: Arc<Mutex<HashMap<String, (String, i64, Option<i64>)>>>,
     /// The VPS itself (CPU, RAM, disk), refreshed by the collector.
     pub host: Arc<Mutex<host::Host>>,
     /// Background builds (image download + container creation) in progress or failed, by project.
@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
     let data_dir = env("DEVHUB_DATA", "./data");
     std::fs::create_dir_all(&data_dir)?;
     let conn = db::open(&format!("{data_dir}/devhub.sqlite"))?;
-    let needs_setup = db::passkeys(&conn)?.is_empty();
+    let needs_setup = !db::passkey_rows(&conn).iter().any(|k| k.profile_id == db::OWNER);
 
     let webauthn = WebauthnBuilder::new(&domain, &Url::parse(&origin)?)?.rp_name("DevHub").build()?;
     let st = AppState {
@@ -157,6 +157,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/handoff", get(proxy::handoff))
         .route("/security", get(web::security::page))
         .route("/security/{id}/delete", post(delete_passkey))
+        .route("/profiles", get(web::profiles::list).post(web::profiles::create))
+        .route("/profiles/{id}", get(web::profiles::edit).post(web::profiles::update))
+        .route("/profiles/{id}/invite", post(web::profiles::invite))
+        .route("/profiles/{id}/delete", post(web::profiles::delete))
+        .route("/invite/{token}", get(web::profiles::invite_page))
         .route("/audit", get(web::audit::page))
         .route("/audit.csv", get(web::audit::csv))
         .route("/update", get(web::update::page))
@@ -253,15 +258,21 @@ async fn login_page(
     web::auth::login(needs_setup, next.as_deref(), proxy::base_host(&st)).into_response()
 }
 
+/// Your own passkeys (never the last one), or, for an administrator, those of another profile.
+/// The owner always keeps at least one.
 async fn delete_passkey(State(st): State<AppState>, jar: CookieJar, Path(id): Path<i64>) -> Result<Redirect, Response> {
-    auth::require(&st, &jar)?;
+    let Some(me) = auth::current_profile(&st, &jar) else { return Err(Redirect::to("/login").into_response()) };
     let c = st.db.lock().unwrap();
-    if db::passkeys(&c).map(|k| k.len()).unwrap_or(0) > 1 {
-        let name = db::passkeys(&c).ok().and_then(|k| k.into_iter().find(|k| k.0 == id)).map(|k| k.1).unwrap_or_default();
+    let keys = db::passkey_rows(&c);
+    let Some(k) = keys.iter().find(|k| k.id == id) else { return Ok(Redirect::to("/security")) };
+    let left = keys.iter().filter(|x| x.profile_id == k.profile_id).count();
+    let mine = k.profile_id == me.id;
+    let allowed = if mine || k.profile_id == db::OWNER { (mine || me.admin) && left > 1 } else { me.admin };
+    if allowed {
         let _ = db::delete_passkey(&c, id);
-        db::audit(&c, "owner", "passkey.delete", &name);
+        db::audit(&c, &me.actor(), "passkey.delete", &k.name);
     }
-    Ok(Redirect::to("/security"))
+    Ok(Redirect::to(if mine { "/security" } else { "/profiles" }))
 }
 
 #[derive(Deserialize)]
@@ -278,7 +289,7 @@ fn bad(msg: impl Into<String>) -> Response {
 }
 
 async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): Form<NewProject>) -> Result<Response, Response> {
-    auth::require(&st, &jar)?;
+    let who = auth::require_admin(&st, &jar)?;
     let back = |e: String| {
         let q = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("err", &e)
@@ -292,7 +303,7 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
     };
     let ports = ops::parse_ports(f.ports.as_deref().unwrap_or("")).map_err(back)?;
     let np = ops::NewProject { name: f.name.clone(), template: f.template.clone(), image: f.image.clone(), git_url: f.git_url.clone(), ports };
-    let p = ops::create(&st, np, "owner").await.map_err(back)?;
+    let p = ops::create(&st, np, &who.actor()).await.map_err(back)?;
     Ok(Redirect::to(&format!("/projects/{}", p.name)).into_response())
 }
 
@@ -328,7 +339,15 @@ async fn project_action(
     Path((name, action)): Path<(String, String)>,
     Form(form): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
-    auth::require(&st, &jar)?;
+    // Deleting is for administrators; everything else changes the project and needs "manage".
+    let need = if action == "delete" { None } else { Some(auth::Need::Manage) };
+    let who = match need {
+        Some(n) => auth::require_project(&st, &jar, &name, n)?,
+        None => {
+            auth::require_project(&st, &jar, &name, auth::Need::See)?;
+            auth::require_admin(&st, &jar)?
+        }
+    };
     let back = back_to(&form, &name);
     let field = |k: &str| form.get(k).map(String::as_str).unwrap_or("");
     let fail = |e: String| Redirect::to(&with_param(&back, "err", &e));
@@ -336,7 +355,7 @@ async fn project_action(
         // Minecraft console: not a project change, just a command run in the container.
         ops::load(&st, &name).map_err(|e| fail(e).into_response())?;
         let cmd = field("cmd");
-        db::audit(&st.db.lock().unwrap(), "owner", &format!("{name}:minecraft"), cmd);
+        db::audit(&st.db.lock().unwrap(), &who.actor(), &format!("{name}:minecraft"), cmd);
         return Ok(match web::project::mc_command(&st, &name, cmd).await {
             Ok(out) => Redirect::to(&with_param(&back, "mc", &format!("> {cmd}\n{out}"))),
             Err(e) => fail(e),
@@ -373,7 +392,7 @@ async fn project_action(
         _ => return Err(bad("action inconnue")),
     };
     let is_domain = action == "domain-add";
-    match ops::apply(&st, &name, change, "owner").await {
+    match ops::apply(&st, &name, change, &who.actor()).await {
         Ok(()) => Ok(Redirect::to(&back)),
         // Keep what was typed so the field isn't emptied by the error.
         Err(e) if is_domain => Ok(Redirect::to(&with_param(&with_param(&back, "err", &e), "host", field("host")))),

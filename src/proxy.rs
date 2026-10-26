@@ -96,17 +96,23 @@ pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query
         (Some(h), None) => h.to_string(),
         _ => return (StatusCode::BAD_REQUEST, "next invalide").into_response(),
     };
-    if resolve_custom(&st, &host).is_none() {
+    let Some(target) = resolve_custom(&st, &host) else {
         return (StatusCode::BAD_REQUEST, "domaine inconnu").into_response();
+    };
+    let profile = auth::current_profile(&st, &jar);
+    if profile.as_ref().is_some_and(|p| !p.sees(&target.project.name)) {
+        return error_page(&st, StatusCode::FORBIDDEN, "Accès refusé", "Ton profil n'a pas accès à ce projet.", None, None);
     }
-    if !auth::is_logged_in(&st, &jar) {
+    if profile.is_none() {
         let me = format!("{}/auth/handoff", st.cfg.origin);
         let back = url::Url::parse_with_params(&me, [("next", &next)]).map(|u| u.to_string()).unwrap_or(me);
         let login = url::Url::parse_with_params(&format!("{}/login", st.cfg.origin), [("next", back)]).map(|u| u.to_string());
         return axum::response::Redirect::to(&login.unwrap_or_default()).into_response();
     }
     let code = crate::random_token(32);
-    st.handoffs.lock().unwrap().insert(code.clone(), (host.clone(), db::now() + HANDOFF_TTL));
+    // The custom-domain session is opened for the same passkey, hence the same profile.
+    let passkey = auth::current_passkey(&st, &jar).map(|p| p.0);
+    st.handoffs.lock().unwrap().insert(code.clone(), (host.clone(), db::now() + HANDOFF_TTL, passkey));
     let path = match u.query() {
         Some(q) => format!("{}?{q}", u.path()),
         None => u.path().to_string(),
@@ -119,16 +125,16 @@ pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query
 fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
     let q: HashMap<String, String> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
     let code = q.get("code").cloned().unwrap_or_default();
-    let valid = {
+    let passkey = {
         let mut h = st.handoffs.lock().unwrap();
-        h.retain(|_, (_, exp)| *exp > db::now());
-        h.remove(&code).is_some_and(|(bound, _)| bound == host)
+        h.retain(|_, (_, exp, _)| *exp > db::now());
+        h.remove(&code).filter(|(bound, _, _)| bound == host).map(|x| x.2)
     };
-    if !valid {
+    let Some(passkey) = passkey else {
         return error_page(st, StatusCode::FORBIDDEN, "Lien expiré", "Ce lien de connexion n'est plus valable. Recharge la page du projet.", None, None);
-    }
+    };
     let token = crate::random_token(32);
-    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, None).is_err() {
+    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//")).cloned().unwrap_or_else(|| "/".into());
@@ -156,7 +162,10 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         return error_page(&st, StatusCode::NOT_FOUND, "Introuvable",
             &format!("Aucun projet ne correspond à « {label} »."), None, None);
     };
-    if !t.project.public && !auth::is_logged_in(&st, &CookieJar::from_headers(req.headers())) {
+    // Private projects: a signed-in profile that may see this project. Others get the private page
+    // (whose login link also lets them switch to a profile that can).
+    let viewer = auth::current_profile(&st, &CookieJar::from_headers(req.headers()));
+    if !t.project.public && !viewer.as_ref().is_some_and(|p| p.sees(&t.project.name)) {
         let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
         let back = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
         // Custom domains don't share the dashboard cookie: go through the session handoff.
@@ -166,7 +175,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
         return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, &st.cfg.origin, base_host(&st))).into_response();
     }
-    let owner = auth::is_logged_in(&st, &CookieJar::from_headers(req.headers()));
+    let owner = viewer.as_ref().is_some_and(|p| p.sees(&t.project.name));
     let name = t.project.name.clone();
     let stream = match connect(&st, &t).await {
         Ok(s) => s,

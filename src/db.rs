@@ -85,9 +85,172 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS metrics(ts INTEGER NOT NULL, scope TEXT NOT NULL, cpu REAL NOT NULL, mem INTEGER NOT NULL);
          CREATE INDEX IF NOT EXISTS metrics_scope_ts ON metrics(scope, ts);
-         CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);",
+         CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
+         CREATE TABLE IF NOT EXISTS profiles(
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0,
+            all_projects INTEGER NOT NULL DEFAULT 0, projects TEXT NOT NULL DEFAULT '[]',
+            can_manage INTEGER NOT NULL DEFAULT 0, can_shell INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, expires INTEGER NOT NULL);",
+    )?;
+    // Profiles arrived after single-user installs: the existing passkeys belong to the owner (profile 1).
+    let _ = c.execute("ALTER TABLE passkeys ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1", []);
+    c.execute(
+        "INSERT OR IGNORE INTO profiles(id, name, admin, all_projects, can_manage, can_shell, created_at) VALUES (1, 'Propriétaire', 1, 1, 1, 1, ?1)",
+        [now()],
     )?;
     Ok(c)
+}
+
+// ---------- Profiles ----------
+
+/// Who may do what. Profile 1 is the owner: administrator, cannot be removed or restricted.
+#[derive(Clone, Debug, Default)]
+pub struct Profile {
+    pub id: i64,
+    pub name: String,
+    /// Settings (Claude, journal, update, profiles), project creation and deletion, every project.
+    pub admin: bool,
+    pub all_projects: bool,
+    pub projects: Vec<String>,
+    /// Start / stop / restart / rebuild, ports, variables, resources, domains, visibility.
+    pub can_manage: bool,
+    /// Terminal and file changes.
+    pub can_shell: bool,
+    pub created_at: i64,
+}
+
+pub const OWNER: i64 = 1;
+
+impl Profile {
+    pub fn is_owner(&self) -> bool {
+        self.id == OWNER
+    }
+    pub fn sees(&self, project: &str) -> bool {
+        self.admin || self.all_projects || self.projects.iter().any(|p| p == project)
+    }
+    pub fn manages(&self, project: &str) -> bool {
+        self.sees(project) && (self.admin || self.can_manage)
+    }
+    pub fn shell(&self, project: &str) -> bool {
+        self.sees(project) && (self.admin || self.can_shell)
+    }
+    /// Name written in the audit log: "owner" for the owner (as before profiles), the profile name otherwise.
+    pub fn actor(&self) -> String {
+        if self.is_owner() { "owner".into() } else { self.name.clone() }
+    }
+    pub fn role(&self) -> &'static str {
+        if self.is_owner() {
+            "Propriétaire"
+        } else if self.admin {
+            "Administrateur"
+        } else if self.can_shell {
+            "Développeur"
+        } else if self.can_manage {
+            "Opérateur"
+        } else {
+            "Lecture seule"
+        }
+    }
+}
+
+fn row_to_profile(r: &rusqlite::Row) -> rusqlite::Result<Profile> {
+    let projects: String = r.get(4)?;
+    Ok(Profile {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        admin: r.get::<_, i64>(2)? != 0,
+        all_projects: r.get::<_, i64>(3)? != 0,
+        projects: serde_json::from_str(&projects).unwrap_or_default(),
+        can_manage: r.get::<_, i64>(5)? != 0,
+        can_shell: r.get::<_, i64>(6)? != 0,
+        created_at: r.get(7)?,
+    })
+}
+
+const PROFILE_COLS: &str = "id, name, admin, all_projects, projects, can_manage, can_shell, created_at";
+
+pub fn profiles(c: &Connection) -> Vec<Profile> {
+    let Ok(mut s) = c.prepare(&format!("SELECT {PROFILE_COLS} FROM profiles ORDER BY id")) else { return Vec::new() };
+    s.query_map([], row_to_profile).map(|rows| rows.filter_map(Result::ok).collect()).unwrap_or_default()
+}
+
+pub fn profile(c: &Connection, id: i64) -> Option<Profile> {
+    c.query_row(&format!("SELECT {PROFILE_COLS} FROM profiles WHERE id=?1"), [id], row_to_profile).ok()
+}
+
+/// Inserts (id 0) or updates a profile; the owner always keeps every right.
+pub fn save_profile(c: &Connection, p: &Profile) -> anyhow::Result<i64> {
+    let owner = p.id == OWNER;
+    let projects = serde_json::to_string(&p.projects)?;
+    let flags = (owner || p.admin, owner || p.all_projects, owner || p.can_manage, owner || p.can_shell);
+    if p.id == 0 {
+        c.execute(
+            "INSERT INTO profiles(name, admin, all_projects, projects, can_manage, can_shell, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![p.name, flags.0 as i64, flags.1 as i64, projects, flags.2 as i64, flags.3 as i64, now()],
+        )?;
+        Ok(c.last_insert_rowid())
+    } else {
+        c.execute(
+            "UPDATE profiles SET name=?1, admin=?2, all_projects=?3, projects=?4, can_manage=?5, can_shell=?6 WHERE id=?7",
+            params![p.name, flags.0 as i64, flags.1 as i64, projects, flags.2 as i64, flags.3 as i64, p.id],
+        )?;
+        Ok(p.id)
+    }
+}
+
+/// Removes a profile with its passkeys, sessions and invitations (never the owner).
+pub fn delete_profile(c: &Connection, id: i64) -> anyhow::Result<()> {
+    anyhow::ensure!(id != OWNER, "le profil propriétaire ne peut pas être supprimé");
+    c.execute("DELETE FROM sessions WHERE passkey_id IN (SELECT id FROM passkeys WHERE profile_id=?1)", [id])?;
+    c.execute("DELETE FROM passkeys WHERE profile_id=?1", [id])?;
+    c.execute("DELETE FROM invites WHERE profile_id=?1", [id])?;
+    c.execute("DELETE FROM profiles WHERE id=?1", [id])?;
+    Ok(())
+}
+
+/// Drops a deleted or renamed project from every profile's list.
+pub fn rename_in_profiles(c: &Connection, old: &str, new: Option<&str>) {
+    for mut p in profiles(c) {
+        if p.projects.iter().any(|x| x == old) {
+            p.projects.retain(|x| x != old);
+            if let Some(n) = new {
+                p.projects.push(n.to_string());
+            }
+            let _ = save_profile(c, &p);
+        }
+    }
+}
+
+pub fn create_invite(c: &Connection, token: &str, profile_id: i64, ttl: i64) -> anyhow::Result<()> {
+    c.execute("DELETE FROM invites WHERE expires < ?1 OR profile_id=?2", params![now(), profile_id])?;
+    c.execute("INSERT INTO invites(token, profile_id, expires) VALUES (?1,?2,?3)", params![token, profile_id, now() + ttl])?;
+    Ok(())
+}
+
+/// Profile an unexpired invitation is for.
+pub fn invite_profile(c: &Connection, token: &str) -> Option<(i64, i64)> {
+    c.query_row("SELECT profile_id, expires FROM invites WHERE token=?1 AND expires > ?2", params![token, now()], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+}
+
+pub fn invite_of(c: &Connection, profile_id: i64) -> Option<(String, i64)> {
+    c.query_row("SELECT token, expires FROM invites WHERE profile_id=?1 AND expires > ?2", params![profile_id, now()], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+}
+
+pub fn delete_invite(c: &Connection, token: &str) {
+    let _ = c.execute("DELETE FROM invites WHERE token=?1", [token]);
+}
+
+/// Profile behind a session. Sessions opened before profiles existed (no passkey recorded) are the owner's.
+pub fn session_profile(c: &Connection, token: &str) -> Option<Profile> {
+    let pid: Option<i64> = c
+        .query_row(
+            "SELECT p.profile_id FROM sessions s LEFT JOIN passkeys p ON p.id = s.passkey_id WHERE s.token=?1 AND s.expires > ?2",
+            params![token, now()],
+            |r| r.get(0),
+        )
+        .ok()?;
+    profile(c, pid.unwrap_or(OWNER))
 }
 
 pub fn now() -> i64 {
@@ -210,10 +373,10 @@ pub fn passkeys(c: &Connection) -> anyhow::Result<Vec<(i64, String, String)>> {
     Ok(v)
 }
 
-pub fn add_passkey(c: &Connection, name: &str, data: &str) -> anyhow::Result<i64> {
+pub fn add_passkey(c: &Connection, name: &str, data: &str, profile_id: i64) -> anyhow::Result<i64> {
     c.execute(
-        "INSERT INTO passkeys(name, data, created_at) VALUES (?1,?2,?3)",
-        params![name, data, now()],
+        "INSERT INTO passkeys(name, data, created_at, profile_id) VALUES (?1,?2,?3,?4)",
+        params![name, data, now(), profile_id],
     )?;
     Ok(c.last_insert_rowid())
 }
@@ -224,6 +387,7 @@ pub fn update_passkey(c: &Connection, id: i64, data: &str) -> anyhow::Result<()>
 }
 
 pub fn delete_passkey(c: &Connection, id: i64) -> anyhow::Result<()> {
+    c.execute("DELETE FROM sessions WHERE passkey_id=?1", [id])?;
     c.execute("DELETE FROM passkeys WHERE id=?1", [id])?;
     Ok(())
 }
@@ -298,11 +462,12 @@ pub struct PasskeyRow {
     pub name: String,
     pub created_at: i64,
     pub last_used: Option<i64>,
+    pub profile_id: i64,
 }
 
 pub fn passkey_rows(c: &Connection) -> Vec<PasskeyRow> {
-    let Ok(mut s) = c.prepare("SELECT id, name, created_at, last_used FROM passkeys ORDER BY id") else { return Vec::new() };
-    s.query_map([], |r| Ok(PasskeyRow { id: r.get(0)?, name: r.get(1)?, created_at: r.get(2)?, last_used: r.get(3)? }))
+    let Ok(mut s) = c.prepare("SELECT id, name, created_at, last_used, profile_id FROM passkeys ORDER BY id") else { return Vec::new() };
+    s.query_map([], |r| Ok(PasskeyRow { id: r.get(0)?, name: r.get(1)?, created_at: r.get(2)?, last_used: r.get(3)?, profile_id: r.get(4)? }))
         .map(|rows| rows.filter_map(Result::ok).collect())
         .unwrap_or_default()
 }

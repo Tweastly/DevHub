@@ -7,7 +7,7 @@ use crate::mcp_admin::{LAST_USED, SETTING};
 use axum::extract::State;
 
 pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, Response> {
-    let ctx = ctx(&st, &jar)?;
+    let ctx = ctx_admin(&st, &jar)?;
     let names = ctx.names();
     let (token, admin_last, today, today_total) = {
         let c = st.db.lock().unwrap();

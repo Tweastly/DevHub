@@ -4,7 +4,7 @@ use super::*;
 use axum::extract::State;
 
 pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, Response> {
-    let mut ctx = ctx(&st, &jar)?;
+    let mut ctx = ctx_admin(&st, &jar)?;
     crate::updater::refresh(&st).await;
     ctx.update = st.update.lock().unwrap().clone();
     let u = &ctx.update;

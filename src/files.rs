@@ -46,10 +46,11 @@ pub fn files_url(project: &str, rel: &str) -> String {
     format!("/projects/{project}/files?path={q}")
 }
 
-pub fn check(st: &AppState, jar: &CookieJar, name: &str) -> Result<(), Response> {
-    auth::require(st, jar)?;
+/// Reading needs to see the project; changing files needs the terminal & files right.
+pub fn check(st: &AppState, jar: &CookieJar, name: &str, need: auth::Need) -> Result<db::Profile, Response> {
+    let who = auth::require_project(st, jar, name, need)?;
     match db::get_project(&st.db.lock().unwrap(), name) {
-        Ok(Some(_)) => Ok(()),
+        Ok(Some(_)) => Ok(who),
         _ => Err((StatusCode::NOT_FOUND, "projet introuvable").into_response()),
     }
 }
@@ -109,7 +110,7 @@ pub async fn download(
     Path(name): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Result<Response, Response> {
-    check(&st, &jar, &name)?;
+    check(&st, &jar, &name, auth::Need::See)?;
     let rel = clean(q.get("path").map(String::as_str).unwrap_or(""))?;
     let bytes = docker::read_file(&st.docker, &name, &abs(&rel)).await.map_err(fail)?;
     let file = rel.rsplit('/').next().unwrap_or("fichier").replace('"', "");
@@ -123,8 +124,8 @@ pub async fn download(
         .into_response())
 }
 
-fn audit(st: &AppState, action: &str, detail: &str) {
-    db::audit(&st.db.lock().unwrap(), "owner", action, detail);
+fn audit(st: &AppState, who: &str, action: &str, detail: &str) {
+    db::audit(&st.db.lock().unwrap(), who, action, detail);
 }
 
 pub async fn save(
@@ -133,7 +134,7 @@ pub async fn save(
     Path(name): Path<String>,
     Form(f): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
-    check(&st, &jar, &name)?;
+    let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let rel = clean(f.get("path").map(String::as_str).unwrap_or(""))?;
     if rel.is_empty() {
         return Err(fail("chemin manquant"));
@@ -141,7 +142,7 @@ pub async fn save(
     // Browsers submit textarea line breaks as CRLF; keep the file's Unix line endings.
     let content = f.get("content").map(|c| c.replace("\r\n", "\n")).unwrap_or_default();
     docker::write_file(&st.docker, &name, &abs(&rel), content.as_bytes()).await.map_err(fail)?;
-    audit(&st, "file.save", &format!("{name}:{rel}"));
+    audit(&st, &who, "file.save", &format!("{name}:{rel}"));
     Ok(Redirect::to(&files_url(&name, &rel)))
 }
 
@@ -151,7 +152,7 @@ pub async fn upload(
     Path(name): Path<String>,
     mut mp: Multipart,
 ) -> Result<Redirect, Response> {
-    check(&st, &jar, &name)?;
+    let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let mut dir = String::new();
     let mut count = 0;
     while let Some(field) = mp.next_field().await.map_err(fail)? {
@@ -170,7 +171,7 @@ pub async fn upload(
             _ => {}
         }
     }
-    audit(&st, "file.upload", &format!("{name}:/{dir} ({count} fichier(s))"));
+    audit(&st, &who, "file.upload", &format!("{name}:/{dir} ({count} fichier(s))"));
     Ok(Redirect::to(&files_url(&name, &dir)))
 }
 
@@ -180,7 +181,7 @@ pub async fn create(
     Path(name): Path<String>,
     Form(f): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
-    check(&st, &jar, &name)?;
+    let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let dir = clean(f.get("dir").map(String::as_str).unwrap_or(""))?;
     let new = f.get("name").map(|s| s.trim().to_string()).unwrap_or_default();
     let as_dir = f.get("kind").map(String::as_str) == Some("dir") || new.ends_with('/');
@@ -191,12 +192,12 @@ pub async fn create(
     let target = sh_quote(&abs(&rel));
     if as_dir {
         run(&st, &name, &format!("mkdir -p {target}")).await?;
-        audit(&st, "file.mkdir", &format!("{name}:{rel}"));
+        audit(&st, &who, "file.mkdir", &format!("{name}:{rel}"));
         Ok(Redirect::to(&files_url(&name, &rel)))
     } else {
         run(&st, &name, &format!("test ! -e {target} || {{ echo 'existe déjà'; exit 1; }}")).await?;
         docker::write_file(&st.docker, &name, &abs(&rel), b"").await.map_err(fail)?;
-        audit(&st, "file.create", &format!("{name}:{rel}"));
+        audit(&st, &who, "file.create", &format!("{name}:{rel}"));
         Ok(Redirect::to(&files_url(&name, &rel)))
     }
 }
@@ -207,7 +208,7 @@ pub async fn rename(
     Path(name): Path<String>,
     Form(f): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
-    check(&st, &jar, &name)?;
+    let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let rel = clean(f.get("path").map(String::as_str).unwrap_or(""))?;
     let to_name = f.get("to").map(|s| s.trim()).unwrap_or("");
     if rel.is_empty() || to_name.is_empty() || to_name.contains('/') || to_name == ".." || to_name == "." {
@@ -216,7 +217,7 @@ pub async fn rename(
     let to = clean(&format!("{}/{to_name}", parent(&rel)))?;
     let (src, dst) = (sh_quote(&abs(&rel)), sh_quote(&abs(&to)));
     run(&st, &name, &format!("test ! -e {dst} || {{ echo 'un fichier porte déjà ce nom'; exit 1; }}; mv -- {src} {dst}")).await?;
-    audit(&st, "file.rename", &format!("{name}:{rel} → {to}"));
+    audit(&st, &who, "file.rename", &format!("{name}:{rel} → {to}"));
     Ok(Redirect::to(&files_url(&name, parent(&rel))))
 }
 
@@ -226,12 +227,12 @@ pub async fn delete(
     Path(name): Path<String>,
     Form(f): Form<HashMap<String, String>>,
 ) -> Result<Redirect, Response> {
-    check(&st, &jar, &name)?;
+    let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let rel = clean(f.get("path").map(String::as_str).unwrap_or(""))?;
     if rel.is_empty() {
         return Err(fail("impossible de supprimer /workspace lui-même"));
     }
     run(&st, &name, &format!("rm -rf -- {}", sh_quote(&abs(&rel)))).await?;
-    audit(&st, "file.delete", &format!("{name}:{rel}"));
+    audit(&st, &who, "file.delete", &format!("{name}:{rel}"));
     Ok(Redirect::to(&files_url(&name, parent(&rel))))
 }

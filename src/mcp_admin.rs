@@ -310,7 +310,7 @@ async fn call(st: &AppState, params: &Value) -> Value {
 // --- Panel page to enable / rotate / revoke the admin URL ---
 
 pub async fn admin_action(State(st): State<AppState>, jar: CookieJar, Path(action): Path<String>) -> Result<Redirect, Response> {
-    auth::require(&st, &jar)?;
+    let who = auth::require_admin(&st, &jar)?;
     let c = st.db.lock().unwrap();
     let value = match action.as_str() {
         "enable" | "rotate" => Some(random_token(32)),
@@ -318,6 +318,6 @@ pub async fn admin_action(State(st): State<AppState>, jar: CookieJar, Path(actio
         _ => return Err((StatusCode::BAD_REQUEST, "action inconnue").into_response()),
     };
     db::set_setting(&c, SETTING, value.as_deref()).map_err(|e| crate::AppError(e).into_response())?;
-    db::audit(&c, "owner", &format!("admin_mcp.{action}"), "");
+    db::audit(&c, &who.actor(), &format!("admin_mcp.{action}"), "");
     Ok(Redirect::to("/claude"))
 }

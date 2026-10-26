@@ -83,6 +83,9 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
         Tab::Terminal => Some("Terminal"),
         Tab::Settings => Some("Paramètres"),
     };
+    let (manage, shell) = (ctx.profile.manages(n), ctx.profile.shell(n));
+    // Read-only profiles see the pages without their forms (the server refuses them anyway).
+    let ro = if tab == Tab::Files { !shell } else { !manage };
     let head = html! {
         div.pband {
             a.back href="/projects" { "← Tous les projets" }
@@ -92,24 +95,26 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                 @if (tab == Tab::Overview || tab == Tab::Network) && x.p.first_http().is_some() {
                     @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
                 }
-                form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
+                @if ro { span.tag { "lecture seule" } }
+                @if manage { form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
                     (back_field(&here))
                     button class={"icon-btn bare pin" (if x.p.pinned { " on" } else { "" })} title=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler dans la barre latérale" }) aria-label=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler" }) { (icon("pin")) }
-                }
+                } }
                 div.acts {
                     @if running && tab == Tab::Overview {
                         @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" { "Ouvrir le site ↗" } }
                     }
-                    @if running {
+                    @if !manage {
+                    } @else if running {
                         form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.btn { "Redémarrer" } }
                     } @else if x.s.state != "absent" {
                         form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { "Démarrer" } }
                     }
-                    @if x.s.state == "absent" { (build_button(ctx, n, &here, "")) }
-                    @if x.s.state != "absent" {
+                    @if manage && x.s.state == "absent" { (build_button(ctx, n, &here, "")) }
+                    @if manage && x.s.state != "absent" {
                         form.inline method="post" action={(base) "/rebuild"} onsubmit="return confirm('Recréer le conteneur ? /workspace est conservé.')" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { "Recréer" } }
                     }
-                    @if running {
+                    @if manage && running {
                         form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { (back_field(&here)) button.btn.danger-outline { "Arrêter" } }
                     }
                 }
@@ -119,8 +124,8 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                 a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
                 a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" span.count { (n_addr) } }
                 a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
-                a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal & journaux" }
-                a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" }
+                a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { (if shell { "Terminal & journaux" } else { "Journaux" }) }
+                @if manage { a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" } }
             }
         }
     };
@@ -128,7 +133,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
     if let Some(t) = title_crumb {
         crumbs.push((t.into(), None));
     }
-    render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { (head) (body) })
+    render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { (head) div class=[ro.then_some("ro")] { (body) } })
 }
 
 fn default_subtitle(ctx: &Ctx, x: &P) -> Markup {
@@ -209,7 +214,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     @else { pre.logs.short data-stream={(base) "/logs/stream"} data-tag="#logtag-ov" data-max="200" { (logs) } }
                 }
                 div.card {
-                    div.card-h { h3 { "Activité de ce projet" } div.end { a.btn.sm.ghost href={"/audit?project=" (n)} { "Journal →" } } }
+                    div.card-h { h3 { "Activité de ce projet" } @if ctx.profile.admin { div.end { a.btn.sm.ghost href={"/audit?project=" (n)} { "Journal →" } } } }
                     @if activity.is_empty() { div.card-b.muted { "Rien encore." } }
                     @for r in activity.iter().take(5) {
                         @let ev = event(&names, &r.action, &r.detail);
@@ -234,7 +239,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         }
                     }
                 }
-                div.card {
+                @if ctx.profile.shell(n) { div.card {
                     div.card-h { h3 { "Connecter Claude Desktop" } span.tag.mono { "MCP" } }
                     div.card-b {
                         p.muted style="margin-bottom:12px" { "Dans Claude Desktop : " b { "Réglages → Connecteurs → Ajouter un connecteur personnalisé" } ", colle cette URL :" }
@@ -245,7 +250,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                             span.dim style="font-size:12px" { @if let Some(t) = x.p.mcp_last_used { "Utilisée " (ago(t)) } @else { "Jamais utilisée" } }
                         }
                     }
-                }
+                } }
             }
         }
     };
@@ -424,7 +429,9 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let base = format!("/projects/{n}");
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 400).await };
     let subtitle = html! { span { "root@" (n) ":/workspace" } };
+    let shell = ctx.profile.shell(n);
     let body = html! {
+        @if shell {
         div.row style="margin-bottom:18px" {
             div.seg { a.on href="#terminal" { "Terminal" } a href="#logs" { "Logs" } }
             span.spacer {}
@@ -443,6 +450,7 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             @if x.s.state != "running" { "Le projet n'est pas démarré : démarre-le pour ouvrir un terminal. " }
             "Déconnecté ? Le bandeau passe en rouge : « déconnecté — recharge la page ». La barre de touches n'apparaît que sur écran tactile."
         }
+        }
         div.row #logs style="margin-bottom:14px" {
             span.label { "Journaux" }
             span.spacer {}
@@ -458,10 +466,12 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 div.end style="margin-left:auto" { a.btn.sm href={(base) "/logs/download"} download { "Télécharger" } }
             }
         }
-        link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css";
-        script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" {}
-        script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" {}
-        script { (PreEscaped(TERMINAL_JS.replace("__NAME__", n))) }
+        @if shell {
+            link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css";
+            script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" {}
+            script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" {}
+            script { (PreEscaped(TERMINAL_JS.replace("__NAME__", n))) }
+        }
     };
     Ok(frame(&ctx, &x, Tab::Terminal, subtitle, body))
 }
@@ -504,6 +514,7 @@ fn mask(v: &str) -> String {
 }
 
 pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
+    crate::auth::require_project(&st, &jar, &name, crate::auth::Need::Manage)?;
     let ctx = ctx(&st, &jar)?;
     let x = load(&ctx, &name).await?;
     let n = &x.p.name;
@@ -531,7 +542,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 div.nav-label style="padding-top:0" { "Sur cette page" }
                 a href="#resources" { "Ressources" }
                 a href="#env" { "Variables d'environnement" span.count { (x.p.env.len()) } }
-                a href="#danger" style="color:var(--err)" { "Zone dangereuse" }
+                @if ctx.profile.admin { a href="#danger" style="color:var(--err)" { "Zone dangereuse" } }
             }
             div.stack {
                 div.card #resources {
@@ -589,7 +600,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         }
                     }
                 }
-                div.card.danger #danger {
+                @if ctx.profile.admin { div.card.danger #danger {
                     div.card-h { (icon("alert")) h3 { "Zone dangereuse" } }
                     div.card-b {
                         b { "Supprimer " (n) } p.muted style="margin:4px 0 14px" { "Le conteneur, ses ports et ses sous-domaines sont supprimés. Cette action est définitive." }
@@ -600,7 +611,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                             button.btn.danger style="margin-top:14px" { (icon("trash")) "Supprimer le projet" }
                         }
                     }
-                }
+                } }
             }
         }
     };

@@ -1,4 +1,4 @@
-//! Passkeys page: registered devices, last sign-ins, add / remove.
+//! "Mes passkeys": the signed-in profile's devices, its last sign-ins, add / remove.
 
 use super::*;
 use axum::extract::{Query, State};
@@ -12,15 +12,22 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     let ctx = ctx(&st, &jar)?;
     let (keys, logins) = {
         let c = st.db.lock().unwrap();
-        let keys = db::passkey_rows(&c);
+        let keys: Vec<db::PasskeyRow> = db::passkey_rows(&c).into_iter().filter(|k| k.profile_id == ctx.profile.id).collect();
         let (rows, _) = db::audit_query(&c, &db::AuditFilter::default(), 300, 0);
-        let logins: Vec<db::AuditRow> = rows.into_iter().filter(|r| matches!(r.action.as_str(), "login.ok" | "login.fail" | "passkey.add" | "login")).take(5).collect();
+        // Failed attempts can't be tied to a profile: administrators see them.
+        let me = ctx.profile.actor();
+        let logins: Vec<db::AuditRow> = rows
+            .into_iter()
+            .filter(|r| matches!(r.action.as_str(), "login.ok" | "login.fail" | "passkey.add" | "login"))
+            .filter(|r| r.actor == me || (r.actor == "?" && ctx.profile.admin))
+            .take(5)
+            .collect();
         (keys, logins)
     };
     let me = ctx.passkey.as_ref().map(|p| p.0);
     let only_one = keys.len() <= 1;
     let body = html! {
-        div.page-head { div { h1 { "Passkeys" } p.lead { "DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents." } } }
+        div.page-head { div { h1 { "Mes passkeys" } p.lead { "Profil " b { (ctx.profile.name) } " · " (ctx.profile.role()) ". DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents." } } }
         @if let Some(n) = q.get("added") { div.flash { (alert("ok", html! { "Passkey « " (n) " » ajouté. Tu peux maintenant te connecter depuis cet appareil." })) } }
         (flash(&q))
         div.split {
@@ -28,7 +35,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 div.card-h { h3 { "Mes passkeys" } span.sub { (keys.len()) " appareil" @if keys.len() > 1 { "s" } } }
                 @for k in &keys {
                     div.list-row {
-                        span.avatar style="background:var(--accent-soft);color:var(--accent)" { (icon(device_icon(&k.name))) }
+                        span.avatar { (icon(device_icon(&k.name))) }
                         div.t {
                             div.row.tight {
                                 b { (k.name) }
@@ -78,9 +85,9 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         script { (PreEscaped(super::auth::WEBAUTHN_JS)) }
     };
     Ok(render(&ctx, Shell {
-        title: "Passkeys",
+        title: "Mes passkeys",
         nav: Nav::Passkeys,
-        crumbs: vec![("DevHub".into(), Some("/".into())), ("Sécurité".into(), None), ("Passkeys".into(), None)],
+        crumbs: vec![("DevHub".into(), Some("/".into())), ("Paramètres".into(), None), ("Mes passkeys".into(), None)],
         actions: html! {},
     }, body))
 }
