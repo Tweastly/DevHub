@@ -6,6 +6,7 @@ mod host;
 mod live;
 mod mcp;
 mod mcp_admin;
+mod oauth;
 mod ops;
 mod proxy;
 mod terminal;
@@ -195,7 +196,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/live/stats", get(live::stats))
         .route("/_caddy/ask", get(proxy::caddy_ask))
         .route("/mcp/{token}", post(mcp::handle).get(mcp::get_not_allowed))
-        .route("/mcp/admin/{token}", post(mcp_admin::handle).get(mcp::get_not_allowed))
+        .route("/mcp", post(mcp_admin::handle).get(mcp::get_not_allowed))
+        .route("/.well-known/oauth-protected-resource", get(oauth::protected_resource))
+        .route("/.well-known/oauth-protected-resource/mcp", get(oauth::protected_resource))
+        .route("/.well-known/oauth-authorization-server", get(oauth::authorization_server))
+        .route("/oauth/register", post(oauth::register))
+        .route("/oauth/authorize", get(oauth::authorize).post(oauth::authorize_post))
+        .route("/oauth/token", post(oauth::token))
+        .route("/claude/connections/{id}/revoke", post(oauth::revoke))
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 

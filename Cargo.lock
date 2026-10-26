@@ -461,6 +461,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "maud",
+ "openssl",
  "rand 0.8.8",
  "reqwest",
  "rusqlite",

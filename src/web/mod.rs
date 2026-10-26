@@ -65,7 +65,7 @@ pub fn head_at(title: &str, origin: &str) -> Markup {
         meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover";
         meta name="color-scheme" content="light dark";
         title { (title) }
-        link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23b4541f'/%3E%3C/svg%3E";
+        link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10.1 2h3.8l5.6 16H4.5z' fill='%23e0712f'/%3E%3Cpath d='M8.3 8h7.4l.8 2.3H7.5zM6.6 13h10.8l.8 2.3H5.8z' fill='%23fff'/%3E%3Crect x='2.5' y='18' width='19' height='3.2' rx='1.2' fill='%23b4541f'/%3E%3C/svg%3E";
         link rel="preconnect" href="https://fonts.googleapis.com";
         link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
         link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap";
@@ -159,10 +159,16 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
     }
 }
 
-/// The mark: a plain terracotta square.
+/// The mark: a traffic cone (a building site), in the accent colour.
 pub fn logo(size: u32) -> Markup {
-    html! { span.logo style={"width:" (size) "px;height:" (size) "px"} aria-hidden="true" {} }
+    html! {
+        svg.logo width=(size) height=(size) viewBox="0 0 24 24" aria-hidden="true" {
+            (PreEscaped(CONE))
+        }
+    }
 }
+
+const CONE: &str = r##"<path d="M10.1 2h3.8l5.6 16H4.5z" fill="currentColor"/><path d="M8.3 8h7.4l.8 2.3H7.5zM6.6 13h10.8l.8 2.3H5.8z" fill="#fff"/><rect x="2.5" y="18" width="19" height="3.2" rx="1.2" fill="currentColor"/>"##;
 
 // ---------- Formatting ----------
 
@@ -427,7 +433,7 @@ pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
     let mut projects = db::list_projects(&c).unwrap_or_default();
     projects.retain(|p| profile.sees(&p.name));
     let passkey_count = db::passkey_rows(&c).iter().filter(|k| k.profile_id == profile.id).count();
-    let admin = db::setting(&c, crate::mcp_admin::SETTING).is_some();
+    let admin = db::setting(&c, crate::mcp_admin::ENABLED).is_some();
     drop(c);
     Ok(Ctx {
         st: st.clone(),

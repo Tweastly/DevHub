@@ -91,8 +91,23 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             all_projects INTEGER NOT NULL DEFAULT 0, projects TEXT NOT NULL DEFAULT '[]',
             can_manage INTEGER NOT NULL DEFAULT 0, can_shell INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL);
-         CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, expires INTEGER NOT NULL);",
+         CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, expires INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS oauth_clients(id TEXT PRIMARY KEY, name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS oauth_codes(
+            code TEXT PRIMARY KEY, client_id TEXT NOT NULL, profile_id INTEGER NOT NULL,
+            redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, expires INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS oauth_tokens(
+            id INTEGER PRIMARY KEY, client_id TEXT NOT NULL, profile_id INTEGER NOT NULL,
+            access_hash TEXT NOT NULL UNIQUE, access_expires INTEGER NOT NULL,
+            refresh_hash TEXT NOT NULL UNIQUE, refresh_expires INTEGER NOT NULL,
+            created_at INTEGER NOT NULL, last_used INTEGER);",
     )?;
+    // The admin MCP used to be a secret URL; it is now OAuth on a fixed URL. An install that
+    // had it enabled keeps Claude's access enabled.
+    if setting(&c, "admin_mcp_token").is_some() {
+        set_setting(&c, "claude_access", Some("1"))?;
+        set_setting(&c, "admin_mcp_token", None)?;
+    }
     // Profiles arrived after single-user installs: the existing passkeys belong to the owner (profile 1).
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1", []);
     c.execute(
@@ -205,6 +220,7 @@ pub fn delete_profile(c: &Connection, id: i64) -> anyhow::Result<()> {
     c.execute("DELETE FROM sessions WHERE passkey_id IN (SELECT id FROM passkeys WHERE profile_id=?1)", [id])?;
     c.execute("DELETE FROM passkeys WHERE profile_id=?1", [id])?;
     c.execute("DELETE FROM invites WHERE profile_id=?1", [id])?;
+    c.execute("DELETE FROM oauth_tokens WHERE profile_id=?1", [id])?;
     c.execute("DELETE FROM profiles WHERE id=?1", [id])?;
     Ok(())
 }
@@ -595,4 +611,129 @@ pub fn audit_actor_counts(c: &Connection, f: &AuditFilter) -> Vec<(String, i64)>
                 .map(|rows| rows.filter_map(Result::ok).collect())
         })
         .unwrap_or_default()
+}
+
+// ---------- OAuth (MCP authorization) ----------
+
+pub fn sha256_hex(s: &str) -> String {
+    openssl::sha::sha256(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub struct OAuthClient {
+    pub id: String,
+    pub name: String,
+    pub redirect_uris: Vec<String>,
+}
+
+pub fn add_oauth_client(c: &Connection, id: &str, name: &str, redirect_uris: &[String]) -> anyhow::Result<()> {
+    // Registrations nobody authorized within a day are dropped (anyone may register a client).
+    c.execute(
+        "DELETE FROM oauth_clients WHERE created_at < ?1 AND id NOT IN (SELECT client_id FROM oauth_tokens)",
+        [now() - 86400],
+    )?;
+    c.execute(
+        "INSERT INTO oauth_clients(id, name, redirect_uris, created_at) VALUES (?1,?2,?3,?4)",
+        params![id, name, serde_json::to_string(redirect_uris)?, now()],
+    )?;
+    Ok(())
+}
+
+pub fn oauth_client(c: &Connection, id: &str) -> Option<OAuthClient> {
+    c.query_row("SELECT id, name, redirect_uris FROM oauth_clients WHERE id=?1", [id], |r| {
+        let uris: String = r.get(2)?;
+        Ok(OAuthClient { id: r.get(0)?, name: r.get(1)?, redirect_uris: serde_json::from_str(&uris).unwrap_or_default() })
+    })
+    .ok()
+}
+
+pub fn add_oauth_code(c: &Connection, code: &str, client_id: &str, profile_id: i64, redirect_uri: &str, challenge: &str) -> anyhow::Result<()> {
+    c.execute("DELETE FROM oauth_codes WHERE expires < ?1", [now()])?;
+    c.execute(
+        "INSERT INTO oauth_codes(code, client_id, profile_id, redirect_uri, challenge, expires) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![sha256_hex(code), client_id, profile_id, redirect_uri, challenge, now() + 120],
+    )?;
+    Ok(())
+}
+
+/// Consumes a code (single use): (client_id, profile_id, redirect_uri, challenge).
+pub fn take_oauth_code(c: &Connection, code: &str) -> Option<(String, i64, String, String)> {
+    let h = sha256_hex(code);
+    let row = c
+        .query_row(
+            "SELECT client_id, profile_id, redirect_uri, challenge FROM oauth_codes WHERE code=?1 AND expires > ?2",
+            params![h, now()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .ok();
+    let _ = c.execute("DELETE FROM oauth_codes WHERE code=?1", [h]);
+    row
+}
+
+/// New connection (id 0) or rotation of an existing one: a fresh access and refresh token.
+pub fn save_oauth_tokens(c: &Connection, id: i64, client_id: &str, profile_id: i64, access: &str, access_ttl: i64, refresh: &str, refresh_ttl: i64) -> anyhow::Result<()> {
+    let (a, r, t) = (sha256_hex(access), sha256_hex(refresh), now());
+    if id == 0 {
+        c.execute(
+            "INSERT INTO oauth_tokens(client_id, profile_id, access_hash, access_expires, refresh_hash, refresh_expires, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![client_id, profile_id, a, t + access_ttl, r, t + refresh_ttl, t],
+        )?;
+    } else {
+        c.execute(
+            "UPDATE oauth_tokens SET access_hash=?1, access_expires=?2, refresh_hash=?3, refresh_expires=?4 WHERE id=?5",
+            params![a, t + access_ttl, r, t + refresh_ttl, id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Connection behind a refresh token: (id, client_id, profile_id).
+pub fn oauth_refresh(c: &Connection, refresh: &str) -> Option<(i64, String, i64)> {
+    c.query_row(
+        "SELECT id, client_id, profile_id FROM oauth_tokens WHERE refresh_hash=?1 AND refresh_expires > ?2",
+        params![sha256_hex(refresh), now()],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )
+    .ok()
+}
+
+/// Profile behind a valid access token; records the use.
+pub fn oauth_access(c: &Connection, access: &str) -> Option<Profile> {
+    let (id, pid): (i64, i64) = c
+        .query_row(
+            "SELECT id, profile_id FROM oauth_tokens WHERE access_hash=?1 AND access_expires > ?2",
+            params![sha256_hex(access), now()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()?;
+    let _ = c.execute("UPDATE oauth_tokens SET last_used=?1 WHERE id=?2", params![now(), id]);
+    profile(c, pid)
+}
+
+pub struct OAuthConnection {
+    pub id: i64,
+    pub client: String,
+    pub profile: String,
+    pub created_at: i64,
+    pub last_used: Option<i64>,
+}
+
+pub fn oauth_connections(c: &Connection) -> Vec<OAuthConnection> {
+    let Ok(mut s) = c.prepare(
+        "SELECT t.id, COALESCE(c.name, '?'), COALESCE(p.name, '?'), t.created_at, t.last_used
+         FROM oauth_tokens t LEFT JOIN oauth_clients c ON c.id = t.client_id LEFT JOIN profiles p ON p.id = t.profile_id
+         WHERE t.refresh_expires > ?1 ORDER BY COALESCE(t.last_used, t.created_at) DESC",
+    ) else {
+        return Vec::new();
+    };
+    s.query_map([now()], |r| Ok(OAuthConnection { id: r.get(0)?, client: r.get(1)?, profile: r.get(2)?, created_at: r.get(3)?, last_used: r.get(4)? }))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+}
+
+/// Revokes one connection, or every one (None).
+pub fn revoke_oauth(c: &Connection, id: Option<i64>) {
+    let _ = match id {
+        Some(id) => c.execute("DELETE FROM oauth_tokens WHERE id=?1", [id]),
+        None => c.execute("DELETE FROM oauth_tokens", []),
+    };
 }

@@ -696,3 +696,23 @@ form:has(input[name=role][value=admin]:checked) .scope { opacity: .45; pointer-e
 /* Private / public: a radio mark, the selected card keeps its accent border. */
 .access .radio { margin-left: auto; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-2); box-sizing: border-box; }
 .access button.on .radio { border: 5px solid var(--accent); }
+/* Both cards fill their grid cell: same width and height. */
+.access > form { display: flex; margin: 0; }
+.access > form > button { flex: 1; width: 100%; }
+/* Claude page: numbered steps in one column. */
+.csteps { max-width: 860px; display: flex; flex-direction: column; gap: 32px; }
+.cstep { display: flex; gap: 20px; }
+.cstep .step-n { margin-top: 2px; }
+.cstep-b { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.cstep-b h2.label { margin: 4px 0 0; }
+.cswitch { display: flex; align-items: center; gap: 20px; }
+.cswitch .t { flex: 1; min-width: 0; }
+.sw.lg { width: 52px; height: 30px; }
+.sw.lg::after { width: 24px; height: 24px; }
+.sw.lg.on::after { transform: translateX(22px); }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary { list-style: none; }
+details.card[open] > summary { border-bottom: 1px solid var(--border); }
+@media (max-width: 900px) { .cstep { gap: 12px; } }
+/* Logo: the traffic cone takes the accent colour, no tile behind it. */
+.logo { background: none; color: var(--accent); border-radius: 0; flex: none; display: inline-block; }

@@ -91,6 +91,41 @@ pub fn invite(token: &str, profile: Option<&db::Profile>, footer: &str) -> Marku
     })
 }
 
+/// OAuth consent: Claude Desktop sent the person here to approve the MCP connection.
+pub fn oauth_consent(client: &str, p: &db::Profile, enabled: bool, fields: &[(&str, String)], footer: &str) -> Markup {
+    shell("Autoriser Claude · DevHub", "", footer, false, html! {
+        @if !enabled {
+            h1 { "L'accès de Claude est coupé" }
+            p.sub { "Un administrateur doit l'activer dans DevHub, page " b style="color:var(--text)" { "Claude" } ", avant de connecter " (client) "." }
+            form method="post" action="/oauth/authorize" {
+                @for (k, v) in fields { input type="hidden" name=(k) value=(v); }
+                button.btn name="decision" value="deny" { "Retour" }
+            }
+        } @else {
+            h1 { "Autoriser " (client) " ?" }
+            p.sub {
+                (client) " pourra agir dans DevHub avec les droits de ton profil "
+                b style="color:var(--text)" { (p.name) } @if p.name != p.role() { " (" (p.role()) ")" }
+                @if !p.admin && !p.all_projects { ", sur " (p.projects.len()) " projet" @if p.projects.len() > 1 { "s" } }
+                ". Chaque action est notée dans le journal, et tu peux révoquer l'accès à tout moment."
+            }
+            form method="post" action="/oauth/authorize" {
+                @for (k, v) in fields { input type="hidden" name=(k) value=(v); }
+                button.btn.primary name="decision" value="allow" autofocus { "Autoriser" }
+                button.btn name="decision" value="deny" { "Refuser" }
+            }
+        }
+    })
+}
+
+pub fn oauth_error(message: &str, footer: &str) -> Markup {
+    shell("Connexion impossible · DevHub", "", footer, false, html! {
+        h1 { "Connexion impossible" }
+        p.sub { (message) }
+        a.btn href="/" { "Ouvrir DevHub" }
+    })
+}
+
 /// Proxy errors. `message` is trusted HTML built by the proxy.
 pub fn error_page(code: u16, title: &str, message: &str, detail: Option<&str>, action: Option<(&str, &str)>, origin: &str, footer: &str) -> Markup {
     shell(&format!("{title} · {code}"), origin, footer, false, html! {

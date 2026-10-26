@@ -1,12 +1,14 @@
-//! Admin MCP server: gives Claude the whole panel (create/delete/configure any project,
-//! and work inside any container). Off by default; the owner enables it from /claude
-//! and can rotate or revoke its URL at any time. Passkeys and the admin URL itself stay
-//! out of reach, so Claude can never lock the owner out.
+//! The MCP server at /mcp: Claude works in DevHub with the rights of the profile that
+//! authorized it (OAuth, see oauth.rs): the whole panel for an administrator, only its
+//! projects and rights otherwise. Off by default; the switch on /claude turns it on and
+//! off without changing the URL. Passkeys, profiles and authorizations stay out of reach,
+//! so Claude can never lock anyone out.
 
 use crate::mcp::{project_tool, text};
 use crate::ops::{self, Change};
-use crate::{auth, db, docker, proxy, random_token, updater, AppState};
+use crate::{auth, db, docker, proxy, updater, AppState};
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
@@ -14,13 +16,20 @@ use axum_extra::extract::CookieJar;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-pub const SETTING: &str = "admin_mcp_token";
+/// Setting: Claude's access is on.
+pub const ENABLED: &str = "claude_access";
 pub const LAST_USED: &str = "admin_mcp_last_used";
 
-pub async fn handle(State(st): State<AppState>, Path(token): Path<String>, Json(req): Json<Value>) -> Response {
-    let ok = db::setting(&st.db.lock().unwrap(), SETTING).is_some_and(|t| t == token);
-    if !ok {
-        return StatusCode::NOT_FOUND.into_response();
+pub fn enabled(st: &AppState) -> bool {
+    db::setting(&st.db.lock().unwrap(), ENABLED).is_some()
+}
+
+pub async fn handle(State(st): State<AppState>, headers: HeaderMap, Json(req): Json<Value>) -> Response {
+    let Some(who) = crate::oauth::bearer_profile(&st, &headers) else {
+        return crate::oauth::unauthorized(&st, "connexion requise");
+    };
+    if !enabled(&st) {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "access_denied", "error_description": "l'accès de Claude est coupé dans DevHub" }))).into_response();
     }
     let _ = db::set_setting(&st.db.lock().unwrap(), LAST_USED, Some(&db::now().to_string()));
     let Some(id) = req.get("id").cloned() else {
@@ -34,17 +43,17 @@ pub async fn handle(State(st): State<AppState>, Path(token): Path<String>, Json(
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "devhub-admin", "version": env!("CARGO_PKG_VERSION") },
             "instructions": format!(
-                "Tu administres DevHub ({}) : tu peux créer, configurer, redémarrer et supprimer des projets, \
-                 et travailler dans n'importe quel conteneur (paramètre `project`). Chaque projet est servi sur \
+                "Tu travailles dans DevHub ({}) avec les droits du profil « {} » ({}). Selon ces droits, tu peux créer, configurer, redémarrer et supprimer des projets, \
+                 et travailler dans leurs conteneurs (paramètre `project`). Chaque projet est servi sur \
                  https://<projet>.{} (premier port) et https://<projet>-<port>.{}. \
                  create_project rend la main tout de suite : l'image se télécharge en arrière-plan, \
                  vérifie avec get_project que l'état passe à running avant d'y lancer des commandes. \
                  Demande confirmation à l'utilisateur avant toute suppression.",
-                st.cfg.origin, proxy::base_host(&st), proxy::base_host(&st))
+                st.cfg.origin, who.name, who.role(), proxy::base_host(&st), proxy::base_host(&st))
         })),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({ "tools": tools() })),
-        "tools/call" => Ok(call(&st, &params).await),
+        "tools/list" => Ok(json!({ "tools": tools_for(&who) })),
+        "tools/call" => Ok(call(&st, &who, &params).await),
         _ => Err(json!({ "code": -32601, "message": format!("method not found: {method}") })),
     };
     let body = match result {
@@ -134,6 +143,51 @@ fn tools() -> Value {
     Value::Array(list)
 }
 
+/// What a tool needs from the profile.
+enum Need {
+    Admin,
+    See,
+    Manage,
+    Shell,
+    Nothing,
+}
+
+fn need(tool: &str) -> Need {
+    match tool {
+        "create_project" | "delete_project" | "devhub_update" | "audit_log" | "list_templates" => Need::Admin,
+        "list_projects" | "server_resources" => Need::Nothing,
+        "get_project" | "logs" => Need::See,
+        "project_action" | "set_ports" | "set_env" | "set_public" | "set_resources" | "add_domain" | "remove_domain" => Need::Manage,
+        _ => Need::Shell, // in-container tools
+    }
+}
+
+/// Whether `who` may call `tool` (on `project`, for project tools).
+fn allowed(who: &db::Profile, tool: &str, project: &str) -> bool {
+    match need(tool) {
+        Need::Admin => who.admin,
+        Need::Nothing => true,
+        Need::See => who.sees(project),
+        Need::Manage => who.manages(project),
+        Need::Shell => who.shell(project),
+    }
+}
+
+/// Only the tools this profile can use at all.
+fn tools_for(who: &db::Profile) -> Value {
+    let all = tools();
+    let keep = |t: &Value| {
+        let n = t["name"].as_str().unwrap_or("");
+        match need(n) {
+            Need::Admin => who.admin,
+            Need::Nothing | Need::See => true,
+            Need::Manage => who.admin || who.can_manage,
+            Need::Shell => who.admin || who.can_shell,
+        }
+    };
+    Value::Array(all.as_array().map(|a| a.iter().filter(|t| keep(t)).cloned().collect()).unwrap_or_default())
+}
+
 async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
     let s = crate::current_status(st, &p.name).await;
     let ports: Vec<Value> = p
@@ -164,11 +218,15 @@ fn pretty(v: &Value) -> Value {
     text(serde_json::to_string_pretty(v).unwrap_or_default(), false)
 }
 
-async fn call(st: &AppState, params: &Value) -> Value {
+async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let a = &params["arguments"];
     let s = |k: &str| a[k].as_str().unwrap_or("").to_string();
     let project = s("project");
+    if !allowed(who, name, &project) {
+        return text(format!("refusé : le profil « {} » n'a pas le droit d'utiliser {name}{}", who.name,
+            if project.is_empty() { String::new() } else { format!(" sur {project}") }), true);
+    }
     // Ports: integers (HTTP) or strings like "25565/tcp" (public TCP, game servers).
     let ports = |k: &str| -> Result<Vec<ops::PortSpec>, String> {
         a[k].as_array()
@@ -190,12 +248,13 @@ async fn call(st: &AppState, params: &Value) -> Value {
             "list_projects" => {
                 let ps = db::list_projects(&st.db.lock().unwrap()).map_err(|e| e.to_string())?;
                 let mut out = Vec::new();
-                for p in &ps {
+                for p in ps.iter().filter(|p| who.sees(&p.name)) {
                     out.push(project_json(st, p, false).await);
                 }
                 pretty(&json!(out))
             }
-            "get_project" => pretty(&project_json(st, &ops::load(st, &project)?, true).await),
+            // Variables can hold secrets: only for profiles that may change them.
+            "get_project" => pretty(&project_json(st, &ops::load(st, &project)?, who.manages(&project)).await),
             "list_templates" => pretty(&json!(docker::TEMPLATES
                 .iter()
                 .map(|(k, img, d)| json!({ "template": k, "image": img, "description": d }))
@@ -307,17 +366,17 @@ async fn call(st: &AppState, params: &Value) -> Value {
     r.unwrap_or_else(|e| text(format!("erreur : {e}"), true))
 }
 
-// --- Panel page to enable / rotate / revoke the admin URL ---
+// --- Panel switch: Claude's access on / off (the URL never changes) ---
 
 pub async fn admin_action(State(st): State<AppState>, jar: CookieJar, Path(action): Path<String>) -> Result<Redirect, Response> {
     let who = auth::require_admin(&st, &jar)?;
     let c = st.db.lock().unwrap();
-    let value = match action.as_str() {
-        "enable" | "rotate" => Some(random_token(32)),
-        "disable" => None,
+    let on = match action.as_str() {
+        "enable" => true,
+        "disable" => false,
         _ => return Err((StatusCode::BAD_REQUEST, "action inconnue").into_response()),
     };
-    db::set_setting(&c, SETTING, value.as_deref()).map_err(|e| crate::AppError(e).into_response())?;
-    db::audit(&c, &who.actor(), &format!("admin_mcp.{action}"), "");
+    db::set_setting(&c, ENABLED, on.then_some("1")).map_err(|e| crate::AppError(e).into_response())?;
+    db::audit(&c, &who.actor(), &format!("claude.{action}"), "");
     Ok(Redirect::to("/claude"))
 }
