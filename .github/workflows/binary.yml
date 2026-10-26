@@ -1,6 +1,8 @@
 # Builds the DevHub binary on every push to main and publishes it on the rolling "edge"
 # release as devhub-x86_64-<commit>. DevHub's "Mettre à jour" button downloads it instead of
 # compiling on the VPS, which brings an update down to a few seconds.
+#
+# Shell steps only (no `uses:`), so it runs whatever the repository's allowed-actions policy is.
 name: binary
 
 on:
@@ -19,14 +21,20 @@ jobs:
   build:
     # Ubuntu 22.04 (glibc 2.35, OpenSSL 3): the binary runs on the debian:bookworm-slim image.
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked
+      - name: Checkout
+        run: |
+          git init -q .
+          git fetch -q --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+      - name: Build
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable build --release --locked
       - name: Publish on the edge release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           asset="devhub-x86_64-${GITHUB_SHA}"
           cp target/release/devhub "$asset"
