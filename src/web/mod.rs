@@ -583,8 +583,6 @@ fn is_settings(nav: Nav) -> bool {
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
     let on = |n: Nav| if n == nav { "on" } else { "" };
     let pinned: Vec<&Project> = ctx.projects.iter().filter(|p| p.pinned).collect();
-    let h = &ctx.host;
-    let mem_pct = pct(h.mem_used_mb as f64, h.mem_total_mb as f64);
     let device = ctx.passkey.as_ref().map(|p| p.1.clone());
     html! {
         aside.sidebar {
@@ -607,23 +605,6 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 }
             }
             div.side-foot {
-                @if ctx.profile.admin {
-                    div.srv {
-                        div.srv-h { span.nav-label style="padding:0" { "Serveur" } span.dim { (h.ncpu) " cœurs" } }
-                        div.meter {
-                            div.meter-h { "Processeur" b data-live="_host:cpu" { (format!("{:.0}", h.cpu_pct)) " %" } }
-                            (bar(h.cpu_pct, Some("_host:cpubar".into()), ""))
-                        }
-                        div.meter {
-                            div.meter-h { "Mémoire" b { span data-live="_host:memgb" { (gb(h.mem_used_mb)) } " / " (gb(h.mem_total_mb)) " Go" } }
-                            (bar(mem_pct, Some("_host:membar".into()), ""))
-                        }
-                        div.meter {
-                            div.meter-h { "Disque" b { span data-live="_host:disk" { (format!("{:.0}", h.disk_pct())) } " %" } }
-                            (bar(h.disk_pct(), Some("_host:diskbar".into()), ""))
-                        }
-                    }
-                }
                 // The profile row opens the "Paramètres" category (open while on one of its pages).
                 details.me-menu open[is_settings(nav)] {
                     summary.me {
