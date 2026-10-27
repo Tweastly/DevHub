@@ -161,7 +161,8 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let names = ctx.names();
     let (series, peak, activity) = {
         let c = st.db.lock().unwrap();
-        let (series, peak) = db::metrics_series(&c, n, db::now() - 86400, 12);
+        let per = Period::of("24h");
+        let (series, peak) = db::metrics_series(&c, n, per.since, per.span, per.buckets);
         let (activity, _) = db::audit_query(&c, &db::AuditFilter { project: Some(n.clone()), ..Default::default() }, 30, 0);
         (series, peak, activity)
     };
@@ -184,7 +185,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             div.card.kpi {
                 div.kpi-h { "CPU" span.end { "limite " (cpu_lim) " cœur" @if cpu_lim > 1.0 { "s" } } }
                 div.kpi-v { span data-live={(n) ":cpu"} { @if running { (format!("{:.1} %", x.s.cpu_pct)) } @else { "—" } } }
-                div style="margin-top:10px" { (spark(&series)) }
+                (spark(&series, &Period::of("24h")))
                 div.foot { @if let Some((v, ts)) = peak { "Pic à " (format!("{v:.0}")) " % vers " (crate::timefmt::hm(ts)) " (24 h)" } @else { "L'historique se remplit (un point par minute)." } }
             }
             div.card.kpi {

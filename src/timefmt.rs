@@ -62,6 +62,18 @@ const MONTHS_LONG: [&str; 12] =
     ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const WEEKDAYS: [&str; 7] = ["jeudi", "vendredi", "samedi", "dimanche", "lundi", "mardi", "mercredi"];
 
+/// Axis label of a history chart: "14 h" for hourly columns, "lun. 26" for 6 h ones,
+/// "26 oct." for days.
+pub fn axis(ts: i64, span: i64) -> String {
+    let day = ts.div_euclid(86400);
+    let (_, m, d) = civil_from_days(day);
+    match span {
+        s if s < 6 * 3600 => format!("{} h", ts.rem_euclid(86400) / 3600),
+        s if s < 86400 => format!("{}. {d}", &WEEKDAYS[day.rem_euclid(7) as usize][..3]),
+        _ => format!("{d} {}", MONTHS[(m - 1) as usize]),
+    }
+}
+
 /// "12 oct. 2026"
 pub fn date_short(ts: i64) -> String {
     let (y, m, d) = civil_from_days(ts.div_euclid(86400));

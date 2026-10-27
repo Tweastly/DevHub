@@ -299,14 +299,55 @@ pub fn bar(pct: f64, live: Option<String>, class: &str) -> Markup {
     html! { div class=(cls) { i style={"width:" (format!("{pct:.0}")) "%"} data-live=[live] {} } }
 }
 
-pub fn spark(values: &[f64]) -> Markup {
-    let max = values.iter().cloned().fold(1.0, f64::max);
-    let peak = values.iter().cloned().fold(0.0, f64::max);
+/// Time range of a history chart: 24 h = 24 × 1 h, 7 j = 28 × 6 h, 30 j = 30 days.
+/// Buckets are aligned on whole hours / days and end with the current one.
+pub struct Period {
+    pub key: &'static str,
+    pub since: i64,
+    pub span: i64,
+    pub buckets: i64,
+}
+
+impl Period {
+    pub fn of(key: &str) -> Period {
+        let (key, span, buckets) = match key {
+            "7j" => ("7j", 6 * 3600, 28),
+            "30j" => ("30j", 86400, 30),
+            _ => ("24h", 3600, 24),
+        };
+        let end = (db::now() / span + 1) * span;
+        Period { key, since: end - buckets * span, span, buckets }
+    }
+}
+
+/// Top of the vertical scale: the peak rounded up (5, 10, 25, 50, 100 %…).
+fn nice_max(v: f64) -> f64 {
+    [5.0, 10.0, 25.0, 50.0, 100.0, 200.0, 400.0, 800.0].into_iter().find(|s| v <= *s).unwrap_or((v / 100.0).ceil() * 100.0)
+}
+
+/// CPU history as columns. Hovering or tapping one shows its time range and value
+/// (app.js, in the viewer's local time; the axis labels here are UTC until then).
+pub fn spark(values: &[Option<f64>], p: &Period) -> Markup {
+    let peak = values.iter().flatten().cloned().fold(0.0, f64::max);
+    let scale = nice_max(peak);
+    let mid = p.since + p.buckets / 2 * p.span;
     html! {
-        div.spark {
-            @for v in values {
-                i class=[(*v >= peak && peak > 0.0).then_some("hi")] style={"height:" (format!("{:.0}", (v / max * 100.0).max(8.0))) "%"} {}
+        div.spark-w data-span=(p.span) {
+            span.spark-max { (scale) " %" }
+            div.spark {
+                @for (i, v) in values.iter().enumerate() {
+                    @let cls = match v { None => Some("none"), Some(v) if *v >= peak && peak > 0.0 => Some("hi"), _ => None };
+                    i class=[cls] data-ts=(p.since + i as i64 * p.span) data-v=[v.map(|v| format!("{v:.1}"))] {
+                        b style={"height:" (format!("{:.0}", v.map(|v| v / scale * 100.0).unwrap_or(0.0).max(8.0))) "%"} {}
+                    }
+                }
             }
+            div.spark-axis {
+                span data-ts=(p.since) { (timefmt::axis(p.since, p.span)) }
+                span data-ts=(mid) { (timefmt::axis(mid, p.span)) }
+                span { "maintenant" }
+            }
+            div.spark-tip role="status" hidden {}
         }
     }
 }

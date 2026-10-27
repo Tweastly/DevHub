@@ -4,14 +4,8 @@ use super::projects::{rows, sort_by_activity, table};
 use super::*;
 use axum::extract::{Query, State};
 
-/// (since, buckets, label) for the period selector.
-pub fn period(q: &HashMap<String, String>) -> (&'static str, i64, i64) {
-    let now = db::now();
-    match q.get("p").map(String::as_str) {
-        Some("7j") => ("7j", now - 7 * 86400, 14),
-        Some("30j") => ("30j", now - 30 * 86400, 15),
-        _ => ("24h", now - 86400, 12),
-    }
+pub fn period(q: &HashMap<String, String>) -> Period {
+    Period::of(q.get("p").map(String::as_str).unwrap_or("24h"))
 }
 
 pub fn period_seg(base: &str, current: &str) -> Markup {
@@ -28,13 +22,13 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     let ctx = ctx(&st, &jar)?;
     let mut all = rows(&ctx).await;
     sort_by_activity(&ctx, &mut all);
-    let (pkey, since, buckets) = period(&q);
+    let per = period(&q);
     let names = ctx.names();
     let h = &ctx.host;
 
     let (series, peak, recent, claude_today) = {
         let c = st.db.lock().unwrap();
-        let (series, peak) = db::metrics_series(&c, "", since, buckets);
+        let (series, peak) = db::metrics_series(&c, "", per.since, per.span, per.buckets);
         let peak = peak.map(|(v, ts)| (v, ts, db::metrics_top_at(&c, ts)));
         // Non-admin profiles only see what happened to their projects.
         let (mut recent, _) = db::audit_query(&c, &db::AuditFilter::default(), if ctx.profile.admin { 6 } else { 300 }, 0);
@@ -78,7 +72,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     }
                 }
             }
-            div.acts { (period_seg("/", pkey)) }
+            div.acts { (period_seg("/", per.key)) }
         }
         div.grid4 style="margin-bottom:20px" {
             div.card.kpi {
@@ -95,7 +89,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             div.card.kpi {
                 div.kpi-h { span.ic { (icon("cpu")) } "CPU serveur" }
                 div.kpi-v { span data-live="_host:cpuint" { (format!("{:.0}", h.cpu_pct)) } small { " %" } }
-                div style="margin-top:10px" { (spark(&series)) }
+                (spark(&series, &per))
                 div.foot {
                     @if let Some((v, ts, top)) = &peak {
                         "Pic à " (format!("{v:.0}")) " % vers " (crate::timefmt::hm(*ts))
@@ -121,7 +115,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 h3 { "Projets" } span.sub { "triés par activité" }
                 div.end.row.tight {
                     @for (k, l, n) in [("all", "Tous", all.len()), ("online", "En ligne", online), ("public", "Publics", all.iter().filter(|r| r.p.public).count())] {
-                        a class={"fchip" (if f == k { " on" } else { "" })} href={"/?f=" (k) "&p=" (pkey)} style="height:28px" { (l) " " span.n { (n) } }
+                        a class={"fchip" (if f == k { " on" } else { "" })} href={"/?f=" (k) "&p=" (per.key)} style="height:28px" { (l) " " span.n { (n) } }
                     }
                 }
             }

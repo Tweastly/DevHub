@@ -148,7 +148,54 @@
   }
 
   // ---------- Page widgets, re-initialised after each navigation ----------
+  // A tap outside a chart closes its tip.
+  document.addEventListener('click', e => { $$('.spark-w').forEach(w => { if (!w.contains(e.target)) w.hideTip?.(); }); });
+
   function widgets() {
+    // History columns: local-time axis, and a tip with the range and value on hover / tap.
+    $$('.spark-w:not([data-ready])').forEach(w => {
+      w.dataset.ready = 1;
+      const span = +w.dataset.span, tip = $('.spark-tip', w), bars = $$('.spark i', w);
+      const at = ts => new Date(ts * 1000);
+      const hm = d => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const day = (d, o) => d.toLocaleDateString('fr-FR', o);
+      const sameDay = (a, b) => a.toDateString() === b.toDateString();
+      const axis = ts => {
+        const d = at(ts);
+        if (span < 6 * 3600) return d.getHours() + ' h';
+        if (span < 86400) return day(d, { weekday: 'short', day: 'numeric' });
+        return day(d, { day: 'numeric', month: 'short' });
+      };
+      $$('.spark-axis [data-ts]', w).forEach(s => { s.textContent = axis(+s.dataset.ts); });
+      const range = ts => {
+        const a = at(ts), b = at(ts + span), now = new Date();
+        if (span >= 86400) return day(a, { weekday: 'long', day: 'numeric', month: 'short' });
+        const yest = new Date(now); yest.setDate(now.getDate() - 1);
+        const d = sameDay(a, now) ? "aujourd'hui" : sameDay(a, yest) ? 'hier' : day(a, { weekday: 'short', day: 'numeric', month: 'short' });
+        return d + ' · ' + hm(a) + ' – ' + hm(b);
+      };
+      const show = i => {
+        bars.forEach(x => x.classList.toggle('on', x === i));
+        const v = i.dataset.v, ts = +i.dataset.ts, live = Date.now() / 1000 < ts + span;
+        const val = document.createElement('div'), b = document.createElement('b'), when = document.createElement('span');
+        b.textContent = v == null ? 'pas de mesure' : (+v < 1 && +v > 0 ? '< 1' : Math.round(+v)) + ' %';
+        val.append(b, v == null ? '' : ' en moyenne' + (live ? ', en cours' : ''));
+        when.textContent = range(ts);
+        tip.replaceChildren(val, when);
+        tip.hidden = false;
+        // Centered on the column, kept inside the chart.
+        const W = w.clientWidth, tw = tip.offsetWidth, c = i.offsetLeft + i.offsetWidth / 2;
+        tip.style.left = Math.min(Math.max(c, tw / 2), Math.max(W - tw / 2, tw / 2)) + 'px';
+      };
+      const hide = () => { tip.hidden = true; bars.forEach(x => x.classList.remove('on')); };
+      bars.forEach(i => {
+        i.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(i); });
+        i.addEventListener('click', e => { e.stopPropagation(); i.classList.contains('on') && e.pointerType !== 'mouse' ? hide() : show(i); });
+      });
+      $('.spark', w).addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
+      w.hideTip = hide;
+    });
+
     // Editor: line-number gutter, Tab inserts a tab, Ctrl/Cmd+S saves.
     const ta = $('.editor textarea'), gut = $('.editor .gut');
     if (ta && gut && !ta.dataset.ready) {

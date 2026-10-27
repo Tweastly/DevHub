@@ -538,15 +538,15 @@ pub fn metrics_insert(c: &Connection, ts: i64, rows: &[(String, f64, i64)]) {
     let _ = c.execute("DELETE FROM metrics WHERE ts < ?1", [ts - 31 * 86400]);
 }
 
-/// Average CPU per bucket over [since, now], plus the peak sample (cpu, ts).
-pub fn metrics_series(c: &Connection, scope: &str, since: i64, buckets: i64) -> (Vec<f64>, Option<(f64, i64)>) {
-    let span = ((now() - since) / buckets).max(1);
-    let mut out = vec![0.0; buckets as usize];
+/// Average CPU per bucket of `span` seconds from `since` (None = no sample), plus the
+/// peak sample (cpu, ts).
+pub fn metrics_series(c: &Connection, scope: &str, since: i64, span: i64, buckets: i64) -> (Vec<Option<f64>>, Option<(f64, i64)>) {
+    let mut out = vec![None; buckets as usize];
     if let Ok(mut s) = c.prepare("SELECT (ts - ?2) / ?3 AS b, AVG(cpu) FROM metrics WHERE scope=?1 AND ts >= ?2 GROUP BY b") {
-        if let Ok(rows) = s.query_map(params![scope, since, span], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))) {
+        if let Ok(rows) = s.query_map(params![scope, since, span.max(1)], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))) {
             for (b, v) in rows.flatten() {
                 if (0..buckets).contains(&b) {
-                    out[b as usize] = v;
+                    out[b as usize] = Some(v);
                 }
             }
         }

@@ -288,9 +288,22 @@ kbd { font-size: 11px; border: 1px solid var(--border-2); border-radius: 4px; pa
 .bar.err > i { background: var(--err); }
 .bar.accent > i { background: var(--accent); }
 .bar.thick { height: 8px; }
-.spark { display: flex; align-items: flex-end; gap: 3px; height: 38px; }
-.spark i { flex: 1; min-height: 3px; border-radius: 2px; background: var(--border-2); }
-.spark i.hi { background: var(--meter); }
+/* History columns: dashed top = the scale shown at the right; tip on hover / tap. */
+.spark-w { position: relative; margin-top: 24px; }
+.spark { display: flex; gap: 3px; height: 38px; border-top: 1px dashed var(--line); }
+.spark i { flex: 1; min-width: 0; display: flex; align-items: flex-end; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.spark i b { display: block; width: 100%; min-height: 3px; border-radius: 2px; background: var(--border-2); transition: background .12s; }
+.spark i.hi b { background: var(--meter); }
+.spark i.none b { height: 3px !important; opacity: .45; }
+.spark i:hover b, .spark i.on b { background: var(--accent); }
+.spark-max { position: absolute; right: 0; top: -16px; font: 10.5px var(--mono); color: var(--faint); }
+.spark-axis { display: flex; justify-content: space-between; margin-top: 6px; font: 10.5px var(--mono); color: var(--faint); }
+.spark-tip { position: absolute; bottom: calc(100% + 6px); left: 0; transform: translateX(-50%); z-index: 5; pointer-events: none;
+  padding: 6px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font-size: 11.5px; line-height: 1.4; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+.spark-tip:not([hidden]) { display: flex; flex-direction: column; }
+.spark-tip b { font: 600 13px var(--mono); }
+.spark-tip span { opacity: .72; }
 .alloc { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--track); gap: 2px; }
 .alloc i { display: block; height: 100%; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text-2); margin-top: 12px; }
