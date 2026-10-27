@@ -208,8 +208,8 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         "url": p.first_http().map(|_| proxy::url_for(st, &p.name, None)),
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
         "limits": {
-            "memory_mb": p.memory_mb.unwrap_or(st.cfg.memory_bytes / 1_048_576),
-            "cpus": p.cpus.unwrap_or(st.cfg.nano_cpus as f64 / 1e9),
+            "memory_mb": p.memory_mb.unwrap_or(st.default_mb()),
+            "cpus": p.cpus.unwrap_or(st.default_cpus()),
             "custom": p.memory_mb.is_some() || p.cpus.is_some(),
         },
     });
@@ -318,8 +318,8 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
             }
             "server_resources" => {
                 let (ncpu, mem_total) = docker::host_resources(&st.docker).await;
-                let def_mb = st.cfg.memory_bytes / 1_048_576;
-                let def_cpu = st.cfg.nano_cpus as f64 / 1e9;
+                let def_mb = st.default_mb();
+                let def_cpu = st.default_cpus();
                 let ps = db::list_projects(&st.db.lock().unwrap()).map_err(|e| e.to_string())?;
                 pretty(&json!({
                     "cpus": ncpu, "memory_mb": mem_total,

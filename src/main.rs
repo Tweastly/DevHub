@@ -60,9 +60,34 @@ pub struct AppState {
     pub data_dir: Arc<String>,
 }
 
+/// Settings of the Ressources page. Project defaults fall back to DEVHUB_MEMORY_MB / DEVHUB_CPUS.
+pub const DEFAULT_MB: &str = "default_memory_mb";
+pub const DEFAULT_CPUS: &str = "default_cpus";
+pub const DEVHUB_MB: &str = "devhub_memory_mb";
+pub const DEVHUB_CPUS: &str = "devhub_cpus";
+
 impl AppState {
     fn limits(&self) -> docker::Limits {
-        docker::Limits { memory_bytes: self.cfg.memory_bytes, nano_cpus: self.cfg.nano_cpus, bind_ip: self.cfg.bind_ip.clone(), self_container: self.cfg.self_container.clone() }
+        docker::Limits {
+            memory_bytes: self.default_mb() * 1024 * 1024,
+            nano_cpus: (self.default_cpus() * 1e9) as i64,
+            bind_ip: self.cfg.bind_ip.clone(),
+            self_container: self.cfg.self_container.clone(),
+        }
+    }
+    fn num_setting<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
+        db::setting(&self.db.lock().unwrap(), key).and_then(|v| v.parse().ok())
+    }
+    /// RAM (MB) and CPUs of a project without its own limits.
+    pub fn default_mb(&self) -> i64 {
+        self.num_setting(DEFAULT_MB).unwrap_or(self.cfg.memory_bytes / 1_048_576)
+    }
+    pub fn default_cpus(&self) -> f64 {
+        self.num_setting(DEFAULT_CPUS).unwrap_or(self.cfg.nano_cpus as f64 / 1e9)
+    }
+    /// Limits chosen for DevHub's own container (None = no limit).
+    pub fn devhub_limits(&self) -> (Option<i64>, Option<f64>) {
+        (self.num_setting(DEVHUB_MB), self.num_setting(DEVHUB_CPUS))
     }
 }
 
@@ -136,6 +161,13 @@ async fn main() -> anyhow::Result<()> {
     if let Some(me) = &st.cfg.self_container {
         let projects = db::list_projects(&st.db.lock().unwrap())?;
         docker::join_all(&st.docker, &projects, me).await;
+        // An update recreates the container without limits: put them back.
+        let (mem, cpus) = st.devhub_limits();
+        if mem.is_some() || cpus.is_some() {
+            if let Err(e) = docker::limit_container(&st.docker, me, mem, cpus).await {
+                tracing::warn!("limites de DevHub non appliquées : {e:#}");
+            }
+        }
     }
     updater::spawn_periodic(st.clone());
     spawn_stats_collector(st.clone());
@@ -171,6 +203,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/invite/{token}", get(web::profiles::invite_page))
         .route("/audit", get(web::audit::page))
         .route("/audit.csv", get(web::audit::csv))
+        .route("/resources", get(web::resources::page))
+        .route("/resources/{which}", post(web::resources::save))
         .route("/update", get(web::update::page))
         .route("/update/check", post(updater::check_now))
         .route("/update/apply", post(updater::apply))
@@ -220,6 +254,9 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Key of DevHub's own container in `stats` (project names can't start with "_").
+pub const SELF_STATS: &str = "_devhub";
+
 /// Live stats for every project and the server, plus one history sample per minute.
 fn spawn_stats_collector(st: AppState) {
     tokio::spawn(async move {
@@ -232,6 +269,10 @@ fn spawn_stats_collector(st: AppState) {
                 .map(|p| p.name)
                 .collect();
             let all = futures_util::future::join_all(names.iter().map(|n| docker::status(&st.docker, n))).await;
+            let me = match &st.cfg.self_container {
+                Some(c) => Some(docker::container_status(&st.docker, c).await),
+                None => None,
+            };
             let mut h = st.host.lock().unwrap().clone();
             sampler.sample(&st.docker, &st.data_dir, &mut h).await;
             *st.host.lock().unwrap() = h.clone();
@@ -247,7 +288,11 @@ fn spawn_stats_collector(st: AppState) {
                 }
                 db::metrics_insert(&st.db.lock().unwrap(), minute, &rows);
             }
-            *st.stats.lock().unwrap() = names.into_iter().zip(all).collect();
+            let mut stats: HashMap<String, docker::Status> = names.into_iter().zip(all).collect();
+            if let Some(me) = me {
+                stats.insert(SELF_STATS.into(), me);
+            }
+            *st.stats.lock().unwrap() = stats;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
@@ -334,7 +379,7 @@ fn back_to(form: &HashMap<String, String>, name: &str) -> String {
 }
 
 /// Appends `?err=…` (or `&err=…`) before any `#fragment`.
-fn with_param(url: &str, key: &str, value: &str) -> String {
+pub(crate) fn with_param(url: &str, key: &str, value: &str) -> String {
     let (path, frag) = url.split_once('#').map(|(p, f)| (p, format!("#{f}"))).unwrap_or((url, String::new()));
     let sep = if path.contains('?') { '&' } else { '?' };
     let v: String = url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
@@ -342,7 +387,7 @@ fn with_param(url: &str, key: &str, value: &str) -> String {
 }
 
 /// Empty field = None (use the default), otherwise it must parse.
-fn opt_num<T: std::str::FromStr>(s: &str) -> Result<Option<T>, String> {
+pub(crate) fn opt_num<T: std::str::FromStr>(s: &str) -> Result<Option<T>, String> {
     let s = s.trim();
     if s.is_empty() { Ok(None) } else { s.parse().map(Some).map_err(|_| format!("valeur invalide : {s}")) }
 }

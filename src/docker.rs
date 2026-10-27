@@ -275,20 +275,33 @@ fn nano_cpus(p: &Project, lim: &Limits) -> i64 {
 
 /// Applies the project's limits to its running container, without a restart.
 pub async fn update_limits(d: &Docker, p: &Project, lim: &Limits) -> anyhow::Result<()> {
-    let mem = memory_bytes(p, lim);
-    let opts = bollard::container::UpdateContainerOptions::<String> {
-        memory: Some(mem),
-        // Same ratio as Docker's default at creation (swap = RAM).
-        memory_swap: Some(mem * 2),
-        nano_cpus: Some(nano_cpus(p, lim)),
-        ..Default::default()
-    };
-    match d.update_container(&container_name(&p.name), opts).await {
+    match set_limits(d, &container_name(&p.name), memory_bytes(p, lim), nano_cpus(p, lim)).await {
         Ok(_) => Ok(()),
         // No container yet (still building): the limits apply when it's created.
         Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => Ok(()),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Limits of DevHub's own container, applied live. None = no limit: Docker can't lift a
+/// limit once set, so it's raised to the whole server instead.
+pub async fn limit_container(d: &Docker, name: &str, memory_mb: Option<i64>, cpus: Option<f64>) -> anyhow::Result<()> {
+    let (ncpu, mem_total) = host_resources(d).await;
+    let mem = memory_mb.unwrap_or(mem_total).max(64) * 1024 * 1024;
+    set_limits(d, name, mem, (cpus.unwrap_or(ncpu as f64) * 1e9) as i64).await?;
+    Ok(())
+}
+
+/// Swap = RAM, as Docker does at creation. Always explicit: with cgroup v1, runc doesn't
+/// write an "unlimited" (-1) swap, and the RAM then can't rise above the old swap limit.
+async fn set_limits(d: &Docker, name: &str, memory: i64, nano_cpus: i64) -> Result<(), bollard::errors::Error> {
+    let opts = bollard::container::UpdateContainerOptions::<String> {
+        memory: Some(memory),
+        memory_swap: Some(memory * 2),
+        nano_cpus: Some(nano_cpus),
+        ..Default::default()
+    };
+    d.update_container(name, opts).await.map(|_| ())
 }
 
 /// Server totals, as seen by Docker: (CPU count, RAM in MB).
@@ -443,7 +456,12 @@ pub async fn state(d: &Docker, p: &str) -> String {
 /// Full status with CPU/memory. Slow (~2 s): Docker waits for two samples to compute CPU,
 /// so only the background collector calls it.
 pub async fn status(d: &Docker, p: &str) -> Status {
-    let name = container_name(p);
+    container_status(d, &container_name(p)).await
+}
+
+/// Same, for any container by name (DevHub's own one, too).
+pub async fn container_status(d: &Docker, name: &str) -> Status {
+    let name = name.to_string();
     let Ok(info) = d.inspect_container(&name, None::<InspectContainerOptions>).await else {
         return Status { state: "absent".into(), ..Default::default() };
     };

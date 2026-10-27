@@ -19,7 +19,7 @@ async fn snapshot(st: &AppState, who: &db::Profile) -> String {
     let mut projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
     projects.retain(|p| who.sees(&p.name));
     let statuses = futures_util::future::join_all(projects.iter().map(|p| crate::current_status(st, &p.name))).await;
-    let def_cpu = st.cfg.nano_cpus as f64 / 1e9;
+    let def_cpu = st.default_cpus();
     let map: serde_json::Map<String, serde_json::Value> = projects
         .iter()
         .zip(statuses)
@@ -35,6 +35,18 @@ async fn snapshot(st: &AppState, who: &db::Profile) -> String {
         })
         .collect();
     let mut map = map;
+    if who.admin {
+        if let Some(s) = st.stats.lock().unwrap().get(crate::SELF_STATS) {
+            let (_, cpus) = st.devhub_limits();
+            map.insert(crate::SELF_STATS.into(), json!({
+                "state": s.state,
+                "cpu": (s.cpu_pct * 10.0).round() / 10.0,
+                "cpu_max": cpus.unwrap_or(st.host.lock().unwrap().ncpu as f64) * 100.0,
+                "mem": s.mem_used / 1_048_576,
+                "mem_max": s.mem_limit / 1_048_576,
+            }));
+        }
+    }
     let h = st.host.lock().unwrap().clone();
     map.insert("_host".into(), json!({
         "state": "running",

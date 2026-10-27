@@ -10,6 +10,7 @@ pub mod overview;
 pub mod profiles;
 pub mod project;
 pub mod projects;
+pub mod resources;
 pub mod security;
 pub mod update;
 
@@ -429,10 +430,10 @@ impl Ctx {
         if self.host.name.is_empty() { "serveur" } else { &self.host.name }
     }
     pub fn default_mb(&self) -> i64 {
-        self.st.cfg.memory_bytes / 1_048_576
+        self.st.default_mb()
     }
     pub fn default_cpus(&self) -> f64 {
-        self.st.cfg.nano_cpus as f64 / 1e9
+        self.st.default_cpus()
     }
 }
 
@@ -500,6 +501,7 @@ pub enum Nav<'a> {
     Passkeys,
     Profiles,
     Audit,
+    Resources,
     Update,
     Menu,
 }
@@ -587,6 +589,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
     if ctx.profile.admin {
         let n = db::profiles(&ctx.st.db.lock().unwrap()).len();
         v.push((Nav::Profiles, "/profiles", "Profils", Some((n.to_string(), false))));
+        v.push((Nav::Resources, "/resources", "Ressources", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
     }
@@ -594,7 +597,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
 }
 
 fn is_settings(nav: Nav) -> bool {
-    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Audit | Nav::Update)
+    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Resources | Nav::Audit | Nav::Update)
 }
 
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
