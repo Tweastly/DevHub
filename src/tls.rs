@@ -93,7 +93,9 @@ async fn probe(st: &AppState, caddy: &str, host: &str) -> String {
     }
     let cmd = format!(
         "echo \"ask=$(wget -q -S -O /dev/null 'http://devhub:8080/_caddy/ask?domain={host}' 2>&1 | grep -m1 HTTP/ || echo échec)\"; \
-         echo \"tls=$(wget -q -O- http://localhost:2019/config/apps/tls/automation 2>&1 | head -c 1200)\""
+         echo \"version=$(caddy version 2>&1 | head -c 60)\"; \
+         echo \"caddyfile=$(grep -v '^\\s*#' /etc/caddy/Caddyfile | tr -s ' \\t\\n' ' ' | head -c 900)\"; \
+         echo \"tls=$(wget -q -O- http://127.0.0.1:2019/config/apps/tls/automation 2>&1 | head -c 900)\""
     );
     let Ok(e) = st
         .docker
