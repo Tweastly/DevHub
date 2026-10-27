@@ -17,7 +17,10 @@ pub async fn status(st: &AppState, host: &str) -> Option<Result<(), String>> {
     let ok = tokio::time::timeout(Duration::from_secs(8), tokio::task::spawn_blocking(move || handshake(&target, &h))).await;
     match ok {
         Ok(Ok(Ok(()))) => Some(Ok(())),
-        _ => Some(Err(last_error(st, &caddy.0, host).await.unwrap_or_else(|| "Caddy n'a pas pu obtenir le certificat (rien dans son journal)".into()))),
+        _ => {
+            let why = last_error(st, &caddy.0, host).await.unwrap_or_else(|| "Caddy n'a pas pu obtenir le certificat (rien dans son journal)".into());
+            Some(Err(format!("{why} · {}", probe(st, &caddy.0, host).await)))
+        }
     }
 }
 
@@ -79,4 +82,34 @@ fn explain(e: &str) -> String {
     };
     let short: String = e.chars().take(300).collect();
     format!("{hint}{short}")
+}
+
+/// Seen from Caddy's container: DevHub's answer to its on-demand check, and the TLS
+/// automation Caddy actually runs (to tell a refusal from a config problem).
+async fn probe(st: &AppState, caddy: &str, host: &str) -> String {
+    use bollard::exec::{CreateExecOptions, StartExecResults};
+    if !host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return String::new();
+    }
+    let cmd = format!(
+        "echo \"ask=$(wget -q -S -O /dev/null 'http://devhub:8080/_caddy/ask?domain={host}' 2>&1 | grep -m1 HTTP/ || echo échec)\"; \
+         echo \"tls=$(wget -q -O- http://localhost:2019/config/apps/tls/automation 2>&1 | head -c 1200)\""
+    );
+    let Ok(e) = st
+        .docker
+        .create_exec(caddy, CreateExecOptions { cmd: Some(vec!["sh", "-c", cmd.as_str()]), attach_stdout: Some(true), attach_stderr: Some(true), ..Default::default() })
+        .await
+    else {
+        return "exec impossible dans Caddy".into();
+    };
+    let mut out = String::new();
+    if let Ok(StartExecResults::Attached { output: mut o, .. }) = st.docker.start_exec(&e.id, None).await {
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(c)) = o.next().await {
+                out.push_str(&c.to_string());
+            }
+        })
+        .await;
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
