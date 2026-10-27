@@ -63,6 +63,8 @@ pub struct NewProject {
     pub image: Option<String>,
     pub git_url: Option<String>,
     pub ports: Vec<PortSpec>,
+    /// Run the image's own command (see db::Project::service).
+    pub service: bool,
 }
 
 pub enum Change {
@@ -81,6 +83,8 @@ pub enum Change {
     /// None = back to the server-wide default.
     Resources { memory_mb: Option<i64>, cpus: Option<f64> },
     Pin(bool),
+    /// Service (image's command) or dev container; recreates the container.
+    Launch { service: bool },
 }
 
 impl Change {
@@ -99,6 +103,7 @@ impl Change {
             Change::RemoveDomain(_) => "domain-remove",
             Change::Resources { .. } => "resources",
             Change::Pin(_) => "pin",
+            Change::Launch { .. } => "launch",
         }
     }
 }
@@ -241,6 +246,8 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         env.insert("MOTD".into(), format!("{name} · hébergé avec DevHub"));
     }
     let ports = map_ports(st, &[], &wanted).map_err(internal)?;
+    // Only custom images choose; templates are dev containers, game servers always services.
+    let service = np.service && np.template == "custom";
     let p = db::Project {
         name,
         template: np.template,
@@ -255,6 +262,7 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         cpus: None,
         pinned: false,
         mcp_last_used: None,
+        service,
     };
     {
         let c = st.db.lock().unwrap();
@@ -390,6 +398,12 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
             let show = |v: Option<String>| v.unwrap_or_else(|| "défaut".into());
             detail = format!("{name} : RAM {} Mo, CPU {}", show(memory_mb.map(|m| m.to_string())), show(cpus.map(|c| c.to_string())));
+        }
+        Change::Launch { service } => {
+            p.service = service;
+            detail = format!("{name} → {}", if service { "service" } else { "environnement de dev" });
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+            docker::create(d, &p, &st.limits()).await.map_err(internal)?;
         }
         Change::Pin(pinned) => {
             db::set_pinned(&st.db.lock().unwrap(), name, pinned).map_err(internal)?;

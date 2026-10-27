@@ -237,8 +237,9 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
             ]
         }) },
         working_dir: (!p.is_service()).then(|| "/workspace".into()),
-        // PocketMine reads its console on stdin: DevHub sends commands by attaching to it.
-        open_stdin: (p.template == "pocketmine").then_some(true),
+        // Services read their console on stdin: DevHub sends commands by attaching to it
+        // (Minecraft Java uses RCON instead).
+        open_stdin: (p.is_service() && p.template != "minecraft").then_some(true),
         env: Some(env),
         labels: Some(labels),
         exposed_ports: Some(exposed),

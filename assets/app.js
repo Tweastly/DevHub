@@ -190,6 +190,7 @@
         if (np.ports) np.ports.placeholder = { site: '8000', minecraft: '25565/tcp', pocketmine: '19132/udp' }[t] || '3000, 5173';
         const show = t === 'minecraft' || t === 'pocketmine' ? t : 'other';
         $$('[data-show-for]', np).forEach(e => { e.hidden = e.dataset.showFor !== show; });
+        $$('[data-show-for-custom]', np).forEach(e => { e.hidden = !custom; });
       };
       np.addEventListener('input', upd);
       upd();

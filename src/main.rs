@@ -298,6 +298,7 @@ struct NewProject {
     image: Option<String>,
     git_url: Option<String>,
     ports: Option<String>,
+    service: Option<String>,
 }
 
 fn bad(msg: impl Into<String>) -> Response {
@@ -314,11 +315,12 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
             .append_pair("image", f.image.as_deref().unwrap_or(""))
             .append_pair("git_url", f.git_url.as_deref().unwrap_or(""))
             .append_pair("ports", f.ports.as_deref().unwrap_or(""))
+            .append_pair("service", if f.service.is_some() { "1" } else { "" })
             .finish();
         Redirect::to(&format!("/projects/new?{q}")).into_response()
     };
     let ports = ops::parse_ports(f.ports.as_deref().unwrap_or("")).map_err(back)?;
-    let np = ops::NewProject { name: f.name.clone(), template: f.template.clone(), image: f.image.clone(), git_url: f.git_url.clone(), ports };
+    let np = ops::NewProject { name: f.name.clone(), template: f.template.clone(), image: f.image.clone(), git_url: f.git_url.clone(), ports, service: f.service.is_some() };
     let p = ops::create(&st, np, &who.actor()).await.map_err(back)?;
     Ok(Redirect::to(&format!("/projects/{}", p.name)).into_response())
 }
@@ -376,6 +378,7 @@ async fn project_action(
             ops::Change::SetPublic(!p.public)
         }
         "pin" => ops::Change::Pin(true),
+        "launch" => ops::Change::Launch { service: field("mode") == "service" },
         "unpin" => ops::Change::Pin(false),
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),
         "env" => ops::Change::Env(ops::parse_env(field("env"))),

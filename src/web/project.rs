@@ -435,13 +435,15 @@ pub fn console(ctx: &Ctx, x: &P, tall: bool, logs: &str) -> Markup {
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let game = x.p.is_game();
+    // Services (PocketMine, custom images run as a service) read the console on stdin.
+    let stdin = x.p.is_service() && x.p.template != "minecraft";
     let running = x.s.state == "running";
     let can = if game { ctx.profile.manages(n) } else { ctx.profile.shell(n) };
     let id = if tall { "console-tall" } else { "console" };
     html! {
         div.term.console {
             div.term-h {
-                span { "Console · " @if game { "serveur" } @else { "bash · /workspace" } }
+                span { "Console · " @if game { "serveur" } @else if stdin { "app · entrée standard" } @else { "bash · /workspace" } }
                 span.end {
                     span.live-tag id={(id) "-tag"} { "flux actif" }
                     @if !tall { a.btn.sm href={(base) "/terminal"} data-reload { "Agrandir" } }
@@ -452,11 +454,11 @@ pub fn console(ctx: &Ctx, x: &P, tall: bool, logs: &str) -> Markup {
                 pre.logs class=[(!tall).then_some("short")] id={(id) "-out"} data-stream={(base) "/logs/stream"} data-tag={"#" (id) "-tag"} data-max=(if tall { "3000" } else { "300" }) { (logs) }
             }
             @if can {
-                form.console-in method="post" action={(base) "/console"} data-console={(base) "/console"} data-out={"#" (id) "-out"} data-in-logs=(x.p.template == "pocketmine") {
+                form.console-in method="post" action={(base) "/console"} data-console={(base) "/console"} data-out={"#" (id) "-out"} data-in-logs=(stdin) {
                     label.sr for={(id) "-cmd"} { "Commande" }
-                    span.prompt aria-hidden="true" { (if game { "/" } else { "$" }) }
+                    span.prompt aria-hidden="true" { (if game { "/" } else if stdin { ">" } else { "$" }) }
                     input id={(id) "-cmd"} name="cmd" autocomplete="off" spellcheck="false" disabled[!running]
-                        placeholder=(if !running { "le projet est arrêté" } else if game { "list, op Pseudo, whitelist add Pseudo…" } else { "npm install, ls, git pull…" });
+                        placeholder=(if !running { "le projet est arrêté" } else if game { "list, op Pseudo, whitelist add Pseudo…" } else if stdin { "texte envoyé à l'app (Entrée pour valider)" } else { "npm install, ls, git pull…" });
                     button.btn.sm type="submit" disabled[!running] { "Envoyer" }
                 }
                 @if game && running {
@@ -492,6 +494,15 @@ pub async fn console_run(
     let cmd = f.get("cmd").map(|c| c.trim()).unwrap_or("");
     if cmd.is_empty() || cmd.len() > 2000 || cmd.contains(['\n', '\r']) {
         return Json(json!({ "ok": false, "output": "commande invalide" })).into_response();
+    }
+    if p.is_service() && !p.is_game() {
+        // A custom image run as a service: the line goes to its stdin, its answer to the logs.
+        db::audit(&st.db.lock().unwrap(), &who.actor(), &format!("{name}:console"), cmd);
+        return Json(match stdin_command(&st, &name, cmd).await {
+            Ok(out) => json!({ "ok": true, "output": out, "in_logs": true }),
+            Err(e) => json!({ "ok": false, "output": e, "in_logs": false }),
+        })
+        .into_response();
     }
     if p.is_game() {
         db::audit(&st.db.lock().unwrap(), &who.actor(), &format!("{name}:console"), cmd);
@@ -661,6 +672,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             nav.nav.hide-m style="position:sticky;top:84px" {
                 div.nav-label style="padding-top:0" { "Sur cette page" }
                 a href="#resources" { "Ressources" }
+                @if !x.p.is_game() { a href="#launch" { "Lancement" } }
                 a href="#env" { "Variables d'environnement" span.count { (x.p.env.len()) } }
                 @if ctx.profile.admin { a href="#danger" style="color:var(--err)" { "Zone dangereuse" } }
             }
@@ -686,6 +698,29 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         p.help.row.tight style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)" {
                             (icon_c("server", "sm"))
                             "Serveur : " (h.ncpu) " cœurs, " (h.mem_total_mb) " Mo. Tous les projets réunis peuvent utiliser jusqu'à " b { (all_mb) " Mo" } " et " b { (format!("{all_cpu:.1}")) " cœurs" } "."
+                        }
+                    }
+                }
+                @if !x.p.is_game() {
+                    div.card #launch {
+                        div.card-h { h3 { "Lancement" } span.sub { "ce que le conteneur fait au démarrage" } }
+                        form.card-b method="post" action={(base) "/launch"} onsubmit="return confirm('Changer le mode recrée le conteneur (/workspace est conservé). Continuer ?')" {
+                            (back_field(&format!("{here}#launch")))
+                            div.access {
+                                label.tile {
+                                    input type="radio" name="mode" value="service" checked[x.p.service];
+                                    span.radio {}
+                                    b { "Service" }
+                                    span.d style="display:block;font-size:13px;color:var(--text-body);margin-top:4px" { "La commande de l'image tourne. La console écrit sur son entrée standard." }
+                                }
+                                label.tile {
+                                    input type="radio" name="mode" value="dev" checked[!x.p.service];
+                                    span.radio {}
+                                    b { "Environnement de dev" }
+                                    span.d style="display:block;font-size:13px;color:var(--text-body);margin-top:4px" { "Le conteneur reste allumé et lance " code { "/workspace/start.sh" } ". La console exécute des commandes bash." }
+                                }
+                            }
+                            button.btn style="margin-top:16px" { "Appliquer (recrée le conteneur)" }
                         }
                     }
                 }
@@ -868,6 +903,17 @@ async fn minecraft_card(st: &AppState, x: &P) -> Markup {
     }
 }
 
+/// Writes a line on a service's stdin and returns what it logged in the next second
+/// (ANSI codes left for the caller). The container must have been created with stdin open.
+pub async fn stdin_command(st: &AppState, name: &str, cmd: &str) -> Result<String, String> {
+    let since = db::now();
+    docker::console_write(&st.docker, name, cmd)
+        .await
+        .map_err(|e| format!("entrée standard indisponible (clique sur Recréer pour l'activer) : {e:#}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    Ok(docker::logs_since(&st.docker, name, since).await)
+}
+
 /// Sends one console command through RCON and returns its output, ANSI codes removed.
 pub async fn mc_command(st: &AppState, name: &str, cmd: &str) -> Result<String, String> {
     let cmd = cmd.trim().trim_start_matches('/');
@@ -877,10 +923,7 @@ pub async fn mc_command(st: &AppState, name: &str, cmd: &str) -> Result<String, 
     let pocketmine = crate::ops::load(st, name).map(|p| p.template == "pocketmine").unwrap_or(false);
     let r = if pocketmine {
         // PocketMine reads commands on its stdin; its answer shows up in the logs.
-        let since = db::now();
-        docker::console_write(&st.docker, name, cmd).await.map_err(|e| format!("console indisponible (recrée le conteneur) : {e:#}"))?;
-        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-        let out = docker::logs_since(&st.docker, name, since).await;
+        let out = stdin_command(st, name, cmd).await?;
         // Drop our own echoed command and PocketMine's "Command output | " prefix.
         let out: String = out
             .lines()

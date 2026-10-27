@@ -83,6 +83,7 @@ fn tools() -> Value {
                     "template": { "type": "string" },
                     "image": { "type": "string", "description": "Image Docker si template = custom" },
                     "git_url": { "type": "string", "description": "Dépôt cloné dans /workspace (optionnel)" },
+                    "service": { "type": "boolean", "description": "Pour template = custom : true (défaut) lance la commande de l'image, sa console est son entrée standard ; false = conteneur de dev qui lance /workspace/start.sh" },
                     "ports": { "type": "array", "items": { "type": ["integer", "string"] }, "description": "Ports du conteneur à exposer : 3000 (web, via sous-domaine HTTPS), \"25565/tcp\" (TCP public, Minecraft Java) ou \"19132/udp\" (UDP public, Minecraft Bedrock / PocketMine)" }
                 }, "required": ["name", "template"] } }),
         json!({ "name": "project_action", "description": "start, stop, restart ou rebuild (recrée le conteneur, /workspace est conservé).",
@@ -272,6 +273,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     image: a["image"].as_str().map(String::from),
                     git_url: a["git_url"].as_str().map(String::from),
                     ports: ports("ports")?,
+                    service: a["service"].as_bool().unwrap_or(true),
                 };
                 let p = ops::create(st, np, "claude-admin").await?;
                 let addr = match (p.first_http(), p.public_ports().next()) {

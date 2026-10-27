@@ -360,6 +360,13 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                                 span.lbl { "Image Docker personnalisée " span.dim { "— seulement avec « Image perso »" } }
                                 input.mono-input name="image" placeholder="ghcr.io/moi/env:latest" value=(v("image")) style="max-width:560px";
                             }
+                            label.row.tight data-show-for-custom hidden style="margin-top:14px;align-items:flex-start" {
+                                input type="checkbox" name="service" value="1" checked[!q.contains_key("service") || !v("service").is_empty()] style="margin-top:4px";
+                                span {
+                                    b { "Lancer la commande de l'image (service)" }
+                                    span.help style="display:block;margin-top:2px" { "Pour un serveur, un bot ou une app prête à l'emploi : la console du projet écrit sur son entrée standard. Décoche pour un conteneur de dev qui lance " code { "/workspace/start.sh" } "." }
+                                }
+                            }
                         }
                     }
                     div.card {

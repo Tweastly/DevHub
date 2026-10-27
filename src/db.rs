@@ -48,6 +48,9 @@ pub struct Project {
     pub pinned: bool,
     /// Last call on the project's own MCP URL.
     pub mcp_last_used: Option<i64>,
+    /// Runs the image's own command (its console is its stdin) instead of DevHub's idle
+    /// dev container (/workspace/start.sh). Always the case for game servers.
+    pub service: bool,
 }
 
 impl Project {
@@ -64,7 +67,7 @@ impl Project {
     }
     /// Images that run their own command (game servers) instead of DevHub's idle shell.
     pub fn is_service(&self) -> bool {
-        self.is_game()
+        self.service || self.is_game()
     }
     /// Minecraft servers: Java (itzg/minecraft-server) or Bedrock (PocketMine-MP).
     pub fn is_game(&self) -> bool {
@@ -95,6 +98,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE projects ADD COLUMN cpus REAL", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN mcp_last_used INTEGER", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN service INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
     let _ = c.execute("ALTER TABLE sessions ADD COLUMN passkey_id INTEGER", []);
     c.execute_batch(
@@ -315,10 +319,11 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         cpus: r.get(10)?,
         pinned: r.get::<_, i64>(11)? != 0,
         mcp_last_used: r.get(12)?,
+        service: r.get::<_, i64>(13)? != 0,
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -338,8 +343,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             p.name,
             p.template,
@@ -353,7 +358,8 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             p.memory_mb,
             p.cpus,
             p.pinned as i64,
-            p.mcp_last_used
+            p.mcp_last_used,
+            p.service as i64
         ],
     )?;
     Ok(())
