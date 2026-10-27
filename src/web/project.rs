@@ -64,7 +64,8 @@ pub fn back_field(v: &str) -> Markup {
 }
 
 /// Header + tabs around a tab body.
-pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Markup {
+/// Same header on every tab: name, state, access, pin, Ouvrir le site and the actions.
+pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let here = match tab {
@@ -95,7 +96,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
             div.phead {
                 h1 { (n) }
                 (state_pill(ctx, n, &x.s.state))
-                @if (tab == Tab::Overview || tab == Tab::Network) && x.p.first_http().is_some() {
+                @if x.p.first_http().is_some() {
                     @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
                 }
                 @if ro { span.tag { "lecture seule" } }
@@ -104,7 +105,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                     button class={"icon-btn bare pin" (if x.p.pinned { " on" } else { "" })} title=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler dans la barre latérale" }) aria-label=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler" }) { (icon("pin")) }
                 } }
                 div.acts {
-                    @if running && tab == Tab::Overview {
+                    @if running {
                         @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" { "Ouvrir le site ↗" } }
                     }
                     @if !manage {
@@ -122,7 +123,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                     }
                 }
             }
-            div.phead-meta { (subtitle) }
+            div.phead-meta { (default_subtitle(ctx, x)) }
             nav.tabs aria-label="Sections du projet" {
                 a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
                 a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" span.count { (n_addr) } }
@@ -261,7 +262,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             }
         }
     };
-    Ok(frame(&ctx, &x, Tab::Overview, default_subtitle(&ctx, &x), body))
+    Ok(frame(&ctx, &x, Tab::Overview, body))
 }
 
 // ---------- Réseau ----------
@@ -480,7 +481,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
             }
         }
     };
-    Ok(frame(&ctx, &x, Tab::Network, default_subtitle(&ctx, &x), body))
+    Ok(frame(&ctx, &x, Tab::Network, body))
 }
 
 /// Size of /workspace for the delete card. `du` walks the whole tree (seconds on a
@@ -607,7 +608,6 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let n = &x.p.name;
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 400).await };
     let shell = ctx.profile.shell(n);
-    let subtitle = html! { span { "root@" (n) ":/workspace" } };
     let body = html! {
         (console(&ctx, &x, true, &logs))
         p.help style="margin:10px 0 24px" {
@@ -637,7 +637,7 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             script { (PreEscaped(TERMINAL_JS.replace("__NAME__", n))) }
         }
     };
-    Ok(frame(&ctx, &x, Tab::Terminal, subtitle, body))
+    Ok(frame(&ctx, &x, Tab::Terminal, body))
 }
 
 pub async fn logs(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Result<Markup, Response> {
@@ -646,7 +646,6 @@ pub async fn logs(State(st): State<AppState>, jar: CookieJar, Path(name): Path<S
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 400).await };
-    let subtitle = html! { span { "docker logs " (n) } };
     let body = html! {
         div.row style="margin-bottom:14px" {
             span.label { "Journaux du conteneur" }
@@ -664,7 +663,7 @@ pub async fn logs(State(st): State<AppState>, jar: CookieJar, Path(name): Path<S
             }
         }
     };
-    Ok(frame(&ctx, &x, Tab::Logs, subtitle, body))
+    Ok(frame(&ctx, &x, Tab::Logs, body))
 }
 
 /// Interactive shell (xterm over a WebSocket), connected the first time its panel opens.
@@ -730,7 +729,6 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let mem_max = mb(x.s.mem_limit);
     let cpu_lim = x.p.cpus.unwrap_or(def_cpu);
     let env_text: String = x.p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
-    let subtitle = html! { span { (x.p.image) } span { "· créé le " (crate::timefmt::date_short(x.p.created_at)) } };
     let body = html! {
         (flash(&q))
         div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:26px;align-items:start" class="settings-grid" {
@@ -847,7 +845,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
             }
         }
     };
-    Ok(frame(&ctx, &x, Tab::Settings, subtitle, body))
+    Ok(frame(&ctx, &x, Tab::Settings, body))
 }
 
 fn regex_escape(s: &str) -> String {

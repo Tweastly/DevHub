@@ -4,7 +4,6 @@ use super::project::{frame, load, Tab};
 use super::*;
 use crate::files::{self as fs, Entry};
 use axum::extract::{Path, Query, State};
-use std::time::Duration;
 
 fn url_q(rel: &str) -> String {
     url::form_urlencoded::byte_serialize(rel.as_bytes()).collect()
@@ -139,7 +138,7 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
             div.card { (empty("folder", "Le conteneur ne tourne pas", html! { "Les fichiers se lisent dans le conteneur : démarre le projet pour y accéder." },
                 html! { form method="post" action={"/projects/" (name) "/start"} { input type="hidden" name="back" value={"/projects/" (name) "/files"}; button.btn.primary { (icon("play")) "Démarrer" } } })) }
         };
-        return Ok(frame(&ctx, &x, Tab::Files, html! { span { "/workspace" } }, body));
+        return Ok(frame(&ctx, &x, Tab::Files, body));
     }
     let rel = fs::clean(q.get("path").map(String::as_str).unwrap_or(""))?;
     let is_dir = fs::is_dir(&st, &name, &rel).await;
@@ -153,18 +152,6 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
         let mtime = entries.iter().find(|e| Some(e.name.as_str()) == rel.rsplit('/').next()).map(|e| e.mtime);
         Some(editor(&name, &rel, bytes.len(), text.as_deref(), mtime))
     };
-    let stats = crate::docker::exec(
-        &st.docker,
-        &name,
-        "printf '%s · %s' \"$(find /workspace -type f 2>/dev/null | wc -l) fichiers\" \"$(du -sh /workspace 2>/dev/null | cut -f1)\"",
-        Some("/"),
-        Duration::from_secs(2),
-    )
-    .await
-    .ok()
-    .filter(|r| !r.timed_out && r.exit_code == 0)
-    .map(|r| r.output.replace('K', " Ko").replace('M', " Mo").replace('G', " Go"));
-    let subtitle = html! { span { "/workspace" } @if let Some(s) = stats { span { "· " (s) } } };
     let body = html! {
         (flash(&q))
         div.files {
@@ -175,5 +162,5 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
             }
         }
     };
-    Ok(frame(&ctx, &x, Tab::Files, subtitle, body))
+    Ok(frame(&ctx, &x, Tab::Files, body))
 }
