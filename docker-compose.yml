@@ -31,7 +31,9 @@ services:
     environment:
       DEVHUB_DOMAIN: ${DEVHUB_DOMAIN}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The folder, not the file: git replaces files on update, and a single-file bind
+      # mount keeps showing the old one.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
 
 volumes:

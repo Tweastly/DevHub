@@ -388,7 +388,7 @@ pub async fn check_now(State(st): State<AppState>, jar: CookieJar) -> Result<Red
 }
 
 /// Starts the helper container. It mounts the repo at its *host* path so that
-/// compose's relative bind mounts (./data, ./Caddyfile) keep pointing at the right place.
+/// compose's relative bind mounts (./data, ./caddy) keep pointing at the right place.
 pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Response, Response> {
     let who = auth::require_admin(&st, &jar)?;
     run_update(&st).await.map_err(|e| AppError(e).into_response())?;
@@ -460,6 +460,8 @@ else
 fi
 step "reconstruction de DevHub"
 docker compose -p "$PROJECT" up -d --build
+step "rechargement de Caddy"
+docker compose -p "$PROJECT" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "Caddy non rechargé"
 step "terminé""#;
     let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}")];
     let mut binds = vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")];
