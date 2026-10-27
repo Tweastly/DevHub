@@ -183,7 +183,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}/settings", get(web::project::settings))
         .route("/projects/{name}/terminal", get(web::project::terminal))
         .route("/projects/{name}/terminal/ws", get(terminal::ws))
-        .route("/projects/{name}/logs", get(logs_redirect))
+        .route("/projects/{name}/logs", get(web::project::logs))
+        .route("/projects/{name}/console", post(web::project::console_run))
         .route("/projects/{name}/logs/stream", get(live::logs))
         .route("/projects/{name}/logs/download", get(web::project::logs_download))
         .route("/projects/{name}/files", get(web::files::browse))
@@ -320,10 +321,6 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
     Ok(Redirect::to(&format!("/projects/{}", p.name)).into_response())
 }
 
-async fn logs_redirect(Path(name): Path<String>) -> Redirect {
-    Redirect::to(&format!("/projects/{name}/terminal#logs"))
-}
-
 /// Where a form action returns: its `back` field if it's a local path, else the project.
 fn back_to(form: &HashMap<String, String>, name: &str) -> String {
     form.get("back")
@@ -364,16 +361,6 @@ async fn project_action(
     let back = back_to(&form, &name);
     let field = |k: &str| form.get(k).map(String::as_str).unwrap_or("");
     let fail = |e: String| Redirect::to(&with_param(&back, "err", &e));
-    if action == "mc-command" {
-        // Minecraft console: not a project change, just a command run in the container.
-        ops::load(&st, &name).map_err(|e| fail(e).into_response())?;
-        let cmd = field("cmd");
-        db::audit(&st.db.lock().unwrap(), &who.actor(), &format!("{name}:minecraft"), cmd);
-        return Ok(match web::project::mc_command(&st, &name, cmd).await {
-            Ok(out) => Redirect::to(&with_param(&back, "mc", &format!("> {cmd}\n{out}"))),
-            Err(e) => fail(e),
-        });
-    }
     let change = match action.as_str() {
         "start" => ops::Change::Start,
         "stop" => ops::Change::Stop,

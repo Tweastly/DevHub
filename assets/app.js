@@ -93,7 +93,8 @@
   // GET forms (search, filters) navigate the same way.
   document.addEventListener('submit', e => {
     const f = e.target;
-    if ((f.method || 'get').toLowerCase() !== 'get' || f.target) return;
+    // Skip forms another handler already took (the app console sends with fetch).
+    if (e.defaultPrevented || (f.method || 'get').toLowerCase() !== 'get' || f.target) return;
     e.preventDefault();
     const u = new URL(f.action || location.href, location.href);
     u.search = new URLSearchParams(new FormData(f)).toString();
@@ -193,6 +194,42 @@
       np.addEventListener('input', upd);
       upd();
     }
+    // App console: send a line, show it and the answer in the output above; ↑/↓ history.
+    $$('form[data-console]').forEach(f => {
+      if (f.dataset.ready) return;
+      f.dataset.ready = 1;
+      const input = $('input[name=cmd]', f), out = $(f.dataset.out);
+      const hist = []; let pos = 0;
+      const add = (text, cls) => {
+        if (!out) return;
+        text.split('\n').forEach(l => { const s = document.createElement('span'); s.className = 'l ' + cls; s.textContent = l; out.append(s); });
+        out.scrollTop = out.scrollHeight;
+      };
+      f.addEventListener('submit', async e => {
+        e.preventDefault();
+        const cmd = input.value.trim();
+        if (!cmd) return;
+        hist.push(cmd); pos = hist.length; input.value = '';
+        add('> ' + cmd, 'cmd');
+        f.classList.add('busy');
+        try {
+          const r = await fetch(f.dataset.console, { method: 'POST', body: new URLSearchParams({ cmd }) });
+          const j = await r.json();
+          if (!(j.in_logs && j.ok) && j.output) add(j.output, j.ok ? 'reply' : 'err');
+        } catch (err) { add('Erreur : ' + err.message, 'err'); }
+        f.classList.remove('busy'); input.focus();
+      });
+      input.addEventListener('keydown', e => {
+        if (e.key === 'ArrowUp' && pos > 0) { input.value = hist[--pos]; e.preventDefault(); }
+        if (e.key === 'ArrowDown') { pos = Math.min(hist.length, pos + 1); input.value = hist[pos] || ''; e.preventDefault(); }
+      });
+    });
+    $$('[data-fill]').forEach(b => {
+      if (b.dataset.ready) return;
+      b.dataset.ready = 1;
+      b.addEventListener('click', () => { const i = $(b.dataset.for); i.value = b.dataset.fill; i.focus(); if (!b.dataset.fill.endsWith(' ')) i.form.requestSubmit(); });
+    });
+
     // Environment variables: edit fills the add row; pasting KEY=value splits it,
     // several lines go to the raw editor.
     const ek = $('#envkey'), ev = $('#envval'), eb = $('#envbtn');

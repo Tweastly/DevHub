@@ -184,16 +184,16 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
             }
             div.ft {
                 @if !ctx.profile.manages(n) {
-                    a.btn href={(base) "/terminal#logs"} data-reload { "Journaux" }
+                    a.btn href={(base) "/logs"} data-reload { "Journaux" }
                 } @else if running {
                     form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Redémarrer" } }
-                    a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
+                    a.btn href={(base) "/logs"} data-reload { "Logs" }
                 } @else if r.s.state == "absent" {
                     (build_button(ctx, n, "/projects", ""))
                     @if ctx.profile.admin { a.btn href={"/audit?project=" (n)} { "Journal" } }
                 } @else {
                     form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Démarrer" } }
-                    a.btn href={(base) "/terminal#logs"} data-reload { "Logs" }
+                    a.btn href={(base) "/logs"} data-reload { "Logs" }
                 }
                 div.end { a.link href=(base) { "Détail" } }
             }

@@ -11,6 +11,7 @@ pub enum Tab {
     Network,
     Files,
     Terminal,
+    Logs,
     Settings,
 }
 
@@ -71,6 +72,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
         Tab::Network => format!("{base}/network"),
         Tab::Files => format!("{base}/files"),
         Tab::Terminal => format!("{base}/terminal"),
+        Tab::Logs => format!("{base}/logs"),
         Tab::Settings => format!("{base}/settings"),
     };
     let running = x.s.state == "running";
@@ -81,6 +83,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
         Tab::Network => Some("Réseau"),
         Tab::Files => Some("Fichiers"),
         Tab::Terminal => Some("Terminal"),
+        Tab::Logs => Some("Journaux"),
         Tab::Settings => Some("Paramètres"),
     };
     let (manage, shell) = (ctx.profile.manages(n), ctx.profile.shell(n));
@@ -124,7 +127,8 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, subtitle: Markup, body: Markup) -> Mark
                 a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
                 a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" span.count { (n_addr) } }
                 a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
-                a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { (if shell { "Terminal & journaux" } else { "Journaux" }) }
+                a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal" }
+                a class=(on(Tab::Logs)) href={(base) "/logs"} data-reload aria-current=[(tab == Tab::Logs).then_some("page")] { "Journaux" }
                 @if manage { a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" } }
             }
         }
@@ -167,9 +171,9 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     });
     let self_c = st.cfg.self_container.is_some();
     let checks = futures_util::future::join_all(x.p.ports.iter().map(|m| async move { m.udp || docker::port_open(self_c, n, m.container, m.host).await })).await;
-    let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 30).await };
+    let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 60).await };
     let mcp_url = format!("{}/mcp/{}", st.cfg.origin, x.p.mcp_token);
-    let minecraft = if x.p.is_game() { Some(minecraft_card(&st, &x, &q).await) } else { None };
+    let minecraft = if x.p.is_game() { Some(minecraft_card(&st, &x).await) } else { None };
     let base = format!("/projects/{n}");
 
     let body = html! {
@@ -210,11 +214,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         }
         div.split {
             div.stack {
-                div.term {
-                    div.term-h { span { "Journaux · " (n) } span.end { span.live-tag #logtag-ov { "flux actif" } a.btn.sm href={(base) "/terminal#logs"} data-reload { "Tout voir" } } }
-                    @if x.s.state == "absent" { div.logs.short { "Le conteneur n'existe pas encore." } }
-                    @else { pre.logs.short data-stream={(base) "/logs/stream"} data-tag="#logtag-ov" data-max="200" { (logs) } }
-                }
+                (console(&ctx, &x, false, &logs))
                 div.card {
                     div.card-h { h3 { "Activité de ce projet" } @if ctx.profile.admin { div.end { a.btn.sm.ghost href={"/audit?project=" (n)} { "Journal →" } } } }
                     @if activity.is_empty() { div.card-b.muted { "Rien encore." } }
@@ -229,7 +229,11 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     div.card-h { h3 { "Adresses" } div.end { a.btn.sm.ghost href={(base) "/network"} { "Réseau →" } } }
                     div.card-b {
                         @let addrs = addresses(&ctx, &x);
-                        @if addrs.is_empty() { p.muted { "Aucun port exposé. Ajoute-en un dans " a.link href={(base) "/network"} { "Réseau" } "." } }
+                        @for m in x.p.public_ports() {
+                            @let a = proxy::public_address(&st, m);
+                            div.addr { span.mono style="flex:1;font-size:13px" { (a) " " span.dim { (m.proto()) } } button.icon-btn.bare type="button" data-copy=(a) title="Copier" { (icon("copy")) } }
+                        }
+                        @if addrs.is_empty() && x.p.public_ports().next().is_none() { p.muted { "Aucun port exposé. Ajoute-en un dans " a.link href={(base) "/network"} { "Réseau" } "." } }
                         @for (u, _) in addrs.iter().skip(if x.p.http_ports().count() == 1 { 1 } else { 0 }) {
                             div.addr { a href=(u) target="_blank" { (u) } button.icon-btn.bare type="button" data-copy=(u) title="Copier" { (icon("copy")) } }
                         }
@@ -424,37 +428,147 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
 
 // ---------- Terminal & logs ----------
 
+/// The app's console: its output live, and a line to type in. Game servers take their own
+/// commands (RCON for Java, stdin for PocketMine); other projects run a shell command in
+/// /workspace. Shown in Aperçu (short) and Terminal (tall).
+pub fn console(ctx: &Ctx, x: &P, tall: bool, logs: &str) -> Markup {
+    let n = &x.p.name;
+    let base = format!("/projects/{n}");
+    let game = x.p.is_game();
+    let running = x.s.state == "running";
+    let can = if game { ctx.profile.manages(n) } else { ctx.profile.shell(n) };
+    let id = if tall { "console-tall" } else { "console" };
+    html! {
+        div.term.console {
+            div.term-h {
+                span { "Console · " @if game { "serveur" } @else { "bash · /workspace" } }
+                span.end {
+                    span.live-tag id={(id) "-tag"} { "flux actif" }
+                    @if !tall { a.btn.sm href={(base) "/terminal"} data-reload { "Agrandir" } }
+                }
+            }
+            @if x.s.state == "absent" { div.logs class=[(!tall).then_some("short")] { "Le conteneur n'existe pas encore." } }
+            @else {
+                pre.logs class=[(!tall).then_some("short")] id={(id) "-out"} data-stream={(base) "/logs/stream"} data-tag={"#" (id) "-tag"} data-max=(if tall { "3000" } else { "300" }) { (logs) }
+            }
+            @if can {
+                form.console-in method="post" action={(base) "/console"} data-console={(base) "/console"} data-out={"#" (id) "-out"} data-in-logs=(x.p.template == "pocketmine") {
+                    label.sr for={(id) "-cmd"} { "Commande" }
+                    span.prompt aria-hidden="true" { (if game { "/" } else { "$" }) }
+                    input id={(id) "-cmd"} name="cmd" autocomplete="off" spellcheck="false" disabled[!running]
+                        placeholder=(if !running { "le projet est arrêté" } else if game { "list, op Pseudo, whitelist add Pseudo…" } else { "npm install, ls, git pull…" });
+                    button.btn.sm type="submit" disabled[!running] { "Envoyer" }
+                }
+                @if game && running {
+                    div.console-chips {
+                        @for c in ["list", "save-all", "whitelist add ", "op "] {
+                            button type="button" data-fill=(c) data-for={"#" (id) "-cmd"} { (c.trim()) }
+                        }
+                    }
+                }
+            } @else {
+                div.term-f { "Lecture seule : ton profil ne peut pas envoyer de commandes à ce projet." }
+            }
+        }
+    }
+}
+
+/// Runs one console line (see `console`) and answers in JSON: {ok, output, in_logs}.
+/// `in_logs`: the answer will show up in the live output anyway (PocketMine).
+pub async fn console_run(
+    State(st): State<AppState>,
+    jar: CookieJar,
+    Path(name): Path<String>,
+    axum::extract::Form(f): axum::extract::Form<HashMap<String, String>>,
+) -> Response {
+    use axum::Json;
+    use serde_json::json;
+    let Ok(p) = crate::ops::load(&st, &name) else { return StatusCode::NOT_FOUND.into_response() };
+    let need = if p.is_game() { crate::auth::Need::Manage } else { crate::auth::Need::Shell };
+    let who = match crate::auth::require_project(&st, &jar, &name, need) {
+        Ok(w) => w,
+        Err(r) => return r,
+    };
+    let cmd = f.get("cmd").map(|c| c.trim()).unwrap_or("");
+    if cmd.is_empty() || cmd.len() > 2000 || cmd.contains(['\n', '\r']) {
+        return Json(json!({ "ok": false, "output": "commande invalide" })).into_response();
+    }
+    if p.is_game() {
+        db::audit(&st.db.lock().unwrap(), &who.actor(), &format!("{name}:console"), cmd);
+        let in_logs = p.template == "pocketmine";
+        return Json(match mc_command(&st, &name, cmd).await {
+            Ok(out) => json!({ "ok": true, "output": out, "in_logs": in_logs }),
+            Err(e) => json!({ "ok": false, "output": e, "in_logs": false }),
+        })
+        .into_response();
+    }
+    db::audit(&st.db.lock().unwrap(), &who.actor(), &format!("{name}:run_command"), cmd);
+    match docker::exec(&st.docker, &name, cmd, Some("/workspace"), std::time::Duration::from_secs(60)).await {
+        Ok(r) => {
+            let mut out = r.output.trim_end().to_string();
+            let note = if r.timed_out {
+                Some("[arrêté après 60 s : lance les commandes longues dans le shell interactif]".to_string())
+            } else {
+                (r.exit_code != 0).then(|| format!("[code de sortie {}]", r.exit_code))
+            };
+            if let Some(n) = note {
+                out = if out.is_empty() { n } else { format!("{out}\n{n}") };
+            }
+            Json(json!({ "ok": r.exit_code == 0 && !r.timed_out, "output": out, "in_logs": false })).into_response()
+        }
+        Err(e) => Json(json!({ "ok": false, "output": format!("{e:#}"), "in_logs": false })).into_response(),
+    }
+}
+
 pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Result<Markup, Response> {
+    let ctx = ctx(&st, &jar)?;
+    let x = load(&ctx, &name).await?;
+    let n = &x.p.name;
+    let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 400).await };
+    let shell = ctx.profile.shell(n);
+    let subtitle = html! { span { "root@" (n) ":/workspace" } };
+    let body = html! {
+        (console(&ctx, &x, true, &logs))
+        p.help style="margin:10px 0 24px" {
+            @if x.p.is_game() { "Les commandes vont au serveur de jeu ; sa réponse s'affiche dans la console. " }
+            @else { "Chaque ligne s'exécute dans " code { "/workspace" } " (60 s max). Pour un éditeur ou une commande interactive, ouvre le shell ci-dessous. " }
+            "↑ et ↓ rappellent les commandes précédentes."
+        }
+        @if shell {
+            details.card.shell #shell {
+                summary.card-h style="cursor:pointer;border-bottom:0" {
+                    h3 { "Shell interactif" } span.sub { "bash, avec couleurs, éditeurs et raccourcis" }
+                    span.end { span.pill.exited #tstate { "fermé" } }
+                }
+                div.term style="border-radius:0;border:0" {
+                    div.term-h { span { "bash · root@" (n) } span.end #tsize { "bash" } }
+                    div.term-body #term {}
+                    div.keys #keys {
+                        @for (label, seq) in [("Tab", "\t"), ("Ctrl", "CTRL"), ("Échap", "\x1b"), ("←", "\x1b[D"), ("↑", "\x1b[A"), ("↓", "\x1b[B"), ("→", "\x1b[C"), ("|", "|"), ("~", "~"), ("/", "/"), ("Ctrl C", "\x03")] {
+                            button type="button" data-seq=(seq) { (label) }
+                        }
+                    }
+                }
+            }
+            link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css";
+            script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" {}
+            script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" {}
+            script { (PreEscaped(TERMINAL_JS.replace("__NAME__", n))) }
+        }
+    };
+    Ok(frame(&ctx, &x, Tab::Terminal, subtitle, body))
+}
+
+pub async fn logs(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Result<Markup, Response> {
     let ctx = ctx(&st, &jar)?;
     let x = load(&ctx, &name).await?;
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 400).await };
-    let subtitle = html! { span { "root@" (n) ":/workspace" } };
-    let shell = ctx.profile.shell(n);
+    let subtitle = html! { span { "docker logs " (n) } };
     let body = html! {
-        @if shell {
-        div.row style="margin-bottom:18px" {
-            div.seg { a.on href="#terminal" { "Terminal" } a href="#logs" { "Logs" } }
-            span.spacer {}
-            span.pill.absent #tstate { "connexion…" }
-        }
-        div.term #terminal {
-            div.term-h { span { "bash · root@" (n) } span.end #tsize { "bash" } }
-            div.term-body #term {}
-            div.keys #keys {
-                @for (label, seq) in [("Tab", "\t"), ("Ctrl", "CTRL"), ("Échap", "\x1b"), ("←", "\x1b[D"), ("↑", "\x1b[A"), ("↓", "\x1b[B"), ("→", "\x1b[C"), ("|", "|"), ("~", "~"), ("/", "/"), ("Ctrl C", "\x03")] {
-                    button type="button" data-seq=(seq) { (label) }
-                }
-            }
-        }
-        p.help style="margin:12px 0 22px" {
-            @if x.s.state != "running" { "Le projet n'est pas démarré : démarre-le pour ouvrir un terminal. " }
-            "Déconnecté ? Le bandeau passe en rouge : « déconnecté — recharge la page ». La barre de touches n'apparaît que sur écran tactile."
-        }
-        }
-        div.row #logs style="margin-bottom:14px" {
-            span.label { "Journaux" }
+        div.row style="margin-bottom:14px" {
+            span.label { "Journaux du conteneur" }
             span.spacer {}
             button.fchip.on type="button" data-logfilter="all" data-target="#logpre" { "Tout" }
             button.fchip type="button" data-logfilter="err" data-target="#logpre" { "Erreurs " span.n data-errcount="#logpre" { "0" } }
@@ -468,23 +582,23 @@ pub async fn terminal(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 div.end style="margin-left:auto" { a.btn.sm href={(base) "/logs/download"} download { "Télécharger" } }
             }
         }
-        @if shell {
-            link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css";
-            script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" {}
-            script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" {}
-            script { (PreEscaped(TERMINAL_JS.replace("__NAME__", n))) }
-        }
     };
-    Ok(frame(&ctx, &x, Tab::Terminal, subtitle, body))
+    Ok(frame(&ctx, &x, Tab::Logs, subtitle, body))
 }
 
+/// Interactive shell (xterm over a WebSocket), connected the first time its panel opens.
 const TERMINAL_JS: &str = r#"
 (()=>{
-const box=document.getElementById('term');if(!box||!window.Terminal)return;
-const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'JetBrains Mono,ui-monospace,SF Mono,Menlo,monospace',theme:{background:'#141413',foreground:'#f2f1ed',cursor:'#e08350',selectionBackground:'#e0835055'}});
-const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(box);fit.fit();
+const det=document.getElementById('shell'),box=document.getElementById('term');if(!det||!box)return;
+let term=null,fit=null;
+const start=()=>{
+if(term){fit.fit();term.focus();return}
+if(!window.Terminal)return;
+term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'JetBrains Mono,ui-monospace,SF Mono,Menlo,monospace',theme:{background:'#141413',foreground:'#f2f1ed',cursor:'#e08350',selectionBackground:'#e0835055'}});
+fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(box);fit.fit();
 const state=document.getElementById('tstate'),size=document.getElementById('tsize');
 const set=(t,c)=>{state.textContent=t;state.className='pill '+c};
+set('connexion…','absent');
 const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/projects/__NAME__/terminal/ws');
 ws.binaryType='arraybuffer';const te=new TextEncoder();
 const resize=()=>{fit.fit();size.textContent='bash · '+term.cols+'×'+term.rows;if(ws.readyState===1)ws.send(JSON.stringify({cols:term.cols,rows:term.rows}))};
@@ -496,6 +610,10 @@ const send=d=>{if(ws.readyState!==1)return;if(ctrl&&d.length===1){d=String.fromC
 term.onData(send);
 document.querySelectorAll('#keys button').forEach(b=>b.addEventListener('click',()=>{const s=b.dataset.seq;if(s==='CTRL'){ctrl=!ctrl;b.classList.toggle('on',ctrl)}else send(s);term.focus()}));
 addEventListener('resize',resize);
+document.addEventListener('devhub:load',()=>ws.close(),{once:true});
+};
+det.addEventListener('toggle',()=>{if(det.open)start()});
+if(location.hash==='#shell'){det.open=true}
 })();
 "#;
 
@@ -680,7 +798,7 @@ async fn mc_status(st: &AppState, name: &str) -> Option<McStatus> {
 
 /// Server card at the top of a game project: address to share, players, console.
 /// Java (itzg/minecraft-server, TCP, RCON) and Bedrock (PocketMine-MP, UDP, stdin console).
-async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Markup {
+async fn minecraft_card(st: &AppState, x: &P) -> Markup {
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let running = x.s.state == "running";
@@ -697,7 +815,6 @@ async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Ma
     let host = proxy::public_host(st);
     let env = |k: &str| x.p.env.get(k).cloned().unwrap_or_else(|| "?".into());
     let (proto, default_port) = if bedrock { ("udp", 19132) } else { ("tcp", 25565) };
-    let suggestions: &[&str] = if bedrock { &["list", "save-all", "whitelist add Pseudo", "op Pseudo"] } else { &["list", "save-all", "whitelist list", "op Pseudo"] };
     html! {
         div.card style="margin-bottom:20px" {
             div.card-h {
@@ -732,22 +849,7 @@ async fn minecraft_card(st: &AppState, x: &P, q: &HashMap<String, String>) -> Ma
                     }
                     div {
                         span.lbl style="display:block;font-weight:500;font-size:12px;color:var(--text-2);margin-bottom:7px" { "Console" }
-                        form method="post" action={(base) "/mc-command"} {
-                            (back_field(&base))
-                            div.ig {
-                                span.pre { "/" }
-                                input.mono-input name="cmd" required placeholder="whitelist add Pseudo" autocomplete="off" disabled[!running];
-                            }
-                            div.row.tight style="margin-top:8px" {
-                                @for c in suggestions {
-                                    button.btn.sm.ghost type="button" disabled[!running] onclick={"this.form.cmd.value='" (c) "';this.form.cmd.focus()"} { (c) }
-                                }
-                                span.spacer {}
-                                button.btn.sm.primary disabled[!running] { "Envoyer" }
-                            }
-                        }
-                        @if let Some(out) = q.get("mc") { pre.logs.short data-ready="1" style="margin-top:12px;border-radius:10px;max-height:160px" { (out) } }
-                        @if let Some(e) = q.get("err") { p.err-text { (icon_c("error", "sm")) (e) } }
+                        p.muted style="font-size:13px" { "Les commandes du serveur (" code { "list" } ", " code { "op Pseudo" } ", " code { "whitelist add Pseudo" } "…) se tapent dans la console ci-dessous, ou dans l'onglet " a.link href={"/projects/" (n) "/terminal"} data-reload { "Terminal" } "." }
                     }
                 }
                 p.help.row style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)" {
