@@ -118,6 +118,8 @@ pub fn table(ctx: &Ctx, rows: &[Row], back: &str) -> Markup {
     }
 }
 
+/// Project card: the whole top opens the project; one line of badges (the ones that don't
+/// fit are cut); quiet actions, the orange button only to start a stopped project.
 fn card(ctx: &Ctx, r: &Row) -> Markup {
     let p = &r.p;
     let n = &p.name;
@@ -125,77 +127,92 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
     let mem_max = mb(r.s.mem_limit);
     let mem_used = mb(r.s.mem_used);
     let mem_pct = pct(mem_used as f64, mem_max as f64);
+    let cpu_max = p.cpus.unwrap_or(ctx.default_cpus()) * 100.0;
     let domains = db::domains_of(&ctx.st.db.lock().unwrap(), n);
     let running = r.s.state == "running";
+    let http = p.first_http().is_some();
+    let site = domains.first().map(|(h, _)| format!("https://{h}")).unwrap_or_else(|| crate::proxy::url_for(&ctx.st, n, None));
+    let manages = ctx.profile.manages(n);
+    let console = p.is_service() || ctx.profile.shell(n);
+    let game = match p.template.as_str() {
+        "minecraft" => Some("Minecraft Java"),
+        "pocketmine" => Some("PocketMine"),
+        _ => None,
+    };
+    let chip = |body: Markup, class: &str| html! { span class={"chip " (class)} { (body) } };
     html! {
         article.card.pcard.lift {
-            div.top {
+            a.ptop href=(base) aria-label={"Aperçu de " (n)} {
                 div.hd {
-                    a href=(base) {
-                        b { (n) }
-                        span.mono {
-                            @if running && p.first_http().is_some() {
-                                (domains.first().map(|(h, _)| h.clone()).unwrap_or_else(|| crate::proxy::url_for(&ctx.st, n, None).split("://").nth(1).unwrap_or("").to_string()))
-                            } @else if let Some(m) = p.public_ports().next() {
-                                (m.proto()) " · " (crate::proxy::public_address(&ctx.st, m))
-                            } @else { (p.image) }
-                        }
+                    @if p.is_game() { span class={"avatar g" (hue(n))} { (icon("cube")) } } @else { (avatar(n, "")) }
+                    div.t {
+                        span.nm { (n) }
+                        @if http && running {
+                            span.paddr.web { (site.split("://").nth(1).unwrap_or(&site)) }
+                        } @else if let Some(m) = p.public_ports().next() {
+                            span.paddr { (crate::proxy::public_address(&ctx.st, m)) }
+                        } @else { span.paddr { (p.image) } }
                     }
-                    (state_pill(ctx, n, &r.s.state))
+                    @let state = crate::ops::shown_state(&ctx.st, n, &r.s.state);
+                    span class={"pill bare " (state)} data-live={(n) ":state"} { (state_label(&state)) }
                 }
-                @if r.s.state == "absent" {
-                    (build_note(ctx, n))
-                } @else {
-                    div.metrics {
-                        div.metric {
-                            span.k { "Uptime" }
-                            span.v { @if running { @if let Some(t) = r.d.started_at { (crate::timefmt::duration(db::now() - t)) } @else { "—" } } @else { "—" } }
+                @if running {
+                    div.gauges {
+                        div.g {
+                            div.row { span { "CPU" } b data-live={(n) ":cpu"} { (format!("{:.1} %", r.s.cpu_pct)) } }
+                            (bar(pct(r.s.cpu_pct, cpu_max), Some(format!("{n}:cpubar")), ""))
                         }
-                        div.metric {
-                            span.k { "CPU" }
-                            span.v data-live={(n) ":cpu"} { @if running { (format!("{:.1} %", r.s.cpu_pct)) } @else { "—" } }
-                        }
-                        div.metric {
-                            span.k { "Mémoire" }
-                            span.v { @if running { span data-live={(n) ":mem"} { (mem_used) } " / " (mem_max) " Mo" } @else { "—" } }
-                        }
-                        div.metric {
-                            span.k { "Ports" }
-                            span.v { @if p.ports.is_empty() { "—" } @else { @for (i, m) in p.ports.iter().enumerate() { @if i > 0 { " " } ":" (m.container) } } }
+                        div.g {
+                            div.row { span { "RAM" } b { span data-live={(n) ":mem"} { (mem_used) } span.dim { " / " (mem_max) " Mo" } } }
+                            (bar(mem_pct, Some(format!("{n}:membar")), ""))
                         }
                     }
-                    @if !running {
-                        p.note {
-                            "Arrêté"
-                            @if let Some(t) = r.d.finished_at { " " (ago(t)) }
-                            @if let Some(c) = r.d.exit_code { " · code de sortie " span.mono { (c) } }
-                        }
+                } @else if r.s.state != "absent" {
+                    p.stopnote {
+                        "Arrêté"
+                        @if let Some(t) = r.d.finished_at { " " (ago(t)) }
+                        @if let Some(c) = r.d.exit_code.filter(|c| *c != 0) { " · code " span.err { (c) } }
+                        @if r.d.oom_killed { " · " span.dim { "mémoire saturée" } }
                     }
                 }
-                @if p.first_http().is_some() || !domains.is_empty() || (running && mem_pct >= 80.0) {
-                    div.chips {
-                        @if p.first_http().is_some() {
-                            @if p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
+                div.chips {
+                    @if http {
+                        @if p.public { (chip(html! { (icon_c("globe", "sm")) "Public" }, "pub")) } @else { (chip(html! { (icon_c("lock", "sm")) "Privé" }, "")) }
+                    }
+                    @for m in p.ports.iter().filter(|m| m.is_public()) { (chip(html! { (format!("Public · {}", m.proto().to_uppercase())) }, "pub")) }
+                    @if let Some(g) = game { (chip(html! { (g) }, "")) }
+                    @for m in &p.ports { (chip(html! { ":" (m.container) }, "mono")) }
+                    @if !domains.is_empty() { (chip(html! { "+" (domains.len()) " domaine" @if domains.len() > 1 { "s" } }, "")) }
+                    @if running && mem_pct >= 80.0 { (chip(html! { "RAM à " (format!("{mem_pct:.0}")) " %" }, "warn")) }
+                    @if running {
+                        @if let Some(t) = r.d.started_at {
+                            @let up = crate::timefmt::duration(db::now() - t);
+                            span.up title={"En marche depuis " (up)} { (icon_c("clock", "sm")) (up) }
                         }
-                        @if !domains.is_empty() { span.tag { "+" (domains.len()) " domaine" @if domains.len() > 1 { "s" } } }
-                        @if running && mem_pct >= 80.0 { span.pill.warn { "RAM à " (format!("{mem_pct:.0}")) " %" } }
                     }
                 }
             }
+            @if r.s.state == "absent" { div.pbuild { (build_note(ctx, n)) } }
             div.ft {
-                @if !ctx.profile.manages(n) {
-                    a.btn href={(base) "/logs"} data-reload { "Journaux" }
-                } @else if running {
-                    form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Redémarrer" } }
-                    a.btn href={(base) "/logs"} data-reload { "Logs" }
+                @if running {
+                    @if http { a.btn.sm href=(site) target="_blank" rel="noopener" { "Ouvrir le site" } }
+                    @else if console && manages { a.btn.sm href={(base) "/terminal"} { "Console" } }
+                    a.btn.sm.ghost href={(base) "/logs"} data-reload { "Journaux" }
+                    @if manages {
+                        form.inline.end method="post" action={(base) "/restart"} {
+                            input type="hidden" name="back" value="/projects";
+                            button.icon-btn.sm type="submit" title="Redémarrer" aria-label={"Redémarrer " (n)} { (icon("refresh")) }
+                        }
+                    }
                 } @else if r.s.state == "absent" {
-                    (build_button(ctx, n, "/projects", ""))
-                    @if ctx.profile.admin { a.btn href={"/audit?project=" (n)} { "Journal" } }
+                    @if manages { (build_button(ctx, n, "/projects", "sm")) }
+                    @if ctx.profile.admin { a.btn.sm.ghost href={"/audit?project=" (n)} { "Journal" } }
                 } @else {
-                    form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.primary { "Démarrer" } }
-                    a.btn href={(base) "/logs"} data-reload { "Logs" }
+                    @if manages {
+                        form.inline method="post" action={(base) "/start"} { input type="hidden" name="back" value="/projects"; button.btn.sm.primary { (icon_c("play", "sm")) "Démarrer" } }
+                    }
+                    a.btn.sm.ghost href={(base) "/logs"} data-reload { "Journaux" }
                 }
-                div.end { a.link href=(base) { "Détail" } }
             }
         }
     }

@@ -365,6 +365,8 @@ pub struct Detail {
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
     pub exit_code: Option<i64>,
+    /// Killed by the kernel for going over its memory limit.
+    pub oom_killed: bool,
 }
 
 pub async fn detail(d: &Docker, p: &str) -> Detail {
@@ -377,6 +379,7 @@ pub async fn detail(d: &Docker, p: &str) -> Detail {
         started_at: s.started_at.as_deref().and_then(crate::timefmt::parse_rfc3339),
         finished_at: s.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339),
         exit_code: s.exit_code,
+        oom_killed: s.oom_killed.unwrap_or(false),
     }
 }
 
