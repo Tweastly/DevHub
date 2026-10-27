@@ -11,6 +11,7 @@ mod ops;
 mod proxy;
 mod terminal;
 mod timefmt;
+mod tls;
 mod updater;
 mod web;
 

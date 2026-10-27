@@ -814,6 +814,8 @@ img.avatar { object-fit: cover; padding: 0; background: var(--card-2); }
 .seg.radio input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
 .net .dchip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--hover); font-size: 12.5px; }
 .net .dchip a { color: var(--accent-ink); text-decoration: none; }
+.net .dchip.bad { box-shadow: inset 0 0 0 1px var(--err); }
+.net .dchip.bad a { color: var(--err); }
 .net .dchip button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; color: var(--text-2); cursor: pointer; }
 .net .dchip button:hover { background: var(--card); color: var(--text); }
 .net .dchip button svg { width: 12px; height: 12px; }

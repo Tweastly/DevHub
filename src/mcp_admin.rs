@@ -217,7 +217,12 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         v["env"] = json!(p.env);
     }
     let domains = db::domains_of(&st.db.lock().unwrap(), &p.name);
-    v["domains"] = json!(domains.iter().map(|(h, port)| json!({ "host": h, "port": port })).collect::<Vec<_>>());
+    let https = futures_util::future::join_all(domains.iter().map(|(h, _)| crate::tls::status(st, h))).await;
+    v["domains"] = json!(domains
+        .iter()
+        .zip(https)
+        .map(|((h, port), t)| json!({ "host": h, "port": port, "https": match t { Some(Ok(())) => json!("ok"), Some(Err(e)) => json!(e), None => Value::Null } }))
+        .collect::<Vec<_>>());
     v
 }
 

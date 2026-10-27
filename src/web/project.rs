@@ -306,6 +306,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
     }))
     .await;
     let game = if x.p.is_game() { game_status(&st, &x).await } else { None };
+    let https = futures_util::future::join_all(x.domains.iter().map(|(h, _)| crate::tls::status(&st, h))).await;
     // A Bedrock server that answered its ping is listening on its UDP port.
     let open: Vec<Option<bool>> = open.into_iter().zip(&x.p.ports).map(|(o, m)| if m.udp && game.is_some() { Some(true) } else { o }).collect();
     let game_port = x.p.public_ports().next().cloned();
@@ -445,8 +446,8 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                         }
                     }
                     div.row.tight style="margin-top:12px" {
-                        @for (h, port) in &x.domains {
-                            span.dchip {
+                        @for ((h, port), t) in x.domains.iter().zip(&https) {
+                            span class={"dchip" (if matches!(t, Some(Err(_))) { " bad" } else { "" })} title=[t.as_ref().and_then(|t| t.as_ref().err())] {
                                 a.mono href={"https://" (h)} target="_blank" rel="noopener" { (h) }
                                 span.dim { "→ :" (port) }
                                 @if manages {
@@ -475,6 +476,9 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             }
                         }
                         @if x.domains.is_empty() && !manages { span.muted { "Aucun sous-domaine." } }
+                    }
+                    @for ((h, _), t) in x.domains.iter().zip(&https) {
+                        @if let Some(Err(e)) = t { p.err-text { (icon_c("error", "sm")) b { (h) } " : pas de certificat HTTPS. " (e) } }
                     }
                     @if let Some(e) = err { @if q.contains_key("host") { p.err-text { (icon_c("error", "sm")) (e) } } }
                 }
