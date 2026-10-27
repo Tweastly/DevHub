@@ -187,7 +187,7 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
                     @if running {
                         @if let Some(t) = r.d.started_at {
                             @let up = crate::timefmt::duration(db::now() - t);
-                            span.up title={"En marche depuis " (up)} { (icon_c("clock", "sm")) (up) }
+                            span.up title={"En ligne depuis " (up)} { (icon_c("clock", "sm")) (up) }
                         }
                     }
                 }

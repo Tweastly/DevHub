@@ -106,7 +106,7 @@
   let es = null;
   const pct = (a, b) => (b ? Math.min(100, a / b * 100) : 0) + '%';
   // Same table as web::state_label.
-  const LABEL = { running: 'En marche', exited: 'Arrêté', restarting: 'Redémarre', created: 'Créé', paused: 'En pause', dead: 'En échec', absent: 'Construction', failed: 'Échec', missing: 'Pas de conteneur' };
+  const LABEL = { running: 'En ligne', exited: 'Arrêté', restarting: 'Redémarre', created: 'Créé', paused: 'En pause', dead: 'En échec', absent: 'Construction', failed: 'Échec', missing: 'Pas de conteneur' };
   // Gauge fill + level: neutral, amber from 80 %, red from 92 % (as web::bar).
   const fill = (el, w) => {
     el.style.width = w;

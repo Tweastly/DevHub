@@ -232,7 +232,7 @@ pub fn avatar(name: &str, class: &str) -> Markup {
 /// Docker state → label shown next to the dot (app.js keeps the same table for live updates).
 pub fn state_label(state: &str) -> &str {
     match state {
-        "running" => "En marche",
+        "running" => "En ligne",
         "exited" => "Arrêté",
         "restarting" => "Redémarre",
         "created" => "Créé",
