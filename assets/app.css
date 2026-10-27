@@ -734,3 +734,10 @@ details.card[open] > summary { border-bottom: 1px solid var(--border); }
 .term.console > .logs:not(:last-child) { border-radius: 0; }
 details.shell[open] > summary { border-bottom: 1px solid var(--border); }
 details.shell > .term { border-radius: 0 0 var(--r) var(--r); }
+/* Profile pictures */
+img.avatar { object-fit: cover; padding: 0; background: var(--card-2); }
+.avatar.xl { width: 72px; height: 72px; font-size: 22px; }
+.avatar-card { display: flex; align-items: center; gap: 20px; }
+.avatar-card .t { flex: 1; min-width: 0; }
+.avatar-card label.btn { cursor: pointer; }
+.avatar-card label.btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }

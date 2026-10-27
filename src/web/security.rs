@@ -27,9 +27,10 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     let me = ctx.passkey.as_ref().map(|p| p.0);
     let only_one = keys.len() <= 1;
     let body = html! {
-        div.page-head { div { h1 { "Mes passkeys" } p.lead { "Profil " b { (ctx.profile.name) } " · " (ctx.profile.role()) ". DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents." } } }
+        div.page-head { div { h1 { "Mon profil" } p.lead { "Profil " b { (ctx.profile.name) } " · " (ctx.profile.role()) ". DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents." } } }
         @if let Some(n) = q.get("added") { div.flash { (alert("ok", html! { "Passkey « " (n) " » ajouté. Tu peux maintenant te connecter depuis cet appareil." })) } }
         (flash(&q))
+        div style="margin-bottom:24px" { (super::profiles::avatar_card(&ctx.profile, "/security")) }
         div.split {
             div.card {
                 div.card-h { h3 { "Mes passkeys" } span.sub { (keys.len()) " appareil" @if keys.len() > 1 { "s" } } }
@@ -85,9 +86,9 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         script { (PreEscaped(super::auth::WEBAUTHN_JS)) }
     };
     Ok(render(&ctx, Shell {
-        title: "Mes passkeys",
+        title: "Mon profil",
         nav: Nav::Passkeys,
-        crumbs: vec![("DevHub".into(), Some("/".into())), ("Paramètres".into(), None), ("Mes passkeys".into(), None)],
+        crumbs: vec![("DevHub".into(), Some("/".into())), ("Paramètres".into(), None), ("Mon profil".into(), None)],
         actions: html! {},
     }, body))
 }

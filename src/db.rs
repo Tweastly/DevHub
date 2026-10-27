@@ -117,6 +117,10 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             refresh_hash TEXT NOT NULL UNIQUE, refresh_expires INTEGER NOT NULL,
             created_at INTEGER NOT NULL, last_used INTEGER);",
     )?;
+    // Profile pictures: the image itself, its type, and a version for cache busting (0 = none).
+    let _ = c.execute("ALTER TABLE profiles ADD COLUMN avatar BLOB", []);
+    let _ = c.execute("ALTER TABLE profiles ADD COLUMN avatar_type TEXT", []);
+    let _ = c.execute("ALTER TABLE profiles ADD COLUMN avatar_ver INTEGER NOT NULL DEFAULT 0", []);
     // The admin MCP used to be a secret URL; it is now OAuth on a fixed URL. An install that
     // had it enabled keeps Claude's access enabled.
     if setting(&c, "admin_mcp_token").is_some() {
@@ -148,6 +152,8 @@ pub struct Profile {
     /// Terminal and file changes.
     pub can_shell: bool,
     pub created_at: i64,
+    /// Version of the profile picture, 0 = none (see `avatar`).
+    pub avatar_ver: i64,
 }
 
 pub const OWNER: i64 = 1;
@@ -195,10 +201,11 @@ fn row_to_profile(r: &rusqlite::Row) -> rusqlite::Result<Profile> {
         can_manage: r.get::<_, i64>(5)? != 0,
         can_shell: r.get::<_, i64>(6)? != 0,
         created_at: r.get(7)?,
+        avatar_ver: r.get(8)?,
     })
 }
 
-const PROFILE_COLS: &str = "id, name, admin, all_projects, projects, can_manage, can_shell, created_at";
+const PROFILE_COLS: &str = "id, name, admin, all_projects, projects, can_manage, can_shell, created_at, avatar_ver";
 
 pub fn profiles(c: &Connection) -> Vec<Profile> {
     let Ok(mut s) = c.prepare(&format!("SELECT {PROFILE_COLS} FROM profiles ORDER BY id")) else { return Vec::new() };
@@ -751,4 +758,21 @@ pub fn revoke_oauth(c: &Connection, id: Option<i64>) {
         Some(id) => c.execute("DELETE FROM oauth_tokens WHERE id=?1", [id]),
         None => c.execute("DELETE FROM oauth_tokens", []),
     };
+}
+
+/// Profile picture: (bytes, content type).
+pub fn avatar(c: &Connection, profile_id: i64) -> Option<(Vec<u8>, String)> {
+    c.query_row("SELECT avatar, avatar_type FROM profiles WHERE id=?1 AND avatar IS NOT NULL", [profile_id], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+}
+
+/// Sets (Some) or removes (None) a profile picture.
+pub fn set_avatar(c: &Connection, profile_id: i64, image: Option<(&[u8], &str)>) -> anyhow::Result<()> {
+    match image {
+        Some((bytes, typ)) => c.execute(
+            "UPDATE profiles SET avatar=?1, avatar_type=?2, avatar_ver=?3 WHERE id=?4",
+            params![bytes, typ, now(), profile_id],
+        )?,
+        None => c.execute("UPDATE profiles SET avatar=NULL, avatar_type=NULL, avatar_ver=0 WHERE id=?1", [profile_id])?,
+    };
+    Ok(())
 }

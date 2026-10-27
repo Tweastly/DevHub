@@ -166,6 +166,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/profiles/{id}", get(web::profiles::edit).post(web::profiles::update))
         .route("/profiles/{id}/invite", post(web::profiles::invite))
         .route("/profiles/{id}/delete", post(web::profiles::delete))
+        .route("/profiles/{id}/avatar", get(web::profiles::avatar_get).post(web::profiles::avatar_set).layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)))
+        .route("/profiles/{id}/avatar/remove", post(web::profiles::avatar_remove))
         .route("/invite/{token}", get(web::profiles::invite_page))
         .route("/audit", get(web::audit::page))
         .route("/audit.csv", get(web::audit::csv))

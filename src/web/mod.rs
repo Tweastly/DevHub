@@ -212,6 +212,17 @@ pub fn color_of(name: &str) -> &'static str {
     ["#b4541f", "#56524b", "#c99b6b", "#8c877f", "#7d5a3c", "#d8c6b2"][hue(name)]
 }
 
+/// A profile's picture, or its initials.
+pub fn profile_avatar(p: &db::Profile, class: &str) -> Markup {
+    html! {
+        @if p.avatar_ver > 0 {
+            img class={"avatar round " (class)} src={"/profiles/" (p.id) "/avatar?v=" (p.avatar_ver)} alt="" width="34" height="34";
+        } @else {
+            span class={"avatar round " (class)} { (initials(&p.name)) }
+        }
+    }
+}
+
 pub fn avatar(name: &str, class: &str) -> Markup {
     html! { span class={"avatar g" (hue(name)) " " (class)} { (initials(name)) } }
 }
@@ -572,7 +583,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
     if ctx.profile.admin {
         v.push((Nav::Claude, "/claude", "Claude", ctx.admin.then(|| ("admin".to_string(), false))));
     }
-    v.push((Nav::Passkeys, "/security", "Mes passkeys", Some((ctx.passkey_count.to_string(), false))));
+    v.push((Nav::Passkeys, "/security", "Mon profil", Some((ctx.passkey_count.to_string(), false))));
     if ctx.profile.admin {
         let n = db::profiles(&ctx.st.db.lock().unwrap()).len();
         v.push((Nav::Profiles, "/profiles", "Profils", Some((n.to_string(), false))));
@@ -614,7 +625,7 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 // The profile row opens the "Paramètres" category (open while on one of its pages).
                 details.me-menu open[is_settings(nav)] {
                     summary.me {
-                        span.avatar.round.sm { (initials(&ctx.profile.name)) }
+                        (profile_avatar(&ctx.profile, "sm"))
                         span.who {
                             (ctx.profile.name)
                             span {
