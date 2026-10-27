@@ -770,3 +770,65 @@ img.avatar { object-fit: cover; padding: 0; background: var(--card-2); }
 .avatar-card .t { flex: 1; min-width: 0; }
 .avatar-card label.btn { cursor: pointer; }
 .avatar-card label.btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Réseau: address first, then ports, then subdomains ---------- */
+.net .nhero { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.net .nhero-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.net .nhero-h h3 { margin: 0; font-size: 15.5px; font-weight: 600; }
+.net .nhero-h .end { margin-left: auto; }
+.net .nstate { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-body); white-space: nowrap; }
+.net .nstate.dim { color: var(--text-2); }
+.net .seg form { display: contents; }
+.net .seg button svg { width: 13px; height: 13px; }
+.net .nbig { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-radius: var(--r); background: var(--card-2); border: 1px solid var(--line); }
+.net .nurl { flex: 1; min-width: 0; font: 500 16px var(--mono); color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+.net .nurl:hover { color: var(--accent-hover); }
+.net .nbig .btn svg { width: 13px; height: 13px; }
+.net .nalso { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.net .nalso .chip { text-decoration: none; color: var(--accent-ink); }
+.net .nalso .end { margin-left: auto; }
+.net .nfields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.net .nfield { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-radius: var(--r); background: var(--card-2); border: 1px solid var(--line); min-width: 0; }
+.net .nfield > div { flex: 1; min-width: 0; }
+.net .nfield .k { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.net .nfield .v { display: block; margin-top: 2px; font: 500 17px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net .nhero .help { margin: 0; }
+.net .chip.pub { background: var(--accent-soft); color: var(--accent-ink); font-family: var(--sans); }
+.net .chip.warn { color: var(--warn); }
+.net .chip .dot { width: 6px; height: 6px; }
+.net .nrow { display: grid; grid-template-columns: 90px 150px minmax(0, 1fr) 130px 36px; gap: 16px; align-items: center; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 13px; }
+.net .nrow.nhead { border-top: 0; padding-top: 12px; padding-bottom: 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.net .nrow b.mono { font-size: 14px; font-weight: 500; }
+.net .nrow .addr-c { font-size: 12.5px; color: var(--text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net .nadd { border-top: 1px solid var(--line); }
+.net .nadd summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 12px 18px; font-size: 13px; font-weight: 500; color: var(--accent); }
+.net .nadd summary::-webkit-details-marker { display: none; }
+.net .nadd summary svg { width: 13px; height: 13px; }
+.net .nadd[open] summary { padding-bottom: 6px; }
+.net .nadd form { padding: 4px 18px 14px; gap: 12px; }
+.net .nadd .end { margin-left: auto; }
+.seg.radio label { position: relative; }
+.seg.radio input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg.radio span { display: inline-flex; padding: 6px 12px; border-radius: 4px; font: 500 13px var(--sans); color: var(--text-2); }
+.seg.radio input:checked + span { background: var(--hover); color: var(--text); }
+.seg.radio input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.net .dchip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--hover); font-size: 12.5px; }
+.net .dchip a { color: var(--accent-ink); text-decoration: none; }
+.net .dchip button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; color: var(--text-2); cursor: pointer; }
+.net .dchip button:hover { background: var(--card); color: var(--text); }
+.net .dchip button svg { width: 12px; height: 12px; }
+.net .dadd { display: inline-flex; align-items: center; gap: 6px; }
+.net .dinput { display: inline-flex; align-items: center; height: 32px; border: 1px dashed var(--border-2); border-radius: 999px; background: var(--card); }
+.net .dinput.bad { border-color: var(--err); }
+.net .dinput input { width: 110px; height: 30px; padding: 0 4px 0 12px; border: 0; background: transparent; color: var(--text); font: 12.5px var(--mono); outline: none; }
+.net .dinput:focus-within { border-style: solid; border-color: var(--accent); }
+.net .dinput span { padding-right: 12px; font: 12.5px var(--mono); color: var(--text-2); }
+.net .dadd .sel { height: 32px; padding: 0 8px; width: auto; }
+@media (max-width: 720px) {
+  .net .nfields { grid-template-columns: minmax(0, 1fr); }
+  .net .nrow { grid-template-columns: 64px minmax(0, 1fr) 36px; }
+  .net .nrow > :nth-child(3) { grid-column: 2; grid-row: 2; }
+  .net .nrow.nhead > :nth-child(3) { display: none; }
+  .net .nalso .end { margin-left: 0; }
+  .net .nadd .end { display: none; }
+}

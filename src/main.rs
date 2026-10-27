@@ -426,6 +426,23 @@ async fn project_action(
         "launch" => ops::Change::Launch { service: field("mode") == "service" },
         "unpin" => ops::Change::Pin(false),
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),
+        // One port at a time from the Réseau tab: added to / removed from the current list.
+        "port-add" | "port-remove" => {
+            let current: Vec<String> = ops::load(&st, &name).map_err(|e| fail(e).into_response())?.ports.iter().map(|m| m.spec()).collect();
+            let wanted = if action == "port-add" {
+                let n = field("port").trim();
+                let spec = match field("kind") { "tcp" => format!("{n}/tcp"), "udp" => format!("{n}/udp"), _ => n.to_string() };
+                let mut v = current;
+                v.push(spec);
+                v
+            } else {
+                current.into_iter().filter(|s| s != field("spec")).collect()
+            };
+            match ops::parse_ports(&wanted.join(",")) {
+                Ok(v) => ops::Change::Ports(v),
+                Err(e) => return Ok(Redirect::to(&with_param(&with_param(&back, "err", &e), "port", field("port")))),
+            }
+        }
         "env" => ops::Change::Env(ops::parse_env(field("env"))),
         // One variable at a time (the table's add / edit / delete); the same key replaces.
         "env-set" | "env-remove" => {

@@ -275,12 +275,16 @@ async fn dns_status(apps: &str) -> Option<String> {
     }
 }
 
+/// Réseau, address first: what to open (a site) or to type in the game (address and port
+/// apart), then the ports with their state, then the subdomains when there is a site.
 pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx(&st, &jar)?;
     let x = load(&ctx, &name).await?;
     let n = &x.p.name;
     let base = format!("/projects/{n}");
     let here = format!("{base}/network");
+    let manages = ctx.profile.manages(n);
+    let running = x.s.state == "running";
     let since = {
         let c = st.db.lock().unwrap();
         db::audit_query(&c, &db::AuditFilter { project: Some(n.clone()), ..Default::default() }, 50, 0)
@@ -293,133 +297,185 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
         Some(a) => dns_status(a).await,
         None => None,
     };
-    let ports_text = x.p.ports.iter().map(|m| m.spec()).collect::<Vec<_>>().join(", ");
     let first_http = x.p.first_http().map(|m| m.container);
+    let self_c = st.cfg.self_container.is_some();
+    // Something listening? (UDP can't be probed: Bedrock answers its own ping, shown in the hero.)
+    let open = futures_util::future::join_all(x.p.ports.iter().map(|m| async move {
+        if !running { Some(false) } else if m.udp { None } else { Some(docker::port_open(self_c, n, m.container, m.host).await) }
+    }))
+    .await;
+    let game = if x.p.is_game() { game_status(&st, &x).await } else { None };
+    // A Bedrock server that answered its ping is listening on its UDP port.
+    let open: Vec<Option<bool>> = open.into_iter().zip(&x.p.ports).map(|(o, m)| if m.udp && game.is_some() { Some(true) } else { o }).collect();
+    let game_port = x.p.public_ports().next().cloned();
+    let host_of = |url: &str| url.split("://").nth(1).unwrap_or(url).to_string();
+    let site = proxy::url_for(&st, n, None);
     let err = q.get("err");
+    let state = |o: Option<bool>| html! {
+        @match o {
+            Some(true) => span.nstate { span.dot.running {} "Répond" },
+            Some(false) => span.nstate.dim { span.dot.exited {} @if running { "Rien n'écoute" } @else { "Arrêté" } },
+            None => span.nstate.dim { "—" },
+        }
+    };
+    let copy = |v: &str, label: &str| html! { button.btn.sm type="button" data-copy=(v) aria-label={"Copier " (label)} { (icon_c("copy", "sm")) "Copier" } };
+
     let body = html! {
-        @if let Some(m) = q.get("ok") { div.flash { (alert("ok", html! { (m) })) } }
-        div.stack {
-            @if x.p.first_http().is_none() && x.p.public_ports().next().is_some() {
-                (alert("info", html! { "Ce projet n'a pas de site web : le réglage privé/public ne concerne que les adresses HTTPS. Ses ports TCP publics sont ouverts à tous, c'est le jeu qui gère ses accès (whitelist, mot de passe…)." }))
-            } @else {
-            div.card {
-                div.card-h { h3 { "Qui peut voir ce projet ?" } span.sub { "le réglage le plus important de cette page" } }
-                div.card-b {
-                    div.access {
-                        form method="post" action={(base) "/private"} {
-                            (back_field(&here))
-                            button class=(if !x.p.public { "on" } else { "" }) {
-                                span.ic { (icon("lock")) }
-                                span { b { "Privé (passkey)" } span.d { "Seuls les profils autorisés, connectés, voient le site. Les visiteurs tombent sur « Projet privé »." } }
-                                span.radio {}
+        (flash(&q))
+        div.stack.net {
+            // ---- What to open / what to type ----
+            @if first_http.is_some() {
+                section.card.nhero {
+                    div.nhero-h {
+                        h3 { "Adresse du site" }
+                        (state(open.iter().zip(&x.p.ports).find(|(_, m)| Some(m.container) == first_http).and_then(|(o, _)| *o)))
+                        @if manages {
+                            div.seg.end role="group" aria-label="Accès au site" {
+                                form.inline method="post" action={(base) "/private"} { (back_field(&here)) button class=(if !x.p.public { "on" } else { "" }) aria-pressed=(!x.p.public) { (icon_c("lock", "sm")) "Privé" } }
+                                form.inline method="post" action={(base) "/public"} { (back_field(&here)) button class=(if x.p.public { "on" } else { "" }) aria-pressed=(x.p.public) { (icon_c("globe", "sm")) "Public" } }
                             }
-                        }
-                        form method="post" action={(base) "/public"} {
-                            (back_field(&here))
-                            button class=(if x.p.public { "on" } else { "" }) {
-                                span.ic { (icon("globe")) }
-                                span { b { "Public" } span.d { "Tout le monde peut ouvrir les adresses ci-dessous, sans se connecter." } }
-                                span.radio {}
-                            }
+                        } @else {
+                            span.chip.end { @if x.p.public { "Public" } @else { "Privé" } }
                         }
                     }
-                    p.help.row.tight style="margin-top:14px" {
-                        (icon_c("info", "sm"))
-                        "Actuellement " b { (if x.p.public { "public" } else { "privé" }) }
-                        @if let Some(t) = since { " depuis " (ago(t)) }
-                        ". " (if x.p.public { "Clique sur « Privé » pour fermer l'accès immédiatement." } else { "Rien n'est visible sans ton passkey." })
+                    div.nbig {
+                        a.nurl href=(site) target="_blank" rel="noopener" { (site) }
+                        button.icon-btn.sm type="button" data-copy=(site) title="Copier" aria-label="Copier l'adresse" { (icon_c("copy", "sm")) }
+                        a.btn.sm.primary href=(site) target="_blank" rel="noopener" { "Ouvrir" (icon_c("external", "sm")) }
+                    }
+                    div.nalso {
+                        @if !x.domains.is_empty() || x.p.http_ports().count() > 1 {
+                            span { "Aussi sur" }
+                            @for (h, _) in &x.domains { a.chip href={"https://" (h)} target="_blank" rel="noopener" { (h) } }
+                            @for m in x.p.http_ports().filter(|m| Some(m.container) != first_http) {
+                                @let u = proxy::url_for(&st, n, Some(m.container));
+                                a.chip href=(u) target="_blank" rel="noopener" { (host_of(&u)) }
+                            }
+                        }
+                        span.end {
+                            @if x.p.public { "Public : tout le monde peut ouvrir ces adresses" } @else { "Privé : passkey obligatoire pour toutes ces adresses" }
+                            @if let Some(t) = since { ", depuis " (ago(t)) } "."
+                        }
+                    }
+                }
+            } @else if let Some(m) = &game_port {
+                @let host = proxy::public_host(&st);
+                section.card.nhero {
+                    div.nhero-h {
+                        h3 { @if x.p.is_game() { "Rejoindre le serveur" } @else { "Se connecter" } }
+                        @if let Some(g) = &game { span.nstate { span.dot.running {} "Joignable · " (g.online) " / " (g.max) " joueurs" } }
+                        @else if running && m.tcp { (state(open.iter().zip(&x.p.ports).find(|(_, p)| p.container == m.container).and_then(|(o, _)| *o))) }
+                        @else if !running { span.nstate.dim { span.dot.exited {} "Arrêté" } }
+                        span.chip.pub.end { (m.proto().to_uppercase()) " public" }
+                    }
+                    div.nfields {
+                        div.nfield { div { span.k { "Adresse" } span.v { (host) } } (copy(&host, "l'adresse")) }
+                        div.nfield { div { span.k { "Port" } span.v { (m.host) } } (copy(&m.host.to_string(), "le port")) }
+                    }
+                    p.help {
+                        @match x.p.template.as_str() {
+                            "pocketmine" => "Dans Minecraft : Jouer → Serveurs → Ajouter un serveur. ",
+                            "minecraft" => "Dans Minecraft : Multijoueur → Ajouter un serveur (le port 25565 est implicite). ",
+                            _ => "",
+                        }
+                        "Ouvert à tous sur Internet, sans passkey : "
+                        @if x.p.is_game() { "la whitelist du jeu décide qui entre." } @else { "c'est l'application qui gère l'accès." }
                     }
                 }
             }
-            }
-            div.card {
-                div.card-h { h3 { "Ports & adresses automatiques" } span.sub { "HTTPS automatique sur *." (proxy::base_host(&st)) } }
-                @if x.p.ports.is_empty() { div.card-b.muted { "Aucun port exposé pour l'instant." } }
-                @else {
-                    table.tbl.cards {
-                        thead { tr { th { "Port conteneur" } th { "Adresses" } th.num { "Port hôte" } } }
-                        tbody {
-                            @for m in &x.p.ports {
-                                tr {
-                                    td {
-                                        span.chip { (m.container) @if m.is_public() { " " (m.proto().to_uppercase()) } }
-                                        @if Some(m.container) == first_http && !m.is_public() { span.dim style="margin-left:8px;font-size:12px" { "principal" } }
+
+            // ---- Ports ----
+            section.card {
+                @if x.p.ports.is_empty() {
+                    div.card-b.muted { "Aucun port exposé : rien n'est joignable de l'extérieur pour l'instant." }
+                } @else {
+                    div.ntable role="table" aria-label="Ports" {
+                        div.nrow.nhead role="row" { span role="columnheader" { "Port" } span role="columnheader" { "Type" } span role="columnheader" { "Adresse" } span.hide-m role="columnheader" { "État" } span {} }
+                        @for (m, o) in x.p.ports.iter().zip(&open) {
+                            div.nrow role="row" {
+                                b.mono role="cell" { (m.container) }
+                                span role="cell" {
+                                    @if m.is_public() { (m.proto().to_uppercase()) " public" }
+                                    @else { "Site web" @if Some(m.container) == first_http { span.dim { " · principal" } } }
+                                }
+                                span.mono.addr-c role="cell" {
+                                    @if m.is_public() { (proxy::public_address(&st, m)) }
+                                    @else if Some(m.container) == first_http { (host_of(&site)) }
+                                    @else { (host_of(&proxy::url_for(&st, n, Some(m.container)))) }
+                                }
+                                span.hide-m role="cell" { (state(*o)) }
+                                @if manages {
+                                    form.inline method="post" action={(base) "/port-remove"} onsubmit={"return confirm('Retirer le port " (m.container) " ? Le conteneur est recréé, les fichiers sont gardés.')"} {
+                                        (back_field(&here)) input type="hidden" name="spec" value=(m.spec());
+                                        button.icon-btn.sm.bare type="submit" title="Retirer" aria-label={"Retirer le port " (m.container)} { (icon_c("x", "sm")) }
                                     }
-                                    @if m.is_public() {
-                                        td {
-                                            div.row.tight {
-                                                span.pill.public { (m.proto().to_uppercase()) " public" }
-                                                code style="font-size:12.5px" { (proxy::public_address(&st, m)) }
-                                                button.icon-btn.bare type="button" data-copy=(proxy::public_address(&st, m)) title="Copier" { (icon_c("copy", "sm")) }
-                                            }
-                                            div.help style="margin-top:4px" { "Ouvert sur Internet, sans HTTPS ni passkey : le jeu gère ses propres accès." }
-                                        }
-                                    } @else {
-                                        td.mono style="font-size:12px;line-height:1.9" {
-                                            @if Some(m.container) == first_http { a.link href=(proxy::url_for(&st, n, None)) target="_blank" { (proxy::url_for(&st, n, None)) } br; }
-                                            a.link href=(proxy::url_for(&st, n, Some(m.container))) target="_blank" { (proxy::url_for(&st, n, Some(m.container))) }
-                                        }
-                                    }
-                                    td.num.mono.dim.hide-m { (m.host) }
+                                } @else { span {} }
+                            }
+                        }
+                    }
+                }
+                @if manages {
+                    details.nadd open[err.is_some() && q.contains_key("port")] {
+                        summary { (icon_c("plus", "sm")) "Ajouter un port" }
+                        form.row method="post" action={(base) "/port-add"} onsubmit="return confirm('Ajouter ce port recrée le conteneur (les fichiers sont gardés). Continuer ?')" {
+                            (back_field(&here))
+                            div.seg.radio role="radiogroup" aria-label="Type de port" {
+                                @for (v, l) in [("web", "Site web"), ("tcp", "TCP"), ("udp", "UDP")] {
+                                    label { input type="radio" name="kind" value=(v) checked[v == if x.p.is_game() { if x.p.template == "pocketmine" { "udp" } else { "tcp" } } else { "web" }]; span { (l) } }
                                 }
                             }
+                            label.row.tight style="font-size:13px" { span.muted { "Port" } input.mono-input name="port" type="number" min="1" max="65535" required placeholder="3000" style="width:110px" value=[q.get("port")]; }
+                            button.btn { "Ajouter" }
+                            span.help.end { "Site web = adresse HTTPS · TCP / UDP = port ouvert à tous (jeux)" }
                         }
-                    }
-                }
-                div.card-f {
-                    form.row method="post" action={(base) "/ports"} style="flex-wrap:nowrap" onsubmit="return confirm('Changer les ports recrée le conteneur. Continuer ?')" {
-                        (back_field(&here))
-                        label.field style="flex:1" { span.lbl { "Ports conteneur " span.dim { "(séparés par des virgules)" } } input.mono-input name="ports" value=(ports_text) placeholder="3000, 5173"; p.help { code { "3000" } " = site web (sous-domaine HTTPS) · " code { "25565/tcp" } " / " code { "19132/udp" } " = port TCP ou UDP public, pour un serveur de jeu" } }
-                        button.btn style="align-self:flex-end" { (icon("wrench")) "Appliquer (rebuild)" }
                     }
                 }
             }
-            div.card {
-                div.card-h { h3 { "Sous-domaines personnalisés" } @if let Some(a) = &st.cfg.apps_domain { span.sub { "<nom>." (a) } } }
-                div.card-b {
-                    @if let Some(apps) = &st.cfg.apps_domain {
-                        p.muted { "Sers ce projet sur " code { "<nom>." (apps) } ". Il faut un enregistrement DNS " code { "*." (apps) } " vers l'IP du VPS (une seule fois pour tous). Le certificat HTTPS est créé à la première visite." }
-                        div.addr style="margin:16px 0" {
-                            span.mono style="flex:1;font-size:12.5px" { "*." (apps) " " span.chip { "A" } " " (dns.clone().unwrap_or_else(|| "—".into())) }
-                            @if dns.is_some() { span.pill.running.plain { "DNS détecté" } } @else { span.pill.warn.plain { "DNS non détecté" } }
+
+            // ---- Subdomains (sites only) ----
+            @if first_http.is_some() {
+                section.card.card-b.nsub {
+                    div.nhero-h {
+                        h3 { "Sous-domaines" }
+                        span.muted { "HTTPS créé à la première visite" }
+                        @if let Some(apps) = &st.cfg.apps_domain {
+                            @if dns.is_some() { span.chip.end title={"*." (apps) " → " (dns.clone().unwrap_or_default())} { span.dot.running {} "DNS *." (apps) } }
+                            @else { span.chip.warn.end title={"Ajoute un enregistrement A *." (apps) " vers l'IP du serveur"} { span.dot.restarting {} "DNS *." (apps) " non détecté" } }
                         }
-                    } @else {
-                        p.muted style="margin-bottom:16px" { "Sers ce projet sur un autre nom d'hôte. Le certificat HTTPS est créé à la première visite." }
                     }
-                    @if !x.domains.is_empty() {
-                        div.card style="box-shadow:none;margin-bottom:18px" {
-                            @for (h, port) in &x.domains {
-                                div.list-row {
-                                    (icon_c("globe", "sm"))
-                                    span.t.row.tight { a.link.mono href={"https://" (h)} target="_blank" style="font-size:13px" { (h) } span.dim { "→" } span.chip { "port " (port) } span.chip.ok { "HTTPS auto" } }
+                    div.row.tight style="margin-top:12px" {
+                        @for (h, port) in &x.domains {
+                            span.dchip {
+                                a.mono href={"https://" (h)} target="_blank" rel="noopener" { (h) }
+                                span.dim { "→ :" (port) }
+                                @if manages {
                                     form.inline method="post" action={(base) "/domain-remove"} onsubmit="return confirm('Retirer ce sous-domaine ?')" {
                                         (back_field(&here)) input type="hidden" name="host" value=(h);
-                                        button.btn.sm.ghost { "Retirer" }
+                                        button type="submit" aria-label={"Retirer " (h)} { (icon_c("x", "sm")) }
                                     }
                                 }
                             }
                         }
-                    }
-                    @if first_http.is_none() { p.muted { "Ajoute d'abord un port web (HTTP) au projet. Les ports TCP publics n'ont pas de sous-domaine." } }
-                    @else {
-                        form method="post" action={(base) "/domain-add"} {
-                            (back_field(&here))
-                            span.lbl style="display:block;font-weight:650;font-size:13px;margin-bottom:7px" { "Ajouter un sous-domaine" }
-                            div.row style="flex-wrap:nowrap" {
-                                @if let Some(apps) = &st.cfg.apps_domain {
-                                    div class={"ig" (if err.is_some() { " bad" } else { "" })} style="flex:1;max-width:460px" {
-                                        input.mono-input name="host" placeholder="app" required pattern="[a-zA-Z0-9-]+" value=[q.get("host")];
-                                        span.suf { "." (apps) }
+                        @if manages {
+                            form.inline.dadd method="post" action={(base) "/domain-add"} {
+                                (back_field(&here))
+                                span class={"dinput" (if err.is_some() && q.contains_key("host") { " bad" } else { "" })} {
+                                    @if let Some(apps) = &st.cfg.apps_domain {
+                                        input name="host" placeholder="app" required pattern="[a-zA-Z0-9-]+" aria-label="Nom du sous-domaine" value=[q.get("host")];
+                                        span { "." (apps) }
+                                    } @else {
+                                        input name="host" placeholder="app.example.com" required aria-label="Nom d'hôte" style="width:200px" value=[q.get("host")];
                                     }
-                                } @else {
-                                    input.mono-input name="host" placeholder="app.example.com" required style="flex:1;max-width:460px" value=[q.get("host")];
                                 }
-                                select.sel name="port" style="width:auto" aria-label="Port" { @for m in x.p.http_ports() { option value=(m.container) { "port " (m.container) } } }
-                                button.btn.primary { (icon("plus")) "Ajouter" }
+                                @if x.p.http_ports().count() > 1 {
+                                    select.sel name="port" aria-label="Port" { @for m in x.p.http_ports() { option value=(m.container) { ":" (m.container) } } }
+                                } @else if let Some(pt) = first_http { input type="hidden" name="port" value=(pt); }
+                                button.btn.sm { "Ajouter" }
                             }
-                            @if let Some(e) = err { p.err-text { (icon_c("error", "sm")) (e) } }
                         }
+                        @if x.domains.is_empty() && !manages { span.muted { "Aucun sous-domaine." } }
                     }
+                    @if let Some(e) = err { @if q.contains_key("host") { p.err-text { (icon_c("error", "sm")) (e) } } }
                 }
             }
         }
@@ -833,6 +889,22 @@ async fn mc_status(st: &AppState, name: &str) -> Option<McStatus> {
 }
 
 /// Server card at the top of a game project: address to share, players, console.
+/// Players online, from the game itself (Bedrock ping over UDP, Java over RCON).
+async fn game_status(st: &AppState, x: &P) -> Option<McStatus> {
+    let bedrock = x.p.template == "pocketmine";
+    if x.s.state != "running" {
+        return None;
+    }
+    if bedrock {
+        let m = x.p.public_ports().find(|m| m.udp)?;
+        docker::bedrock_ping(st.cfg.self_container.is_some(), &x.p.name, m.container, m.host)
+            .await
+            .map(|s| McStatus { version: s.version, online: s.online, max: s.max, motd: s.motd })
+    } else {
+        mc_status(st, &x.p.name).await
+    }
+}
+
 /// Java (itzg/minecraft-server, TCP, RCON) and Bedrock (PocketMine-MP, UDP, stdin console).
 async fn minecraft_card(st: &AppState, x: &P) -> Markup {
     let n = &x.p.name;
@@ -840,14 +912,7 @@ async fn minecraft_card(st: &AppState, x: &P) -> Markup {
     let running = x.s.state == "running";
     let bedrock = x.p.template == "pocketmine";
     let port = x.p.public_ports().find(|m| m.udp == bedrock).cloned();
-    let status = match (&port, running, bedrock) {
-        (_, false, _) => None,
-        (Some(m), true, true) => docker::bedrock_ping(st.cfg.self_container.is_some(), n, m.container, m.host)
-            .await
-            .map(|s| McStatus { version: s.version, online: s.online, max: s.max, motd: s.motd }),
-        (_, true, true) => None,
-        (_, true, false) => mc_status(st, n).await,
-    };
+    let status = game_status(st, x).await;
     let host = proxy::public_host(st);
     let env = |k: &str| x.p.env.get(k).cloned().unwrap_or_else(|| "?".into());
     let (proto, default_port) = if bedrock { ("udp", 19132) } else { ("tcp", 25565) };

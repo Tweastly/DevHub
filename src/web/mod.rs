@@ -101,6 +101,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "list" => r#"<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>"#,
         "refresh" => r#"<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>"#,
         "search" => r#"<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>"#,
+        "x" => r#"<path d="M6 6l12 12M18 6 6 18"/>"#,
         "plus" => r#"<path d="M12 5v14M5 12h14"/>"#,
         "play" => r#"<path d="M7 4.5v15l12-7.5z"/>"#,
         "stop" => r#"<rect x="6" y="6" width="12" height="12" rx="2"/>"#,
