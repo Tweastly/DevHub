@@ -44,24 +44,25 @@ fn handshake(target: &str, host: &str) -> Result<(), String> {
     if issuer.contains("Caddy Local Authority") { Err("certificat provisoire de Caddy (pas encore émis par Let's Encrypt)".into()) } else { Ok(()) }
 }
 
-/// The latest error Caddy logged about this host, made readable.
+/// The latest error Caddy logged about this host, made readable; else its latest error
+/// at all (an on-demand refusal doesn't always name the host).
 async fn last_error(st: &AppState, caddy: &str, host: &str) -> Option<String> {
     let mut s = st.docker.logs::<String>(caddy, Some(LogsOptions { stdout: true, stderr: true, tail: "3000".into(), ..Default::default() }));
-    let mut found = None;
-    let needle = format!("\"{host}\"");
+    let (mut mine, mut any) = (None, None);
     while let Some(Ok(l)) = s.next().await {
         let line = l.to_string();
-        if !line.contains(&needle) && !line.contains(&format!("[{host}]")) {
-            continue;
-        }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
         if !matches!(v["level"].as_str(), Some("error" | "warn")) {
             continue;
         }
-        let msg = v["error"].as_str().or(v["msg"].as_str()).unwrap_or("").to_string();
-        found = Some(explain(&msg));
+        let msg = format!("{} {}", v["msg"].as_str().unwrap_or(""), v["error"].as_str().unwrap_or("")).trim().to_string();
+        if line.contains(host) {
+            mine = Some(msg);
+        } else {
+            any = Some(msg);
+        }
     }
-    found
+    mine.map(|m| explain(&m)).or_else(|| any.map(|m| format!("Rien sur ce nom dans le journal de Caddy. Sa dernière erreur : {}", explain(&m))))
 }
 
 fn explain(e: &str) -> String {
