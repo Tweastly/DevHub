@@ -217,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}", get(web::project::overview))
         .route("/projects/{name}/network", get(web::project::network))
         .route("/projects/{name}/settings", get(web::project::settings))
+        .route("/projects/{name}/workspace-size", get(web::project::workspace_size))
         .route("/projects/{name}/terminal", get(web::project::terminal))
         .route("/projects/{name}/terminal/ws", get(terminal::ws))
         .route("/projects/{name}/logs", get(web::project::logs))

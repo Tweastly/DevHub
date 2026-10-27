@@ -483,6 +483,19 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
     Ok(frame(&ctx, &x, Tab::Network, default_subtitle(&ctx, &x), body))
 }
 
+/// Size of /workspace for the delete card. `du` walks the whole tree (seconds on a
+/// Minecraft world or node_modules), so the page fetches it after it has rendered.
+pub async fn workspace_size(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Result<String, Response> {
+    crate::auth::require_project(&st, &jar, &name, crate::auth::Need::Manage)?;
+    let out = docker::exec(&st.docker, &name, "du -sh /workspace 2>/dev/null | cut -f1", Some("/"), std::time::Duration::from_secs(10)).await;
+    Ok(out
+        .ok()
+        .map(|r| r.output.trim().replace('K', " Ko").replace('M', " Mo").replace('G', " Go"))
+        .filter(|s| !s.is_empty())
+        .map(|s| format!(", {s}"))
+        .unwrap_or_default())
+}
+
 // ---------- Terminal & logs ----------
 
 /// The app's console: its output live, and a line to type in. Game servers take their own
@@ -717,11 +730,6 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let mem_max = mb(x.s.mem_limit);
     let cpu_lim = x.p.cpus.unwrap_or(def_cpu);
     let env_text: String = x.p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
-    let workspace = if x.s.state == "running" {
-        docker::exec(&st.docker, n, "du -sh /workspace 2>/dev/null | cut -f1", Some("/"), std::time::Duration::from_secs(3)).await.ok().map(|r| r.output.trim().replace('K', " Ko").replace('M', " Mo").replace('G', " Go")).filter(|s| !s.is_empty())
-    } else {
-        None
-    };
     let subtitle = html! { span { (x.p.image) } span { "· créé le " (crate::timefmt::date_short(x.p.created_at)) } };
     let body = html! {
         (flash(&q))
@@ -830,7 +838,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         b { "Supprimer " (n) } p.muted style="margin:4px 0 14px" { "Le conteneur, ses ports et ses sous-domaines sont supprimés. Cette action est définitive." }
                         form method="post" action={(base) "/delete"} onsubmit="return confirm('Supprimer définitivement ce projet ?')" {
                             (back_field("/projects"))
-                            label.row.tight style="margin-bottom:14px" { input type="checkbox" name="keep_data" value="1" checked; "Garder le volume de données (" code { "/workspace" } @if let Some(w) = &workspace { ", " (w) } ")" }
+                            label.row.tight style="margin-bottom:14px" { input type="checkbox" name="keep_data" value="1" checked; "Garder le volume de données (" code { "/workspace" } @if x.s.state == "running" { span data-fetch-text={(base) "/workspace-size"} {} } ")" }
                             label.field style="max-width:360px" { span.lbl { "Tape " code style="color:var(--err)" { (n) } " pour confirmer" } input.mono-input name="confirm" required pattern=(regex_escape(n)) placeholder=(n) autocomplete="off"; }
                             button.btn.danger style="margin-top:14px" { (icon("trash")) "Supprimer le projet" }
                         }

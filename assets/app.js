@@ -152,6 +152,12 @@
   document.addEventListener('click', e => { $$('.spark-w').forEach(w => { if (!w.contains(e.target)) w.hideTip?.(); }); });
 
   function widgets() {
+    // Slow values (e.g. the size of /workspace) loaded once the page is shown.
+    $$('[data-fetch-text]:not([data-ready])').forEach(el => {
+      el.dataset.ready = 1;
+      fetch(el.dataset.fetchText).then(r => r.ok ? r.text() : '').then(t => { el.textContent = t; }).catch(() => {});
+    });
+
     // History columns: local-time axis, and a tip with the range and value on hover / tap.
     $$('.spark-w:not([data-ready])').forEach(w => {
       w.dataset.ready = 1;
