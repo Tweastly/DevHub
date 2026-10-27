@@ -332,7 +332,8 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     "allocated": {
                         "memory_mb": ps.iter().map(|x| x.memory_mb.unwrap_or(def_mb)).sum::<i64>(),
                         "cpus": ps.iter().map(|x| x.cpus.unwrap_or(def_cpu)).sum::<f64>(),
-                    }
+                    },
+                    "https": if who.admin { crate::tls::caddy_report(st).await } else { None },
                 }))
             }
             "add_domain" => {

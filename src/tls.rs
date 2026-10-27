@@ -82,3 +82,52 @@ fn explain(e: &str) -> String {
     format!("{hint}{short}")
 }
 
+
+/// How Caddy handles the project subdomains (for administrators): the mode it was started
+/// with, whether a Cloudflare token is set (never its value), whether its DNS module is
+/// built in, the certificate policies it runs and its latest errors about them.
+pub async fn caddy_report(st: &AppState) -> Option<serde_json::Value> {
+    use bollard::exec::{CreateExecOptions, StartExecResults};
+    let me = st.cfg.self_container.as_deref()?;
+    let (caddy, _) = caddy_container(st, me).await?;
+    let cmd = "echo \"mode=${DEVHUB_TLS:-absent}\"; \
+         if [ -n \"$CLOUDFLARE_API_TOKEN\" ]; then echo token=present; else echo token=absent; fi; \
+         echo \"module=$(caddy list-modules 2>/dev/null | grep -c dns.providers.cloudflare)\"; \
+         echo \"policies=$(wget -q -O- http://127.0.0.1:2019/config/apps/tls/automation/policies 2>&1 | head -c 1500)\"";
+    let e = st
+        .docker
+        .create_exec(&caddy, CreateExecOptions { cmd: Some(vec!["sh", "-c", cmd]), attach_stdout: Some(true), attach_stderr: Some(true), ..Default::default() })
+        .await
+        .ok()?;
+    let mut out = String::new();
+    if let Ok(StartExecResults::Attached { output: mut o, .. }) = st.docker.start_exec(&e.id, None).await {
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(c)) = o.next().await {
+                out.push_str(&c.to_string());
+            }
+        })
+        .await;
+    }
+    let field = |k: &str| out.lines().find_map(|l| l.strip_prefix(&format!("{k}="))).unwrap_or("").trim().to_string();
+    // Latest certificate errors that are not about one custom domain.
+    let mut logs = st.docker.logs::<String>(&caddy, Some(LogsOptions { stdout: true, stderr: true, tail: "5000".into(), ..Default::default() }));
+    let mut errors: Vec<String> = Vec::new();
+    while let Some(Ok(l)) = logs.next().await {
+        let line = l.to_string();
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
+        let logger = v["logger"].as_str().unwrap_or("");
+        if matches!(v["level"].as_str(), Some("error" | "warn")) && (logger.starts_with("tls") || line.contains("cloudflare") || line.contains("*.")) {
+            errors.push(format!("{} {} {}", v["msg"].as_str().unwrap_or(""), v["identifier"].as_str().or(v["identifiers"][0].as_str()).unwrap_or(""), v["error"].as_str().unwrap_or("")).chars().take(400).collect());
+            if errors.len() > 5 {
+                errors.remove(0);
+            }
+        }
+    }
+    Some(serde_json::json!({
+        "mode": field("mode"),
+        "cloudflare_token": field("token"),
+        "cloudflare_module": field("module") != "0" && !field("module").is_empty(),
+        "policies": serde_json::from_str::<serde_json::Value>(&field("policies")).unwrap_or(serde_json::Value::String(field("policies"))),
+        "recent_errors": errors,
+    }))
+}
