@@ -1,0 +1,9 @@
+# DEVHUB_TLS=wildcard: one certificate for every *.<DEVHUB_DOMAIN>, obtained through
+# Cloudflare's DNS (CLOUDFLARE_API_TOKEN, permission Zone → DNS → Edit). Any name gets
+# HTTPS, so an unknown project shows DevHub's 404 page, and new projects don't wait.
+*.{$DEVHUB_DOMAIN} {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	reverse_proxy devhub:8080
+}

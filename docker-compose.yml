@@ -24,12 +24,18 @@ services:
     expose: ["8080"]
 
   caddy:
-    image: caddy:2
+    # caddy:2 plus the Cloudflare DNS module (wildcard certificate, see caddy/).
+    build: ./caddy
+    image: devhub-caddy
     restart: unless-stopped
     # HTTP_PORT: change it if port 80 is taken (certificates then go through 443).
     ports: ["${HTTP_PORT:-80}:80", "443:443"]
     environment:
       DEVHUB_DOMAIN: ${DEVHUB_DOMAIN}
+      # "wildcard" + a Cloudflare token: HTTPS for every *.${DEVHUB_DOMAIN}, so unknown
+      # names get DevHub's 404 page. Default "ondemand": one certificate per project.
+      DEVHUB_TLS: ${DEVHUB_TLS:-ondemand}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     volumes:
       # The folder, not the file: git replaces files on update, and a single-file bind
       # mount keeps showing the old one.

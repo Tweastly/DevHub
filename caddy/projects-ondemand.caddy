@@ -1,0 +1,3 @@
+# DEVHUB_TLS=ondemand (default): project subdomains get their own certificate on first
+# visit, through the `https://` block of the Caddyfile. An unknown name has none, so the
+# browser shows a TLS error instead of DevHub's 404.

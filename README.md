@@ -77,6 +77,7 @@ Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages �
 | `DEVHUB_ORIGIN` | `https://$DOMAIN` | origine exacte du dashboard |
 | `DEVHUB_PORT_RANGE` | `20000-20999` | plage des ports hôte |
 | `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par défaut des projets (modifiables dans Paramètres → Ressources et projet par projet) |
+| `DEVHUB_TLS` / `CLOUDFLARE_API_TOKEN` | `ondemand` / — | `wildcard` + un token Cloudflare (Zone → DNS → Modifier) : un seul certificat pour `*.<domaine>`, les noms inconnus affichent la page 404 de DevHub au lieu d'une erreur TLS |
 | `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP sur laquelle les ports projets sont publiés |
 | `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |
