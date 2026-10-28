@@ -184,7 +184,7 @@ svg.i.lg { width: 20px; height: 20px; }
 .me .who { line-height: 1.3; font-size: 13px; font-weight: 500; min-width: 0; }
 .me .who span { display: block; font-size: 12px; font-weight: 400; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me .row { margin-left: auto; gap: 6px; flex-wrap: nowrap; }
-.main { min-width: 0; display: flex; flex-direction: column; }
+.main { min-width: 0; display: flex; flex-direction: column; overflow-x: clip; }
 .update-pill { display: inline-flex; align-items: center; gap: 8px; height: 36px; box-sizing: border-box; padding: 0 14px 0 12px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--card); font: 500 13px var(--sans); color: var(--text); white-space: nowrap; cursor: pointer; }
 .update-pill.avail { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); list-style: none; }
 .update-pill.avail::-webkit-details-marker { display: none; }
@@ -214,7 +214,7 @@ svg.i.lg { width: 20px; height: 20px; }
   .update-pill { padding: 0 12px 0 10px; }
   .upd-menu { position: fixed; top: 64px; left: 16px; right: 16px; width: auto; max-width: none; }
 }
-.content { padding: 32px 32px 64px; width: 100%; box-sizing: border-box; }
+.content { padding: 32px 32px 64px; width: 100%; max-width: 1400px; margin-inline: auto; box-sizing: border-box; }
 .back { display: inline-flex; margin-bottom: 14px; font-size: 13px; font-weight: 500; color: var(--accent); }
 .back:hover { color: var(--accent-hover); }
 .page-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }
@@ -501,7 +501,9 @@ textarea { font-family: var(--mono); font-size: 13px; line-height: 1.7; min-heig
 .newcard .accent { color: var(--accent); }
 
 /* Project header: a white band with the back link, name, status and tabs. */
-.pband { margin: -32px -32px 32px; padding: 20px 32px 0; background: var(--card); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 18px; }
+.pband { margin: -32px -32px 32px; padding: 20px 32px 0; background: var(--card); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 18px;
+  /* The content column is capped in width; the band still runs edge to edge. */
+  border-image: linear-gradient(to top, var(--border) 1px, var(--card) 1px) fill 0 / 0 / 0 100vmax; }
 .pband .back { margin: 0; align-self: flex-start; }
 .phead { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .phead h1 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
