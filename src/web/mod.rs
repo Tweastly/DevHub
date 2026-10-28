@@ -601,7 +601,7 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
                         header.mobile-head {
                             (logo(22)) span { "DevHub" }
                             div.end {
-                                @if ctx.profile.admin && ctx.update.available() { a.icon-btn href="/update" title="Mise à jour disponible" aria-label="Mise à jour disponible" { (icon("refresh")) } }
+                                @if ctx.profile.admin { (update_pill(ctx)) }
                                 button.icon-btn type="button" data-theme-toggle title="Thème" aria-label="Changer de thème" { (icon("sun")) }
                             }
                         }
@@ -617,16 +617,52 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
     }
 }
 
+/// The update badge of the top bar: new versions (a pill that opens their list and
+/// "Installer"), an installation in progress, a failed one, or "À jour" for two minutes
+/// after a deployment.
 fn update_pill(ctx: &Ctx) -> Markup {
     let u = &ctx.update;
+    let last = crate::db::deploys(&ctx.st.db.lock().unwrap(), 1).into_iter().next();
+    let target = u.target.clone().unwrap_or_default();
+    let short = |s: &str| s[..7.min(s.len())].to_string();
+    let failed = !u.running && u.available() && last.as_ref().is_some_and(|d| d.ok == Some(false) && target.starts_with(&d.sha));
+    let just_done = !u.running && !u.available() && last.as_ref().is_some_and(|d| d.ok == Some(true) && d.finished_at.is_some_and(|f| crate::db::now() - f < 120));
     html! {
         @if u.running {
-            a.update-pill href="/update" { "Mise à jour en cours…" span.go { "Suivre" } }
-        } @else if u.available() {
-            form.update-pill method="post" action="/update/apply" data-confirm="Mettre à jour DevHub ?" data-confirm-body="Le panel redémarre pendant environ 1 min ; tes projets continuent de tourner." data-tone="neutral" data-confirm-ok="Mettre à jour" {
-                b { (u.pending.len()) } span.hide-m { " nouvelle" @if u.pending.len() > 1 { "s" } " version" @if u.pending.len() > 1 { "s" } }
-                button { "Mettre à jour" }
+            @let done = crate::updater::steps(&u.last_log, false).iter().filter(|s| s.state == "done").count();
+            @let pct = (done * 20 + 10).min(95);
+            a.update-pill.running href="/update" title="Suivre l'installation" {
+                svg.ring width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" {
+                    circle cx="8" cy="8" r="6" {}
+                    circle.v cx="8" cy="8" r="6" stroke-dasharray={(pct as f64 * 0.377) " 38"} {}
+                }
+                span { "Installation · " (pct) " %" }
             }
+        } @else if failed {
+            a.update-pill.failed href="/update" { (icon_c("alert", "sm")) span { "Mise à jour échouée" } }
+        } @else if u.available() {
+            details.upd-pop {
+                summary.update-pill.avail { span.pdot {} span { "Mise à jour · " (u.pending.len()) } }
+                div.upd-menu {
+                    div.h {
+                        b { (u.pending.len()) " nouveauté" @if u.pending.len() > 1 { "s" } " à installer" }
+                        span { "de " b.mono { (short(u.local.as_deref().unwrap_or(""))) } " vers " b.mono.accent { (short(&target)) } " · environ 1 min" }
+                    }
+                    ol {
+                        @for (i, c) in u.pending.iter().take(6).enumerate() {
+                            li { span class=(if i == 0 { "d new" } else { "d" }) {} span.m { (c.message) } span.when { @if let Some(t) = c.date { (ago(t)) } } }
+                        }
+                        @if u.pending.len() > 6 { li.more { "et " (u.pending.len() - 6) " autre(s)" } }
+                    }
+                    div.f {
+                        span { "Tes projets continuent de tourner." }
+                        a.link href="/update" { "Détails" }
+                        form.inline method="post" action="/update/apply" { button.btn.sm.primary { "Installer" } }
+                    }
+                }
+            }
+        } @else if just_done {
+            a.update-pill.done href="/update" { (icon_c("check", "sm")) span { "À jour" } }
         }
     }
 }
