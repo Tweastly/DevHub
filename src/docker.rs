@@ -517,11 +517,21 @@ pub struct ExecResult {
 const MAX_OUTPUT: usize = 100_000;
 
 pub async fn exec(d: &Docker, p: &str, cmd: &str, workdir: Option<&str>, timeout: Duration) -> anyhow::Result<ExecResult> {
+    exec_argv(d, p, vec!["bash", "-lc", cmd], workdir, timeout).await
+}
+
+/// Like `exec`, with plain `sh` instead of a bash login shell: no profile to load (nvm,
+/// conda… can take a second), for DevHub's own quick commands (the Files tab).
+pub async fn exec_sh(d: &Docker, p: &str, cmd: &str, workdir: Option<&str>, timeout: Duration) -> anyhow::Result<ExecResult> {
+    exec_argv(d, p, vec!["sh", "-c", cmd], workdir, timeout).await
+}
+
+async fn exec_argv(d: &Docker, p: &str, argv: Vec<&str>, workdir: Option<&str>, timeout: Duration) -> anyhow::Result<ExecResult> {
     let e = d
         .create_exec(
             &container_name(p),
             CreateExecOptions {
-                cmd: Some(vec!["bash", "-lc", cmd]),
+                cmd: Some(argv),
                 working_dir: Some(workdir.unwrap_or("/workspace")),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),

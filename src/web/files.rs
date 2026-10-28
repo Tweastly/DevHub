@@ -141,9 +141,8 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
         return Ok(frame(&ctx, &x, Tab::Files, body));
     }
     let rel = fs::clean(q.get("path").map(String::as_str).unwrap_or(""))?;
-    let is_dir = fs::is_dir(&st, &name, &rel).await;
+    let (is_dir, entries) = fs::browse(&st, &name, &rel).await?;
     let dir = if is_dir { rel.clone() } else { fs::parent(&rel).to_string() };
-    let entries = fs::list(&st, &name, &dir).await?;
     let file_view = if is_dir {
         None
     } else {

@@ -60,7 +60,7 @@ pub fn fail(e: impl std::fmt::Display) -> Response {
 }
 
 async fn run(st: &AppState, name: &str, cmd: &str) -> Result<String, Response> {
-    let r = docker::exec(&st.docker, name, cmd, Some("/workspace"), Duration::from_secs(60)).await.map_err(fail)?;
+    let r = docker::exec_sh(&st.docker, name, cmd, Some("/workspace"), Duration::from_secs(60)).await.map_err(fail)?;
     if r.exit_code != 0 {
         return Err(fail(r.output.trim()));
     }
@@ -75,15 +75,19 @@ pub struct Entry {
     pub mtime: i64,
 }
 
-pub async fn list(st: &AppState, name: &str, rel: &str) -> Result<Vec<Entry>, Response> {
-    // `stat -c` works with both GNU coreutils and busybox.
+/// Whether `rel` is a folder, and the entries of that folder (of its parent for a file),
+/// in one exec: a single `stat` for every entry (GNU coreutils and busybox both have -c).
+/// Patterns that match nothing stay literal, stat skips them on stderr.
+pub async fn browse(st: &AppState, name: &str, rel: &str) -> Result<(bool, Vec<Entry>), Response> {
     let cmd = format!(
-        "cd {} && for f in * .[!.]* ..?*; do [ -e \"$f\" ] || [ -L \"$f\" ] || continue; stat -c '%F|%s|%Y|%n' -- \"$f\"; done",
-        sh_quote(&abs(rel))
+        "if [ -d {p} ]; then echo dir; cd {p}; else echo file; cd {parent}; fi && stat -c '%F|%s|%Y|%n' -- * .[!.]* ..?* 2>/dev/null; true",
+        p = sh_quote(&abs(rel)),
+        parent = sh_quote(&abs(parent(rel))),
     );
     let out = run(st, name, &cmd).await?;
-    let mut v: Vec<Entry> = out
-        .lines()
+    let mut lines = out.lines();
+    let is_dir = lines.next() == Some("dir");
+    let mut v: Vec<Entry> = lines
         .filter_map(|l| {
             let mut it = l.splitn(4, '|');
             let kind = it.next()?;
@@ -97,11 +101,7 @@ pub async fn list(st: &AppState, name: &str, rel: &str) -> Result<Vec<Entry>, Re
         })
         .collect();
     v.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-    Ok(v)
-}
-
-pub async fn is_dir(st: &AppState, name: &str, rel: &str) -> bool {
-    run(st, name, &format!("test -d {}", sh_quote(&abs(rel)))).await.is_ok()
+    Ok((is_dir, v))
 }
 
 pub async fn download(
