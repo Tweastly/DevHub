@@ -85,7 +85,6 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
     };
     let running = x.s.state == "running";
     let on = |t: Tab| if t == tab { "on" } else { "" };
-    let n_addr = addresses(ctx, x).len() + x.p.public_ports().count();
     let title_crumb = match tab {
         Tab::Overview => None,
         Tab::Network => Some("Réseau"),
@@ -98,50 +97,70 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
     let (manage, shell) = (ctx.profile.manages(n), ctx.profile.shell(n));
     // Read-only profiles see the pages without their forms (the server refuses them anyway).
     let ro = if tab == Tab::Files { !shell } else { !manage };
+    let started = x.d.started_at.filter(|_| running);
+    let mcp_url = format!("{}/mcp/{}", ctx.st.cfg.origin, x.p.mcp_token);
     let head = html! {
-        div.pband {
+        div.phero-wrap {
             a.back href="/projects" { "← Tous les projets" }
-            div.phead {
-                (ctx.avatar(n, "lg phead-av", None))
-                h1 { (n) }
-                (state_pill(ctx, n, &x.s.state))
-                @if x.p.first_http().is_some() {
-                    @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
+            section.phero {
+                div.phero-top {
+                    (ctx.avatar(n, "phero-av", x.p.is_game().then_some("cube")))
+                    div.phero-t {
+                        div.phero-name {
+                            h1 { (n) }
+                            (state_pill(ctx, n, &x.s.state))
+                            @if x.p.first_http().is_some() {
+                                @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
+                            }
+                            @if ro { span.tag { "lecture seule" } }
+                        }
+                        @if !x.p.description.is_empty() { p.phero-desc { (x.p.description) } }
+                        div.phero-meta {
+                            @if let Some(u) = main_url(ctx, x) { a.link href=(u) target="_blank" rel="noopener" { (u.split("://").nth(1).unwrap_or(&u)) " ↗" } span { "·" } }
+                            span { (x.p.image) }
+                            @if let Some(t) = started { span { "· démarré " (ago(t)) } }
+                        }
+                    }
+                    div.phero-acts {
+                        @if running {
+                            @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" rel="noopener" { "Ouvrir le site ↗" } }
+                        }
+                        @if manage {
+                            @if running {
+                                form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.icon-btn.lg title="Redémarrer" aria-label="Redémarrer" { (icon("restart")) } }
+                                form.inline method="post" action={(base) "/stop"} data-confirm={"Arrêter " (n) " ?"} data-confirm-body="Le conteneur s'arrête, ses fichiers restent. Ses adresses affichent « Projet arrêté » jusqu'au redémarrage." data-tone="neutral" data-confirm-ok="Arrêter" {
+                                    (back_field(&here)) button.icon-btn.lg.danger title="Arrêter" aria-label="Arrêter" { (icon("stop")) }
+                                }
+                            } @else if x.s.state == "absent" {
+                                (build_button(ctx, n, &here, ""))
+                            } @else {
+                                form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { (icon_c("play", "sm")) "Démarrer" } }
+                                (rebuild_form(&base, &here, n, "icon-btn lg", html! { (icon("hammer")) }))
+                            }
+                            details.pmore {
+                                summary.icon-btn.lg title="Plus d'actions" aria-label="Plus d'actions" { (icon("dots")) }
+                                div.pmenu role="menu" {
+                                    @if running { (rebuild_form(&base, &here, n, "pmi", html! { (icon_c("hammer", "sm")) "Recréer le conteneur" })) }
+                                    form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
+                                        (back_field(&here))
+                                        button.pmi role="menuitem" { (icon_c("pin", "sm")) @if x.p.pinned { "Retirer de la barre" } @else { "Épingler dans la barre" } }
+                                    }
+                                    button.pmi type="button" role="menuitem" data-copy=(mcp_url) { (icon_c("copy", "sm")) "Copier l'URL MCP" }
+                                    @if shell { a.pmi role="menuitem" href={(base) "/terminal"} data-reload { (icon_c("terminal", "sm")) "Ouvrir le terminal" } }
+                                }
+                            }
+                        }
+                    }
                 }
-                @if ro { span.tag { "lecture seule" } }
-                @if manage { form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
-                    (back_field(&here))
-                    button class={"icon-btn bare pin" (if x.p.pinned { " on" } else { "" })} title=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler dans la barre latérale" }) aria-label=(if x.p.pinned { "Retirer des épinglés" } else { "Épingler" }) { (icon("pin")) }
-                } }
-                div.acts {
-                    @if running {
-                        @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" { "Ouvrir le site ↗" } }
-                    }
-                    @if !manage {
-                    } @else if running {
-                        form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.btn { "Redémarrer" } }
-                    } @else if x.s.state != "absent" {
-                        form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { "Démarrer" } }
-                    }
-                    @if manage && x.s.state == "absent" { (build_button(ctx, n, &here, "")) }
-                    @if manage && x.s.state != "absent" {
-                        form.inline method="post" action={(base) "/rebuild"} data-confirm={"Recréer le conteneur de " (n) " ?"} data-confirm-body="Il est supprimé puis recréé depuis son image : /workspace est gardé, ce qui a été installé ailleurs est perdu. Quelques secondes d'interruption." data-tone="warn" data-confirm-ok="Recréer" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { "Recréer" } }
-                    }
-                    @if manage && running {
-                        form.inline method="post" action={(base) "/stop"} data-confirm={"Arrêter " (n) " ?"} data-confirm-body="Le conteneur s'arrête, ses fichiers restent. Ses adresses affichent « Projet arrêté » jusqu'au redémarrage." data-tone="neutral" data-confirm-ok="Arrêter" { (back_field(&here)) button.btn.danger-outline { "Arrêter" } }
-                    }
+                nav.ptabs aria-label="Sections du projet" {
+                    a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
+                    a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" }
+                    a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
+                    a class=(on(Tab::Volumes)) href={(base) "/volumes"} aria-current=[(tab == Tab::Volumes).then_some("page")] { "Volumes" }
+                    a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal" }
+                    a class=(on(Tab::Logs)) href={(base) "/logs"} data-reload aria-current=[(tab == Tab::Logs).then_some("page")] { "Journaux" }
+                    @if manage { a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" } }
                 }
-            }
-            @if !x.p.description.is_empty() { p.phead-desc { (x.p.description) } }
-            div.phead-meta { (default_subtitle(ctx, x)) }
-            nav.tabs aria-label="Sections du projet" {
-                a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
-                a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" span.count { (n_addr) } }
-                a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
-                a class=(on(Tab::Volumes)) href={(base) "/volumes"} aria-current=[(tab == Tab::Volumes).then_some("page")] { "Volumes" span.count { (x.p.mounts.len() + 1) } }
-                a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal" }
-                a class=(on(Tab::Logs)) href={(base) "/logs"} data-reload aria-current=[(tab == Tab::Logs).then_some("page")] { "Journaux" }
-                @if manage { a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" } }
             }
         }
     };
@@ -152,11 +171,12 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
     render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { div.ptint style={"--pc:" (ctx.color(n))} { (head) div class=[ro.then_some("ro")] { (body) } } })
 }
 
-fn default_subtitle(ctx: &Ctx, x: &P) -> Markup {
+fn rebuild_form(base: &str, here: &str, n: &str, class: &str, label: Markup) -> Markup {
     html! {
-        span { (x.p.image) }
-        @if let Some(u) = main_url(ctx, x) { span { "·" } a.link href=(u) target="_blank" { (u.trim_start_matches("https://")) " ↗" } }
-        @if x.s.state == "running" { @if let Some(t) = x.d.started_at { span { "· démarré " (ago(t)) } } }
+        form.inline method="post" action={(base) "/rebuild"} data-confirm={"Recréer le conteneur de " (n) " ?"} data-confirm-body="Il est supprimé puis recréé depuis son image : les dossiers gardés (Volumes) restent, ce qui a été installé ailleurs est perdu. Quelques secondes d'interruption." data-tone="warn" data-confirm-ok="Recréer" {
+            (back_field(here))
+            button class=(class) title="Recréer le conteneur (depuis l'image, les volumes restent)" aria-label="Recréer le conteneur" { (label) }
+        }
     }
 }
 

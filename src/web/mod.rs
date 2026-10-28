@@ -109,6 +109,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "play" => r#"<path d="M7 4.5v15l12-7.5z"/>"#,
         "stop" => r#"<rect x="6" y="6" width="12" height="12" rx="2"/>"#,
         "restart" => r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>"#,
+        "hammer" => r#"<path d="m13.5 4.5 6 6-2.5 2.5-6-6z"/><path d="m16 3 5 5"/><path d="M12.2 9.8 4.4 17.6a1.6 1.6 0 0 0 2.3 2.3l7.8-7.8"/>"#,
         "wrench" => r#"<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>"#,
         "external" => r#"<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>"#,
         "globe" => r#"<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>"#,
@@ -591,7 +592,6 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
             body {
                 div.app {
                     header.topbar {
-                        a.brand href="/" { (logo(22)) span { "DevHub" } span.ver title="Version installée" { (ctx.version()) } }
                         div.srv-chip title="Serveur" {
                             span class={"dot " (if h.mem_total_mb > 0 { "running" } else { "unknown" })} {}
                             (ctx.host_name()) " · " (h.ncpu) " vCPU / " (format!("{:.0}", h.mem_total_mb as f64 / 1024.0)) " Go"
@@ -697,64 +697,57 @@ fn is_settings(nav: Nav) -> bool {
     matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Resources | Nav::Audit | Nav::Update)
 }
 
+/// The menu: a rail of icons that unfolds over the page (labels, pinned projects) while
+/// the pointer or the keyboard focus is in it.
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
-    let on = |n: Nav| if n == nav { "on" } else { "" };
+    let on = |b: bool| if b { "on" } else { "" };
     let pinned: Vec<&Project> = ctx.projects.iter().filter(|p| p.pinned).collect();
-    let device = ctx.passkey.as_ref().map(|p| p.1.clone());
+    let item = |href: &str, active: bool, ic: &str, label: &str, extra: Markup| html! {
+        a class={"ritem " (on(active))} href=(href) aria-label=(label) aria-current=[active.then_some("page")] {
+            span.ric { (icon(ic)) }
+            span.rlbl { (label) }
+            (extra)
+        }
+    };
     html! {
-        aside.sidebar {
-            nav.nav aria-label="Sections" {
-                a class=(on(Nav::Overview)) href="/" { "Vue d'ensemble" }
-                a class=(if matches!(nav, Nav::Projects) { "on" } else { "" }) href="/projects" { "Projets" span.count { (ctx.projects.len()) } }
-                @if ctx.profile.admin {
-                    a class=(on(Nav::Images)) href="/images" { "Images" }
-                    a class=(on(Nav::Volumes)) href="/volumes" { "Volumes" }
+        aside.sidebar.rail {
+            div.rail-in {
+                a.rbrand href="/" aria-label="DevHub" {
+                    span.ric { (logo(24)) }
+                    span.rlbl { b { "DevHub" } span.ver title="Version installée" { (ctx.version()) } }
+                }
+                nav.rnav aria-label="Sections" {
+                    (item("/", nav == Nav::Overview, "grid", "Vue d'ensemble", html! {}))
+                    (item("/projects", matches!(nav, Nav::Projects) || matches!(nav, Nav::Project(n) if !pinned.iter().any(|p| p.name == n)), "box", "Projets", html! { span.rend.mono { (ctx.projects.len()) } }))
+                    @if ctx.profile.admin {
+                        (item("/images", nav == Nav::Images, "layers", "Images", html! {}))
+                        (item("/volumes", nav == Nav::Volumes, "disk", "Volumes", html! {}))
+                    }
                 }
                 @if !pinned.is_empty() {
-                    div.nav-label { "Épinglés" }
-                    @for p in &pinned {
-                        @let s = ctx.status(&p.name);
-                        a class=(if nav == Nav::Project(&p.name) { "on" } else { "" }) href={"/projects/" (p.name)} {
-                            span class={"dot " (crate::ops::shown_state(&ctx.st, &p.name, &s.state))} data-live={(p.name) ":dot"} {}
-                            (p.name)
-                            span.end {
-                                @if s.state == "running" { @if let Some(m) = p.ports.first() { ":" (m.container) } }
-                                @else { (state_label(&crate::ops::shown_state(&ctx.st, &p.name, &s.state)).to_lowercase()) }
+                    div.rsep { span.rlbl { "Épinglés" } }
+                    nav.rnav.rpins aria-label="Projets épinglés" {
+                        @for p in &pinned {
+                            @let state = crate::ops::shown_state(&ctx.st, &p.name, &ctx.status(&p.name).state);
+                            @let active = nav == Nav::Project(&p.name);
+                            a class={"ritem rpin " (on(active))} href={"/projects/" (p.name)} aria-label=(p.name) aria-current=[active.then_some("page")] {
+                                span.ric { (ctx.avatar(&p.name, "sm", p.is_game().then_some("cube"))) span class={"dot " (state)} data-live={(p.name) ":dot"} {} }
+                                span.rlbl { (p.name) }
+                                span.rend { (state_label(&state).to_lowercase()) }
                             }
                         }
                     }
                 }
-            }
-            div.side-foot {
-                // The profile row opens the "Paramètres" category (open while on one of its pages).
-                details.me-menu open[is_settings(nav)] {
-                    summary.me {
-                        (profile_avatar(&ctx.profile, "sm"))
-                        span.who {
-                            (ctx.profile.name)
-                            span {
-                                @if ctx.profile.name != ctx.profile.role() { (ctx.profile.role()) @if device.is_some() { " · " } }
-                                @if let Some(d) = &device { (d) }
-                            }
-                        }
-                        span.chev aria-hidden="true" { (icon_c("chevron-left", "sm")) }
-                    }
-                    nav.nav.settings aria-label="Paramètres" {
-                        div.nav-label { "Paramètres" }
-                        @for (n, link, label, badge) in settings_links(ctx) {
-                            a class=(on(n)) href=(link) {
-                                (label)
-                                @if let Some((b, solid)) = badge {
-                                    @if b == "admin" { span.tag-admin { "admin" } }
-                                    @else { span class=(if solid { "count solid" } else { "count" }) { (b) } }
-                                }
-                            }
-                        }
-                        div.me-acts {
-                            button.btn.ghost.sm type="button" data-theme-toggle { (icon_c("sun", "sm")) "Thème" }
-                            form.inline method="post" action="/logout" { button.btn.ghost.sm { (icon_c("logout", "sm")) "Déconnexion" } }
-                        }
-                    }
+                span.rspace {}
+                nav.rnav aria-label="Paramètres" {
+                    @if ctx.profile.admin { (item("/claude", nav == Nav::Claude, "sparkles", "Claude", html! {})) }
+                    (item("/menu", matches!(nav, Nav::Menu) || (is_settings(nav) && nav != Nav::Claude), "sliders", "Paramètres", html! {
+                        @if ctx.update.available() { span.rbadge title="Mise à jour disponible" {} }
+                    }))
+                }
+                a class={"rme " (on(nav == Nav::Passkeys))} href="/security" aria-label="Mon profil" {
+                    span.ric { (profile_avatar(&ctx.profile, "sm")) }
+                    span.rlbl { b { (ctx.profile.name) } span { (ctx.profile.role()) } }
                 }
             }
         }
