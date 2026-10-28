@@ -195,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/handoff", get(proxy::handoff))
         .route("/security", get(web::security::page))
         .route("/security/{id}/delete", post(delete_passkey))
-        .route("/profiles", get(web::profiles::list).post(web::profiles::create))
+        .route("/profiles", get(web::profiles::list))
         .route("/profiles/{id}", get(web::profiles::edit).post(web::profiles::update))
         .route("/profiles/{id}/invite", post(web::profiles::invite))
         .route("/profiles/{id}/delete", post(web::profiles::delete))
@@ -219,6 +219,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/claude/admin/{action}", post(mcp_admin::admin_action))
         .route("/projects", get(web::projects::list).post(create_project))
         .route("/projects/new", get(web::projects::new_form))
+        .route("/projects/bulk", post(bulk_action))
         .route("/projects/{name}", get(web::project::overview))
         .route("/projects/{name}/network", get(web::project::network))
         .route("/projects/{name}/settings", get(web::project::settings))
@@ -396,6 +397,57 @@ pub(crate) fn with_param(url: &str, key: &str, value: &str) -> String {
 pub(crate) fn opt_num<T: std::str::FromStr>(s: &str) -> Result<Option<T>, String> {
     let s = s.trim();
     if s.is_empty() { Ok(None) } else { s.parse().map(Some).map_err(|_| format!("valeur invalide : {s}")) }
+}
+
+/// One action on several projects from the projects page. Same rights as one by one:
+/// "manage" for each project, administrator to delete.
+async fn bulk_action(State(st): State<AppState>, jar: CookieJar, Form(form): Form<Vec<(String, String)>>) -> Result<Redirect, Response> {
+    let Some(who) = auth::current_profile(&st, &jar) else { return Err(Redirect::to("/login").into_response()) };
+    let get = |k: &str| form.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str()).unwrap_or("");
+    let back = Some(get("back")).filter(|b| b.starts_with("/projects") && !b.starts_with("//")).unwrap_or("/projects").to_string();
+    let names: Vec<String> = form.iter().filter(|(k, _)| k == "names").map(|(_, v)| v.clone()).collect();
+    let action = get("action").to_string();
+    let keep_data = !get("keep_data").is_empty();
+    let label = match action.as_str() {
+        "start" => "démarré",
+        "stop" => "arrêté",
+        "restart" => "redémarré",
+        "rebuild" => "recréé",
+        "delete" if who.admin => "supprimé",
+        "delete" => return Ok(Redirect::to(&with_param(&back, "err", "Seul un administrateur peut supprimer des projets."))),
+        _ => return Ok(Redirect::to(&with_param(&back, "err", "Action inconnue."))),
+    };
+    if names.is_empty() {
+        return Ok(Redirect::to(&with_param(&back, "err", "Aucun projet sélectionné.")));
+    }
+    let change = |a: &str| match a {
+        "start" => ops::Change::Start,
+        "stop" => ops::Change::Stop,
+        "restart" => ops::Change::Restart,
+        "rebuild" => ops::Change::Rebuild,
+        _ => ops::Change::Delete { keep_data },
+    };
+    let actor = who.actor();
+    let results = futures_util::future::join_all(names.iter().map(|n| {
+        let (st, who, actor, c) = (&st, &who, &actor, change(&action));
+        async move {
+            if !who.manages(n) {
+                return Err(format!("{n} : pas le droit"));
+            }
+            ops::apply(st, n, c, actor).await.map_err(|e| format!("{n} : {e}"))
+        }
+    }))
+    .await;
+    let errors: Vec<String> = results.into_iter().filter_map(Result::err).collect();
+    let ok = names.len() - errors.len();
+    let mut url = back;
+    if ok > 0 {
+        url = with_param(&url, "ok", &format!("{ok} projet{s} {label}{s}.", s = if ok > 1 { "s" } else { "" }));
+    }
+    if !errors.is_empty() {
+        url = with_param(&url, "err", &errors.join(" · "));
+    }
+    Ok(Redirect::to(&url))
 }
 
 async fn project_action(

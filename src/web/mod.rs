@@ -603,7 +603,7 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
                             (body)
                         }
                     }
-                    (bottom_nav(sh.nav))
+                    (bottom_nav(sh.nav, ctx.profile.admin))
                 }
             }
         }
@@ -635,7 +635,6 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
         let n = db::profiles(&ctx.st.db.lock().unwrap()).len();
         v.push((Nav::Profiles, "/profiles", "Profils", Some((n.to_string(), false))));
         v.push((Nav::Resources, "/resources", "Ressources", None));
-        v.push((Nav::Volumes, "/volumes", "Volumes", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
     }
@@ -643,7 +642,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
 }
 
 fn is_settings(nav: Nav) -> bool {
-    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Resources | Nav::Volumes | Nav::Audit | Nav::Update)
+    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Resources | Nav::Audit | Nav::Update)
 }
 
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
@@ -655,6 +654,7 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
             nav.nav aria-label="Sections" {
                 a class=(on(Nav::Overview)) href="/" { "Vue d'ensemble" }
                 a class=(if matches!(nav, Nav::Projects) { "on" } else { "" }) href="/projects" { "Projets" span.count { (ctx.projects.len()) } }
+                @if ctx.profile.admin { a class=(on(Nav::Volumes)) href="/volumes" { "Volumes" } }
                 @if !pinned.is_empty() {
                     div.nav-label { "Épinglés" }
                     @for p in &pinned {
@@ -706,12 +706,13 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
     }
 }
 
-fn bottom_nav(nav: Nav) -> Markup {
+fn bottom_nav(nav: Nav, admin: bool) -> Markup {
     let on = |b: bool| if b { "on" } else { "" };
     html! {
         nav.bottom-nav aria-label="Navigation" {
             a class=(on(nav == Nav::Overview)) href="/" { (icon("grid")) "Accueil" }
             a class=(on(matches!(nav, Nav::Projects | Nav::Project(_)))) href="/projects" { (icon("box")) "Projets" }
+            @if admin { a class=(on(nav == Nav::Volumes)) href="/volumes" { (icon("disk")) "Volumes" } }
             a class=(on(matches!(nav, Nav::Menu) || is_settings(nav))) href="/menu" { (icon("sliders")) "Paramètres" }
         }
     }

@@ -122,7 +122,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             @if all.is_empty() {
                 (empty("projects", "Aucun projet", html! { "Crée le premier : une page web prête en dix secondes, ou ton propre conteneur." },
                     html! { a.btn.primary href="/projects/new" { (icon("plus")) "Créer le premier projet" } }))
-            } @else { (table(&ctx, &shown, "/")) }
+            } @else { (table(&ctx, &shown, "/", false)) }
         }
         div.split.wide {
             div.card {

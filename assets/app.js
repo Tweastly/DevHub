@@ -152,6 +152,42 @@
   document.addEventListener('click', e => { $$('.spark-w').forEach(w => { if (!w.contains(e.target)) w.hideTip?.(); }); });
 
   function widgets() {
+    // Projects page: "Sélectionner" shows a box on each project; the bar acts on the checked ones.
+    const selBtn = $('[data-select-toggle]'), bar = $('#bulk');
+    if (selBtn && bar && !selBtn.dataset.ready) {
+      selBtn.dataset.ready = 1;
+      const zone = $('.selectable'), picks = () => $$('[data-pick]');
+      const update = () => {
+        const n = picks().filter(x => x.checked).length;
+        $('[data-pick-count]', bar).textContent = n;
+        $('[data-pick-s]', bar).textContent = n > 1 ? 's' : '';
+        bar.hidden = n === 0;
+      };
+      const setMode = on => {
+        zone?.classList.toggle('selecting', on);
+        selBtn.setAttribute('aria-pressed', on);
+        selBtn.textContent = on ? 'Terminer' : 'Sélectionner';
+        if (!on) { picks().forEach(x => { x.checked = false; }); update(); }
+      };
+      selBtn.addEventListener('click', () => setMode(!zone?.classList.contains('selecting')));
+      picks().forEach(x => x.addEventListener('change', update));
+      // In selection mode a click on a card checks it instead of opening the project.
+      zone?.addEventListener('click', e => {
+        if (!zone.classList.contains('selecting')) return;
+        const top = e.target.closest('.ptop');
+        if (!top) return;
+        e.preventDefault();
+        const box = $('[data-pick]', top.closest('.pcard'));
+        if (box) { box.checked = !box.checked; update(); }
+      }, true);
+      $('[data-pick-all]', bar).addEventListener('click', () => { const all = picks().every(x => x.checked); picks().forEach(x => { x.checked = !all; }); update(); });
+      $('[data-pick-cancel]', bar).addEventListener('click', () => setMode(false));
+      $('[data-back]', bar).value = location.pathname + location.search;
+      bar.addEventListener('submit', e => {
+        const b = e.submitter, names = picks().filter(x => x.checked).map(x => x.value);
+        if (b?.dataset.confirm && !confirm(b.dataset.confirm + '\n\n' + names.join(', '))) e.preventDefault();
+      });
+    }
     // Volume sizes (docker df is slow): one request fills every [data-vsize].
     $$('[data-volume-sizes]:not([data-ready])').forEach(el => {
       el.dataset.ready = 1;

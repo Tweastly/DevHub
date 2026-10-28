@@ -111,11 +111,10 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         let c = st.db.lock().unwrap();
         (db::profiles(&c), db::passkey_rows(&c))
     };
-    let blank = db::Profile { all_projects: false, ..Default::default() };
     let body = html! {
-        div.page-head { div { h1 { "Profils" } p.lead { "Chaque profil a ses propres passkeys et ses autorisations. Pour ajouter quelqu'un, crée son profil puis envoie-lui le lien d'invitation : il crée son passkey sur son appareil." } } }
+        div.page-head { div { h1 { "Profils" } p.lead { "Chaque profil a ses propres passkeys et ses autorisations." } } }
         (flash(&q))
-        div.split {
+        div {
             div.card {
                 div.card-h { h3 { "Profils" } span.sub { (profiles.len()) " profil" @if profiles.len() > 1 { "s" } } }
                 @for p in &profiles {
@@ -138,13 +137,6 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                             }
                         }
                     }
-                }
-            }
-            div.card {
-                div.card-h { h3 { "Nouveau profil" } }
-                form.card-b method="post" action="/profiles" {
-                    (fields(&ctx, &blank))
-                    button.btn.primary style="margin-top:22px" { "Créer et obtenir le lien d'invitation" }
                 }
             }
         }
@@ -231,19 +223,6 @@ pub async fn edit(State(st): State<AppState>, jar: CookieJar, Path(id): Path<i64
 fn err_to(url: &str, e: &str) -> Redirect {
     let q: String = url::form_urlencoded::byte_serialize(e.as_bytes()).collect();
     Redirect::to(&format!("{url}?err={q}"))
-}
-
-pub async fn create(State(st): State<AppState>, jar: CookieJar, Form(f): Form<HashMap<String, String>>) -> Result<Redirect, Response> {
-    let who = crate::auth::require_admin(&st, &jar)?;
-    let mut p = db::Profile::default();
-    if let Err(e) = apply_form(&mut p, &f) {
-        return Ok(err_to("/profiles", &e));
-    }
-    let c = st.db.lock().unwrap();
-    let id = db::save_profile(&c, &p).map_err(|e| crate::AppError(e).into_response())?;
-    db::create_invite(&c, &crate::random_token(24), id, crate::auth::INVITE_TTL).map_err(|e| crate::AppError(e).into_response())?;
-    db::audit(&c, &who.actor(), "profile.create", &format!("{} ({})", p.name, p.role()));
-    Ok(Redirect::to(&format!("/profiles/{id}?created=1")))
 }
 
 pub async fn update(State(st): State<AppState>, jar: CookieJar, Path(id): Path<i64>, Form(f): Form<HashMap<String, String>>) -> Result<Redirect, Response> {

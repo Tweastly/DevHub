@@ -98,13 +98,49 @@ fn row_actions(ctx: &Ctx, r: &Row, back: &str) -> Markup {
     }
 }
 
-pub fn table(ctx: &Ctx, rows: &[Row], back: &str) -> Markup {
+/// Selection box of a project for the bulk bar (only the ones this profile may manage).
+fn pick(ctx: &Ctx, name: &str) -> Markup {
+    html! {
+        @if ctx.profile.manages(name) {
+            label.psel title={"Sélectionner " (name)} {
+                input type="checkbox" name="names" value=(name) form="bulk" data-pick aria-label={"Sélectionner " (name)};
+                span {}
+            }
+        }
+    }
+}
+
+/// Bar shown once projects are selected: one action for all of them.
+fn bulk_bar(ctx: &Ctx) -> Markup {
+    html! {
+        form #bulk.bulkbar method="post" action="/projects/bulk" hidden {
+            input type="hidden" name="back" data-back;
+            span.n { b data-pick-count { "0" } " sélectionné" span data-pick-s {} }
+            button.btn.sm.ghost type="button" data-pick-all { "Tout" }
+            span.sep {}
+            button.btn.sm name="action" value="start" { (icon_c("play", "sm")) "Démarrer" }
+            button.btn.sm name="action" value="stop" { "Arrêter" }
+            button.btn.sm name="action" value="restart" { (icon_c("refresh", "sm")) "Redémarrer" }
+            button.btn.sm name="action" value="rebuild" data-confirm="Recréer les conteneurs sélectionnés ? Leurs données sont gardées." { "Recréer" }
+            @if ctx.profile.admin {
+                span.sep {}
+                label.row.tight.keep { input type="checkbox" name="keep_data" value="1" checked; "garder les données" }
+                button.btn.sm.danger-outline name="action" value="delete" data-confirm="Supprimer définitivement les projets sélectionnés ?" { "Supprimer" }
+            }
+            button.icon-btn.sm.bare.end type="button" data-pick-cancel title="Annuler la sélection" aria-label="Annuler la sélection" { (icon_c("x", "sm")) }
+        }
+    }
+}
+
+/// `select`: a checkbox column for the bulk actions (projects page only).
+pub fn table(ctx: &Ctx, rows: &[Row], back: &str, select: bool) -> Markup {
     html! {
         table.tbl.cards.ptbl {
-            thead { tr { th { "Projet" } th { "État" } th.num { "CPU" } th { "Mémoire" } th { "Accès" } th.num { "Actions" } } }
+            thead { tr { @if select { th.psel-c { span.sr { "Sélection" } } } th { "Projet" } th { "État" } th.num { "CPU" } th { "Mémoire" } th { "Accès" } th.num { "Actions" } } }
             tbody {
                 @for r in rows {
                     tr {
+                        @if select { td.psel-c { (pick(ctx, &r.p.name)) } }
                         td { a.cell-p href={"/projects/" (r.p.name)} { (avatar(&r.p.name, "")) span { b { (r.p.name) } span.mono { (r.p.image) } } } }
                         td { (state_pill(ctx, &r.p.name, &r.s.state)) }
                         td.num.mono { span data-live={(r.p.name) ":cpu"} { @if r.s.state == "running" { (format!("{:.1} %", r.s.cpu_pct)) } @else { "—" } } }
@@ -142,6 +178,7 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
     let chip = |body: Markup, class: &str| html! { span class={"chip " (class)} { (body) } };
     html! {
         article.card.pcard.lift {
+            (pick(ctx, n))
             a.ptop href=(base) aria-label={"Aperçu de " (n)} {
                 div.hd {
                     @if p.is_game() { span class={"avatar g" (hue(n))} { (icon("cube")) } } @else { (avatar(n, "")) }
@@ -273,10 +310,14 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 }
             }
             div.acts {
+                @if !shown.is_empty() && ctx.projects.iter().any(|p| ctx.profile.manages(&p.name)) {
+                    button.btn type="button" data-select-toggle aria-pressed="false" { "Sélectionner" }
+                }
                 div.seg.hide-m { a class=(if view != "list" { "on" } else { "" }) href=(link("view", "cards")) { "Cartes" } a class=(if view == "list" { "on" } else { "" }) href=(link("view", "list")) { "Liste" } }
                 @if ctx.profile.admin { a.btn.primary.only-m href="/projects/new" { "Nouveau projet" } }
             }
         }
+        (flash(&q))
         div.filters {
             (chip("all", "Tous", total, None))
             (chip("online", "En ligne", n_on, Some("running")))
@@ -299,10 +340,11 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         } @else if shown.is_empty() {
             div.card { (empty("search", "Aucun projet ici", html! { "Rien ne correspond à ce filtre." }, html! { a.btn href="/projects" { "Retirer le filtre" } })) }
         } @else if view == "list" {
-            div.card { (table(&ctx, &shown, "/projects?view=list")) }
+            div.card.selectable { (table(&ctx, &shown, "/projects?view=list", true)) }
         } @else {
-            div.pgrid { @for r in &shown { (card(&ctx, r)) } }
+            div.pgrid.selectable { @for r in &shown { (card(&ctx, r)) } }
         }
+        (bulk_bar(&ctx))
         @if ctx.profile.admin { a.newcard href="/projects/new" { (icon("plus")) b { "Nouveau projet" } span.accent.hide-m { " — Node, Rust, Python, Go, Debian, une page web prête à l'emploi ou ton image Docker" } } }
     };
     Ok(render(&ctx, Shell { title: "Projets", nav: Nav::Projects, crumbs: vec![("DevHub".into(), Some("/".into())), ("Projets".into(), None)], actions: html! {} }, body))
