@@ -61,6 +61,8 @@ pub struct AppState {
     pub data_dir: Arc<String>,
     /// Image downloads started from the Images page: reference → step, or "erreur : …".
     pub pulls: Arc<Mutex<HashMap<String, String>>>,
+    /// Docker images for the Images page, refreshed in the background.
+    pub images: Arc<Mutex<Option<Vec<web::images::Local>>>>,
 }
 
 /// Settings of the Ressources page. Project defaults fall back to DEVHUB_MEMORY_MB / DEVHUB_CPUS.
@@ -160,6 +162,7 @@ async fn main() -> anyhow::Result<()> {
         host: Default::default(),
         builds: Default::default(),
         pulls: Default::default(),
+        images: Default::default(),
         data_dir: Arc::new(data_dir.clone()),
     };
     if let Some(me) = &st.cfg.self_container {
@@ -175,6 +178,7 @@ async fn main() -> anyhow::Result<()> {
     }
     updater::spawn_periodic(st.clone());
     spawn_stats_collector(st.clone());
+    web::images::spawn_refresh(st.clone());
     tokio::spawn({
         let d = st.docker.clone();
         async move { docker::prune_template_tags(&d).await }

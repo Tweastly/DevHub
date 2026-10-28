@@ -19,14 +19,17 @@ fn human(bytes: i64) -> String {
     if bytes >= 1_073_741_824 { format!("{:.1} Go", bytes as f64 / 1_073_741_824.0) } else { format!("{:.0} Mo", bytes as f64 / 1_048_576.0) }
 }
 
-struct Local {
+#[derive(Clone)]
+pub struct Local {
     tags: Vec<String>,
     id: String,
     size: i64,
     created: i64,
 }
 
-async fn local(st: &AppState) -> Vec<Local> {
+/// Asks Docker for the images (slow with many images and layers): only the background
+/// refresh and the actions call it, the page reads the cache.
+pub async fn reload(st: &AppState) -> Vec<Local> {
     let mut v: Vec<Local> = st
         .docker
         .list_images(Some(ListImagesOptions::<String> { all: false, ..Default::default() }))
@@ -36,7 +39,26 @@ async fn local(st: &AppState) -> Vec<Local> {
         .map(|i| Local { tags: i.repo_tags.into_iter().filter(|t| t != "<none>:<none>").collect(), id: i.id, size: i.size, created: i.created })
         .collect();
     v.sort_by(|a, b| b.size.cmp(&a.size));
+    *st.images.lock().unwrap() = Some(v.clone());
     v
+}
+
+async fn local(st: &AppState) -> Vec<Local> {
+    let cached = st.images.lock().unwrap().clone();
+    match cached {
+        Some(v) => v,
+        None => reload(st).await,
+    }
+}
+
+/// Keeps the image list fresh for the page (every 30 s).
+pub fn spawn_refresh(st: AppState) {
+    tokio::spawn(async move {
+        loop {
+            reload(&st).await;
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
 }
 
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
@@ -196,6 +218,7 @@ fn start_pull(st: &AppState, image: &str) {
             s2.pulls.lock().unwrap().insert(t2.clone(), step);
         })
         .await;
+        reload(&st).await;
         let mut p = st.pulls.lock().unwrap();
         match r {
             Ok(()) => {
@@ -264,7 +287,9 @@ pub async fn remove(State(st): State<AppState>, jar: CookieJar, Form(f): Form<Ha
         return Ok(Redirect::to(&crate::with_param("/images", "err", &format!("utilisée par le projet « {} »", p.name))));
     }
     let name = img.tags.first().cloned().unwrap_or_else(|| id.clone());
-    Ok(Redirect::to(&match st.docker.remove_image(&id, Some(RemoveImageOptions { force: false, noprune: false }), None).await {
+    let removed = st.docker.remove_image(&id, Some(RemoveImageOptions { force: false, noprune: false }), None).await;
+    reload(&st).await;
+    Ok(Redirect::to(&match removed {
         Ok(_) => {
             db::audit(&st.db.lock().unwrap(), &who.actor(), "image.remove", &name);
             crate::with_param("/images", "ok", &format!("{name} supprimée ({}).", human(img.size)))
@@ -278,7 +303,9 @@ pub async fn remove(State(st): State<AppState>, jar: CookieJar, Form(f): Form<Ha
 pub async fn prune(State(st): State<AppState>, jar: CookieJar) -> Result<Redirect, Response> {
     let who = crate::auth::require_admin(&st, &jar)?;
     let filters = HashMap::from([("dangling".to_string(), vec!["true".to_string()])]);
-    Ok(Redirect::to(&match st.docker.prune_images(Some(PruneImagesOptions { filters })).await {
+    let pruned = st.docker.prune_images(Some(PruneImagesOptions { filters })).await;
+    reload(&st).await;
+    Ok(Redirect::to(&match pruned {
         Ok(r) => {
             let freed = r.space_reclaimed.unwrap_or(0);
             let n = r.images_deleted.map(|v| v.len()).unwrap_or(0);
