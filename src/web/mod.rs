@@ -109,7 +109,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "play" => r#"<path d="M7 4.5v15l12-7.5z"/>"#,
         "stop" => r#"<rect x="6" y="6" width="12" height="12" rx="2"/>"#,
         "restart" => r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>"#,
-        "hammer" => r#"<path d="m13.5 4.5 6 6-2.5 2.5-6-6z"/><path d="m16 3 5 5"/><path d="M12.2 9.8 4.4 17.6a1.6 1.6 0 0 0 2.3 2.3l7.8-7.8"/>"#,
+        "rebuild" => r#"<path d="M3.5 12a8.5 8.5 0 0 1 14.5-6L21 9"/><path d="M21 4v5h-5"/><path d="M20.5 12A8.5 8.5 0 0 1 6 18l-3-3"/><path d="M3 20v-5h5"/>"#,
         "wrench" => r#"<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>"#,
         "external" => r#"<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>"#,
         "globe" => r#"<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>"#,

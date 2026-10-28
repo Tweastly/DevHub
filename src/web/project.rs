@@ -135,12 +135,12 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                                 (build_button(ctx, n, &here, ""))
                             } @else {
                                 form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { (icon_c("play", "sm")) "Démarrer" } }
-                                (rebuild_form(&base, &here, n, "icon-btn lg", html! { (icon("hammer")) }))
+                                (rebuild_form(&base, &here, n, "icon-btn lg", html! { (icon("rebuild")) }))
                             }
                             details.pmore {
                                 summary.icon-btn.lg title="Plus d'actions" aria-label="Plus d'actions" { (icon("dots")) }
                                 div.pmenu role="menu" {
-                                    @if running { (rebuild_form(&base, &here, n, "pmi", html! { (icon_c("hammer", "sm")) "Recréer le conteneur" })) }
+                                    @if running { (rebuild_form(&base, &here, n, "pmi", html! { (icon_c("rebuild", "sm")) "Recréer le conteneur" })) }
                                     form.inline method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
                                         (back_field(&here))
                                         button.pmi role="menuitem" { (icon_c("pin", "sm")) @if x.p.pinned { "Retirer de la barre" } @else { "Épingler dans la barre" } }
