@@ -36,7 +36,7 @@ pub struct Config {
     pub nano_cpus: i64,
     pub bind_ip: String,
     pub self_container: Option<String>,
-    /// Parent domain for custom project subdomains (dev.tweastly.com → tweastly.com).
+    /// Parent domain for custom project subdomains (dev.example.com → example.com).
     pub apps_domain: Option<String>,
 }
 

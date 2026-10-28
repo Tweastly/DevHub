@@ -35,7 +35,7 @@ pub fn safe_next(st: &AppState, next: &str) -> Option<String> {
 }
 
 /// Host players connect to: the dashboard's domain already points at the VPS.
-/// Override with DEVHUB_PUBLIC_HOST (e.g. "mc.tweastly.com").
+/// Override with DEVHUB_PUBLIC_HOST (e.g. "mc.example.com").
 pub fn public_host(st: &AppState) -> String {
     std::env::var("DEVHUB_PUBLIC_HOST").ok().filter(|h| !h.is_empty()).unwrap_or_else(|| st.cfg.domain.clone())
 }
@@ -76,7 +76,7 @@ pub fn resolve(st: &AppState, host: &str) -> Option<Target> {
     Some(Target { project: p, container_port: m.container, host_port: m.host })
 }
 
-/// Custom domain (e.g. new.tweastly.com) → project and port.
+/// Custom domain (e.g. app.example.com) → project and port.
 pub fn resolve_custom(st: &AppState, host: &str) -> Option<Target> {
     let c = st.db.lock().unwrap();
     let (project, port) = db::domain(&c, &host.to_ascii_lowercase())?;

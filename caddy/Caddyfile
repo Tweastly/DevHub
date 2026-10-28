@@ -32,7 +32,7 @@
 import projects-{$DEVHUB_TLS:ondemand}.caddy
 
 # Everything else: project subdomains (*.{$DEVHUB_DOMAIN}) and custom domains
-# added in DevHub (e.g. new.tweastly.com). DevHub routes them by Host header.
+# added in DevHub (e.g. app.example.com). DevHub routes them by Host header.
 https:// {
 	tls {
 		on_demand

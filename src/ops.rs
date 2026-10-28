@@ -433,7 +433,7 @@ pub fn normalize_host(input: &str) -> R<String> {
     if ok { Ok(h) } else { Err(format!("domaine invalide : {input}")) }
 }
 
-/// "new" → "new.tweastly.com". Custom domains are limited to one-level subdomains of
+/// "new" → "new.example.com". Custom domains are limited to one-level subdomains of
 /// the apps domain; with no apps domain configured (local dev), any host is accepted.
 pub fn subdomain_host(st: &AppState, input: &str) -> R<String> {
     let Some(apps) = &st.cfg.apps_domain else { return normalize_host(input) };

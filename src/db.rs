@@ -480,7 +480,7 @@ pub fn set_setting(c: &Connection, key: &str, value: Option<&str>) -> anyhow::Re
     Ok(())
 }
 
-/// Custom domains (e.g. new.tweastly.com) pointing at one port of a project.
+/// Custom domains (e.g. app.example.com) pointing at one port of a project.
 pub fn domains_of(c: &Connection, project: &str) -> Vec<(String, u16)> {
     let Ok(mut s) = c.prepare("SELECT host, port FROM domains WHERE project=?1 ORDER BY host") else { return Vec::new() };
     s.query_map([project], |r| Ok((r.get(0)?, r.get(1)?)))

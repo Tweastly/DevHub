@@ -1,95 +1,121 @@
 # DevHub
 
-Dashboard (Rust) pour gérer tes projets : un conteneur Docker isolé par projet, des ports attribués automatiquement, une connexion uniquement par passkey, et un serveur MCP par projet pour que **Claude Desktop travaille directement dans le conteneur**.
+Panel auto-hébergé (Rust) pour faire tourner tes projets sur un VPS : un conteneur Docker isolé par projet, un sous-domaine HTTPS automatique, une connexion uniquement par passkey, et un accès MCP pour que **Claude travaille directement dans les conteneurs**.
 
 ```
 Navigateur ──passkey──▶ Caddy (HTTPS) ──▶ devhub (Rust, axum) ──socket──▶ Docker
-Claude Desktop ──https://domaine/mcp/<jeton>──┘                      ├─ devhub-projet-a
-                                                                     └─ devhub-projet-b
+Claude ──https://dev.example.com/mcp (OAuth)──┘                    ├─ devhub-projet-a (+ volume)
+                                                                   └─ devhub-projet-b (+ volume)
 ```
+
+Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son domaine parent : remplace-les par les tiens.
 
 ## Fonctionnalités
 
-- **Interface** : barre latérale avec projets épinglés et jauges du serveur, onglets projet (Aperçu, Réseau, Fichiers, Terminal & logs, Paramètres), cartes ou liste, recherche (`/`), thème clair/sombre (système ou forcé), navigation mobile en bas. Le design system est dans `assets/app.css`.
-- **Historique** : CPU et RAM du serveur et de chaque projet échantillonnés chaque minute, gardés 31 jours (sparklines 24 h / 7 j / 30 j).
-- **Journal** : filtres par acteur, projet et période, regroupement par jour, pagination, export CSV. Les connexions notent le passkey utilisé et l'IP masquée.
+### Projets
+- **Création** à partir d'un modèle (Page web, Node, Rust, Python, Go, Debian, Minecraft Java, Minecraft Bedrock) ou de n'importe quelle image Docker, avec un dépôt Git optionnel cloné dans `/workspace`.
+- **Deux modes de lancement** pour une image perso : *Service* (la commande de l'image tourne, la console écrit sur son entrée standard) ou *Environnement de dev* (le conteneur reste allumé et lance `/workspace/start.sh` s'il existe, logs dans `/tmp/start.log`).
+- **Liste des projets** en cartes ou en liste : état, CPU et RAM en direct, badges (accès, ports, domaines, durée), filtres et tri. **Sélection multiple** pour démarrer, arrêter, redémarrer, recréer ou supprimer plusieurs projets d'un coup.
+- **Page projet** : même en-tête sur tous les onglets (état, accès, « Ouvrir le site », Redémarrer / Recréer / Arrêter) et six onglets :
+  - **Aperçu** : CPU (historique 24 h), mémoire, adresses, console de l'app, activité récente.
+  - **Réseau** : l'adresse d'abord (URL du site avec Privé / Public, ou adresse + port à taper dans le jeu), le tableau des ports avec leur état (« Répond » / « Rien n'écoute »), l'ajout d'un port (Site web / TCP / UDP), les sous-domaines personnalisés et l'état de leur certificat HTTPS.
+  - **Fichiers** : explorateur de `/workspace` (ou `/data`) avec éditeur (Ctrl+S), envoi (200 Mo max), création, renommage, suppression, téléchargement.
+  - **Terminal** : la console de l'app (commandes RCON pour Minecraft Java, entrée standard pour PocketMine et les services, bash dans `/workspace` sinon) et un shell interactif xterm.js.
+  - **Journaux** : logs du conteneur en direct, téléchargeables.
+  - **Paramètres** : ressources (RAM / CPU, à chaud), mode de lancement, variables d'environnement, suppression.
+- **Serveurs Minecraft** : Java (`itzg/minecraft-server`, Paper, port `25565/tcp`) et Bedrock (`ghcr.io/pmmp/pocketmine-mp`, port `19132/udp`). Joueurs en ligne, console, monde et plugins dans l'onglet Fichiers. La mémoire Java suit la limite RAM du projet. Ouvre le port dans le pare-feu (`ufw allow 19132/udp`).
 
-- **Projets** : création à partir d'un modèle (Node, Rust, Python, Go, Debian) ou d'une image perso, avec un dépôt Git optionnel cloné dans `/workspace`.
-- **Modèle « Page web »** : génère une page d'accueil au nom du projet (`templates/site.html`), servie tout de suite sur le port 8000 par défaut.
-- **Démarrage automatique** : si `/workspace/start.sh` existe et est exécutable, il est lancé à chaque démarrage du conteneur (logs dans `/tmp/start.log`).
-- **Isolation** : chaque projet a son réseau, une limite RAM/CPU/PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker. Le code vit dans un volume (`/workspace`) qui survit aux rebuilds.
-- **Sous-domaines** : `projet.dev.tweastly.com` pointe vers le premier port du projet, `projet-5173.dev.tweastly.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next). Un projet est **privé par défaut** (passkey requis), et un bouton le rend public. Le cookie DevHub n'est jamais transmis aux projets.
-- **Sous-domaines personnalisés** : sers un projet sur `<nom>.tweastly.com` (tape juste `new`) depuis sa page ou via Claude. Le domaine racine se déduit de `DEVHUB_DOMAIN` (`dev.tweastly.com` → `tweastly.com`), ou se force avec `DEVHUB_APPS_DOMAIN`. Le HTTPS est automatique. Les projets privés restent protégés par ton passkey, grâce à un passage de session à usage unique (le cookie du dashboard n'est jamais partagé).
-- **Serveurs Minecraft** : modèle « Minecraft » (image `itzg/minecraft-server`, Paper par défaut, EULA acceptée). Le port `25565` est publié en **TCP public** sur l'IP du VPS (un 2ᵉ serveur prend `25566`). La mémoire Java suit la limite RAM du projet (75 %). La page du projet donne l'adresse à partager, les joueurs en ligne et une console (commandes RCON). Le monde est dans `/data`, visible dans l'onglet Fichiers. Réglages via les variables (`TYPE`, `VERSION`, `MOTD`, `DIFFICULTY`, `WHITELIST`…).
-- **Serveurs Minecraft Bedrock (PocketMine-MP)** : modèle « Minecraft Bedrock » (image officielle `ghcr.io/pmmp/pocketmine-mp`). Le port `19132` est publié en **UDP public** : les joueurs sur mobile, console et Windows ajoutent l'adresse et le port dans Jouer → Serveurs. La page du projet affiche les joueurs en ligne (ping RakNet) et une console. Les réglages sont dans `server.properties` et les plugins `.phar` dans le dossier `plugins`, tous deux dans l'onglet Fichiers. Ouvre le port dans le pare-feu : `ufw allow 19132/udp`.
-- **Ports UDP** : n'importe quel projet peut publier un port UDP en écrivant `19132/udp` dans ses ports (comme `25565/tcp` pour le TCP).
-- **Ports TCP publics** : dans le champ des ports, `25565/tcp` publie un port brut sur Internet (jeux) au lieu d'un site web derrière un sous-domaine HTTPS. Pense à l'ouvrir dans le pare-feu (`ufw allow 25565/tcp`).
-- **Fichiers** : explorateur de `/workspace` avec éditeur de texte (Ctrl+S), envoi de fichiers (200 Mo max par envoi), création de fichiers et dossiers, renommage, suppression et téléchargement.
-- **Terminal web** : un shell interactif (xterm.js) dans le conteneur, avec redimensionnement, protégé contre le détournement de WebSocket cross-site.
-- **Ports** : attribués automatiquement dans `DEVHUB_PORT_RANGE`, sans conflit. En production, ils ne sont publiés que sur `127.0.0.1` : on y accède par les sous-domaines.
-- **Ressources par projet** : RAM max (Mo) et CPU max (cœurs) réglables depuis la page du projet ou par Claude. C'est appliqué à chaud, sans redémarrage, et conservé aux rebuilds. Le panel affiche la capacité du serveur et le total alloué.
-- **Ressources de DevHub** (Paramètres → Ressources) : RAM et CPU max du conteneur DevHub lui-même, appliqués à chaud et réappliqués après chaque mise à jour, plus les limites par défaut des projets (qui remplacent `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS`).
-- **Volumes** (Paramètres → Volumes) : les données de chaque projet (`/workspace`, `/data` pour les jeux) avec leur taille. Les volumes orphelins (projet supprimé en gardant ses données) se suppriment un par un ou tous ensemble, ou se récupèrent en recréant un projet du même nom.
-- **Dashboard** : état, CPU et RAM de chaque projet **en direct** (flux SSE, toutes les ~2 s), logs en direct, navigation fluide sans rechargement (View Transitions + skeleton pendant le chargement), start/stop/restart/rebuild, logs, variables d'environnement, suppression, journal d'audit (y compris chaque action de Claude).
-- **Mise à jour en un clic** : DevHub vérifie GitHub toutes les 30 min. Quand des commits sont plus récents que la version installée, un bandeau propose « Mettre à jour » : `git pull` puis `docker compose up -d --build`, lancés depuis un conteneur temporaire `devhub-updater`.
-- **Passkey** (WebAuthn), sans mot de passe. Tu peux enregistrer plusieurs appareils.
-- **Profils** (Paramètres → Profils) : plusieurs personnes, chacune avec ses passkeys et ses autorisations. Rôles : *Administrateur* (tout DevHub), *Développeur* (ses projets, terminal et fichiers compris), *Opérateur* (démarrer, arrêter, régler, sans terminal ni fichiers), *Lecture seule*. Chaque profil voit tous les projets ou seulement ceux cochés. À la création, DevHub donne un lien d'invitation (48 h, usage unique) : la personne l'ouvre sur son appareil et y crée son passkey. Les projets privés ne s'ouvrent qu'aux profils qui y ont accès, et l'URL MCP d'un projet n'est montrée qu'aux profils qui ont le terminal. Le profil propriétaire garde toujours tous les droits.
-- **Paramètres** : Claude, passkeys, profils, journal et mise à jour sont regroupés sous ta ligne de profil, en bas du menu (onglet *Paramètres* sur mobile).
-- **Claude (MCP), avec authentification** : une URL fixe, `https://dev.tweastly.com/mcp`, à ajouter dans Claude Desktop (Réglages → Connecteurs → Ajouter un connecteur personnalisé). Claude Desktop ouvre DevHub : tu te connectes avec ton passkey et tu cliques sur « Autoriser » (OAuth 2.1 avec PKCE, comme le prévoit MCP). Claude agit ensuite avec les droits du profil qui l'a autorisé : tout le panel pour un administrateur, seulement ses projets et ses droits pour les autres. L'interrupteur de la page **Claude** coupe et rétablit l'accès sans changer l'URL. Chaque connexion autorisée se révoque individuellement. Les passkeys, les profils et les autorisations restent hors de sa portée.
-- **MCP par projet** : outils `run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`. Chaque URL ne donne accès qu'à un seul conteneur, et elle est régénérable.
+### Réseau
+- **Sous-domaines automatiques** : `projet.dev.example.com` pointe vers le premier port web, `projet-5173.dev.example.com` vers un port précis. Les WebSockets passent (HMR de Vite/Next).
+- **Privé par défaut** : un projet ne s'ouvre qu'aux profils connectés qui y ont accès. Un clic le rend public. Le cookie DevHub n'est jamais transmis aux projets.
+- **Sous-domaines personnalisés** : `<nom>.example.com` (tape juste `app`), avec HTTPS automatique. Les projets privés restent protégés grâce à un passage de session à usage unique.
+- **Ports TCP / UDP publics** (jeux) : publiés directement sur l'IP du serveur, sans HTTPS ni passkey. Les ports web restent sur `127.0.0.1`, joignables seulement par les sous-domaines.
+- **Page 404** pour un sous-domaine inconnu, si le certificat wildcard est activé (voir Configuration).
+
+### Serveur
+- **Vue d'ensemble** : projets en ligne, CPU du serveur (colonnes 24 h / 7 j / 30 j avec l'heure et la valeur au survol), RAM réservée, activité récente.
+- **Volumes** : les données de chaque projet (`/workspace`, `/data` pour les jeux) avec leur taille. Un volume orphelin (projet supprimé en gardant ses données) se récupère en recréant un projet du même nom, ou se supprime.
+- **Ressources** : limites RAM / CPU du conteneur DevHub lui-même et limites par défaut des projets, appliquées à chaud.
+- **Isolation** : chaque projet a son réseau, ses limites RAM / CPU / PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker.
+- **Journal** : chaque action (y compris celles de Claude), filtres par acteur, projet et période, export CSV.
+
+### Accès
+- **Passkeys** (WebAuthn), sans mot de passe, plusieurs appareils par profil.
+- **Profils** : chaque profil a ses passkeys et ses droits (*Administrateur*, *Développeur*, *Opérateur*, *Lecture seule*), sur tous les projets ou une sélection. Le profil propriétaire garde toujours tous les droits.
+- **Claude (MCP)** : une URL fixe, `https://dev.example.com/mcp`, à ajouter dans Claude (Réglages → Connecteurs → Ajouter un connecteur personnalisé). On se connecte avec son passkey et on clique sur « Autoriser » (OAuth 2.1 + PKCE). Claude agit avec les droits du profil qui l'a autorisé. Un interrupteur coupe l'accès sans changer l'URL, et chaque connexion se révoque.
+- **MCP par projet** : une URL secrète par projet, limitée à ce seul conteneur (`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`), régénérable.
+
+### Mises à jour
+- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull` puis `docker compose up -d --build` depuis un conteneur temporaire, puis rechargement de Caddy).
+- **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
+- **Binaire précompilé** : GitHub Actions compile à chaque push (`.github/workflows/binary.yml`) ; la mise à jour télécharge le binaire et le panel redémarre en moins d'une minute. Sinon, le serveur compile avec un cache, seul le code modifié est recompilé.
 
 ## Déploiement sur le VPS
 
-1. DNS : deux enregistrements `A` vers l'IP du VPS, `dev.tweastly.com` et `*.dev.tweastly.com`. Pour les domaines personnalisés, ajoute aussi `*.tweastly.com`, ou un enregistrement par domaine.
-2. Sur le VPS (avec Docker installé) :
+1. **DNS** : des enregistrements `A` vers l'IP du VPS pour `dev.example.com` et `*.dev.example.com`. Pour les sous-domaines personnalisés, ajoute `*.example.com`.
+2. **Sur le VPS**, avec Docker installé :
    ```bash
    git clone https://github.com/Tweastly/DevHub devhub && cd devhub
-   echo "DEVHUB_DOMAIN=dev.tweastly.com" > .env
+   cp .env.example .env    # puis mets ton domaine dans DEVHUB_DOMAIN
    docker compose up -d --build
    docker compose logs devhub | grep "SETUP TOKEN"
    ```
-3. Ouvre `https://dev.tweastly.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
-4. Pare-feu : seuls 80 et 443 doivent être ouverts. Les certificats des sous-domaines sont générés automatiquement à la première visite.
+3. Ouvre `https://dev.example.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
+4. **Pare-feu** : ouvre 80 et 443, plus les ports des jeux (TCP / UDP) si tu en héberges.
 
-## Mises à jour (dépôt privé)
+### Dépôt privé
+Les mises à jour ont besoin d'un jeton GitHub *fine-grained* limité au dépôt, avec la seule permission **Contents : Read-only**. Mets-le dans `.env` (`DEVHUB_GITHUB_TOKEN=…`) puis `docker compose up -d`. Il n'est jamais écrit ailleurs sur le disque.
 
-Crée un jeton GitHub *fine-grained* : Settings → Developer settings → Fine-grained tokens. Limite-le au dépôt DevHub, avec la seule permission **Contents : Read-only**. Ajoute-le au `.env` :
-```bash
-echo "DEVHUB_GITHUB_TOKEN=github_pat_..." >> .env
-docker compose up -d
-```
-Le jeton sert à vérifier les versions et à faire le `git pull`. Il n'est jamais écrit sur le disque.
-
-**Déploiement automatique.** Sur la page Mise à jour, active « Déploiement automatique » : DevHub surveille la branche toutes les 20 secondes et déploie chaque nouveau commit tout seul. Le serveur ne recompile que le code modifié (cache de compilation conservé entre les builds), donc ton changement est en ligne peu après le push. Un commit dont le déploiement échoue n'est pas retenté en boucle : le suivant le sera.
-
-**Mise à jour rapide (moins d'une minute).** À chaque push sur `main`, GitHub Actions compile DevHub (`.github/workflows/binary.yml`, environ 5 à 8 min, sans action tierce : il marche quelle que soit la politique « actions autorisées » du dépôt) et publie le binaire sur la release `edge` du dépôt. Le bouton **Mettre à jour** télécharge ce binaire avec le même jeton, et l'image Docker ne fait que le copier : le panel redémarre en 20 à 30 secondes environ. La page Mise à jour indique si le binaire est prêt. S'il ne l'est pas encore (CI en cours, serveur ARM), DevHub compile sur le serveur en réutilisant le cache de compilation, donc seul le code modifié est recompilé. La toute première mise à jour vers cette version compile encore entièrement.
-
-## Connecter Claude Desktop à un projet
-
-Sur la page du projet, copie l'URL MCP, puis dans Claude Desktop : **Réglages → Connecteurs → Ajouter un connecteur personnalisé**. Colle l'URL. Claude peut alors lire, écrire et exécuter du code, mais seulement dans ce conteneur.
-
-> L'URL contient un jeton secret de 256 bits. Traite-la comme un mot de passe et régénère-la si elle fuit.
+### Certificat wildcard (recommandé)
+Par défaut, chaque projet reçoit son certificat à la première visite, et un nom inconnu provoque une erreur TLS dans le navigateur. Avec un certificat `*.dev.example.com`, tout sous-domaine a un HTTPS valide : les noms inconnus affichent la page 404 de DevHub et les nouveaux projets n'attendent plus.
+1. Cloudflare → Mon profil → Jetons d'API → Créer un jeton : **Zone → DNS → Modifier**, zone `example.com`.
+2. Dans `.env` sur le VPS :
+   ```bash
+   DEVHUB_TLS=wildcard
+   CLOUDFLARE_API_TOKEN=...
+   ```
+3. `docker compose up -d caddy`. L'état est visible par MCP (`server_resources` → `https`, sans jamais montrer le jeton).
 
 ## Configuration
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `DEVHUB_DOMAIN` | `localhost` | domaine (RP ID WebAuthn) |
-| `DEVHUB_ORIGIN` | `https://$DOMAIN` | origine exacte du dashboard |
-| `DEVHUB_PORT_RANGE` | `20000-20999` | plage des ports hôte |
-| `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par défaut des projets (modifiables dans Paramètres → Ressources et projet par projet) |
-| `DEVHUB_TLS` / `CLOUDFLARE_API_TOKEN` | `ondemand` / — | `wildcard` + un token Cloudflare (Zone → DNS → Modifier) : un seul certificat pour `*.<domaine>`, les noms inconnus affichent la page 404 de DevHub au lieu d'une erreur TLS |
-| `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP sur laquelle les ports projets sont publiés |
+| `DEVHUB_DOMAIN` | `localhost` | domaine du panel (aussi l'identifiant WebAuthn des passkeys) |
+| `DEVHUB_ORIGIN` | `https://$DOMAIN` | origine exacte du panel |
+| `DEVHUB_PORT_RANGE` | `20000-20999` | plage des ports hôte des projets |
+| `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par défaut des projets (modifiables dans Ressources) |
+| `DEVHUB_TLS` / `CLOUDFLARE_API_TOKEN` | `ondemand` / — | `wildcard` + un jeton Cloudflare : un certificat pour `*.DEVHUB_DOMAIN` |
+| `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP où les ports web des projets sont publiés |
 | `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |
-| `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés (`<nom>.tweastly.com`) |
-| `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour la mise à jour (dépôt privé) |
+| `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés |
+| `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour les mises à jour (dépôt privé) |
 | `DEVHUB_REPO` | `/repo` | où le dépôt est monté dans le conteneur |
-| `DEVHUB_PUBLIC_HOST` | `DEVHUB_DOMAIN` | nom affiché pour rejoindre les ports TCP (ex. `mc.tweastly.com`) |
+| `DEVHUB_PUBLIC_HOST` | `DEVHUB_DOMAIN` | nom affiché pour rejoindre les ports de jeu (ex. `mc.example.com`) |
+| `HTTP_PORT` | `80` | port HTTP de Caddy s'il est déjà pris |
+
+## Sécurité et secrets
+
+Le dépôt ne contient aucun secret : tout ce qui est sensible vit **uniquement sur le serveur** et est exclu par `.gitignore`.
+
+| Où | Contenu | Publié ? |
+|---|---|---|
+| `.env` | domaine, jeton GitHub, jeton Cloudflare | non (`.gitignore`) |
+| `data/devhub.sqlite` | passkeys (clés publiques), sessions, profils, jetons OAuth (hachés), URL MCP des projets, journal, variables d'environnement des projets | non (`/data` ignoré) |
+| volumes Docker | code et données des projets | non (hors du dépôt) |
+| `prebuilt/` | binaire téléchargé | non (ignoré) |
+| `.env.example` | modèle sans valeurs | oui |
+
+Avant de publier ou de pousser :
+- ne mets jamais de vraie valeur dans `.env.example`, le README ou le code ;
+- `git status` ne doit jamais lister `.env` ni `data/` ;
+- si un jeton a été partagé ailleurs (chat, capture, ticket), révoque-le et recrée-le.
+
+Les URL MCP par projet contiennent un jeton de 256 bits : traite-les comme des mots de passe et régénère-les si elles fuient.
 
 ## Dev local
 
 ```bash
 DEVHUB_ORIGIN=http://localhost:8080 cargo run
 ```
-(les navigateurs acceptent les passkeys sur `localhost` sans HTTPS ; les sous-domaines `projet.localhost:8080` fonctionnent pour les projets publics)
+Les navigateurs acceptent les passkeys sur `localhost` sans HTTPS, et les sous-domaines `projet.localhost:8080` fonctionnent pour les projets publics.
