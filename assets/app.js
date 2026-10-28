@@ -42,6 +42,12 @@
     if (e.target.matches('[data-autosubmit]')) e.target.form.requestSubmit();
   });
 
+  // A field named "action", "method" or "target" shadows the form's property (form.action
+  // is then that element, e.g. the bulk bar's buttons): always read the attributes.
+  const fAttr = (f, k) => f.getAttribute(k) || '';
+  const fAction = f => new URL(fAttr(f, 'action') || location.href, location.href).href;
+  const fMethod = f => (fAttr(f, 'method') || 'get').toLowerCase();
+
   // ---------- Client-side navigation with skeleton + view transitions ----------
   const SK = '<div class="sk-line h"></div><div class="sk-line" style="width:55%"></div>' +
     '<div class="grid3" style="margin-top:26px">' + '<div class="card card-b"><div class="sk-line h"></div><div class="sk-line"></div><div class="sk-line" style="width:60%"></div></div>'.repeat(3) + '</div>' +
@@ -94,9 +100,9 @@
   document.addEventListener('submit', e => {
     const f = e.target;
     // Skip forms another handler already took (the app console sends with fetch).
-    if (e.defaultPrevented || (f.method || 'get').toLowerCase() !== 'get' || f.target) return;
+    if (e.defaultPrevented || fMethod(f) !== 'get' || fAttr(f, 'target')) return;
     e.preventDefault();
-    const u = new URL(f.action || location.href, location.href);
+    const u = new URL(fAction(f));
     u.search = new URLSearchParams(new FormData(f)).toString();
     go(u.href, true);
   });
@@ -174,8 +180,8 @@
   // The form is sent in the background; the answer (the page the server redirects to)
   // replaces the current one in place, keeping the scroll, and its message shows as a toast.
   // Plain submit stays for uploads, logout and sign-in flows, or with data-reload.
-  const native = f => f.enctype === 'multipart/form-data' || f.target || 'reload' in f.dataset ||
-    /^\/(logout|login|auth|oauth|invite)/.test(new URL(f.action || location.href, location.href).pathname);
+  const native = f => fAttr(f, 'enctype') === 'multipart/form-data' || fAttr(f, 'target') || 'reload' in f.dataset ||
+    /^\/(logout|login|auth|oauth|invite)/.test(new URL(fAction(f)).pathname);
   function toast(kind, text) {
     let t = $('#toast');
     if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); }
@@ -187,14 +193,14 @@
   }
   document.addEventListener('submit', async e => {
     const f = e.target;
-    if (e.defaultPrevented || (f.method || 'get').toLowerCase() !== 'post' || native(f)) return;
+    if (e.defaultPrevented || fMethod(f) !== 'post' || native(f)) return;
     e.preventDefault();
     const btn = e.submitter;
     const body = new URLSearchParams(btn ? new FormData(f, btn) : new FormData(f));
     $$('button', f).forEach(b => { b.disabled = true; });
     btn?.classList.add('busy');
     let res;
-    try { res = await fetch(f.action || location.href, { method: 'POST', body }); }
+    try { res = await fetch(fAction(f), { method: 'POST', body }); }
     catch { $$('button', f).forEach(b => { b.disabled = false; }); btn?.classList.remove('busy'); toast('err', 'Connexion perdue : action non envoyée.'); return; }
     const type = res.headers.get('content-type') || '';
     if (!type.includes('text/html')) { location.href = res.url; return; }
