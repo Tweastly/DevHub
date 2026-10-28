@@ -102,6 +102,57 @@
   });
   addEventListener('popstate', () => go(location.href, false));
 
+  // ---------- Action buttons (POST forms) without reloading the page ----------
+  // The form is sent in the background; the answer (the page the server redirects to)
+  // replaces the current one in place, keeping the scroll, and its message shows as a toast.
+  // Plain submit stays for uploads, logout and sign-in flows, or with data-reload.
+  const native = f => f.enctype === 'multipart/form-data' || f.target || 'reload' in f.dataset ||
+    /^\/(logout|login|auth|oauth|invite)/.test(new URL(f.action || location.href, location.href).pathname);
+  function toast(kind, text) {
+    let t = $('#toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); }
+    t.className = 'toast ' + kind;
+    t.textContent = text;
+    t.hidden = false;
+    clearTimeout(t._h);
+    t._h = setTimeout(() => { t.hidden = true; }, kind === 'err' ? 7000 : 3500);
+  }
+  document.addEventListener('submit', async e => {
+    const f = e.target;
+    if (e.defaultPrevented || (f.method || 'get').toLowerCase() !== 'post' || native(f)) return;
+    e.preventDefault();
+    const btn = e.submitter;
+    const body = new URLSearchParams(btn ? new FormData(f, btn) : new FormData(f));
+    $$('button', f).forEach(b => { b.disabled = true; });
+    btn?.classList.add('busy');
+    let res;
+    try { res = await fetch(f.action || location.href, { method: 'POST', body }); }
+    catch { $$('button', f).forEach(b => { b.disabled = false; }); btn?.classList.remove('busy'); toast('err', 'Connexion perdue : action non envoyée.'); return; }
+    const type = res.headers.get('content-type') || '';
+    if (!type.includes('text/html')) { location.href = res.url; return; }
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const app = $('.app', doc);
+    if (!app) { location.href = res.url; return; }
+    const target = new URL(res.url), here = new URL(location.href);
+    const ok = target.searchParams.get('ok'), err = target.searchParams.get('err') || (res.ok ? null : 'Action refusée (' + res.status + ').');
+    // The message is shown once: keep the URL clean so a reload doesn't show it again.
+    ['ok', 'err', 'host', 'port'].forEach(k => target.searchParams.delete(k));
+    const samePage = target.pathname === here.pathname;
+    const y = scrollY;
+    document.title = doc.title;
+    $('.app').replaceWith(app);
+    if (samePage) { history.replaceState({}, '', target.href); scrollTo(0, y); $$('.flash', app).forEach(x => x.remove()); }
+    else { history.pushState({}, '', target.href); scrollTo(0, 0); }
+    document.dispatchEvent(new Event('devhub:load'));
+    $$('script', app).forEach(o => {
+      const s = document.createElement('script');
+      [...o.attributes].forEach(a => s.setAttribute(a.name, a.value));
+      s.textContent = o.src ? '' : '{' + o.textContent + '\n}';
+      o.replaceWith(s);
+    });
+    if (err) toast('err', err); else if (ok) toast('ok', ok);
+  });
+
   // ---------- Live stats (SSE) for every [data-live] element ----------
   let es = null;
   const pct = (a, b) => (b ? Math.min(100, a / b * 100) : 0) + '%';
@@ -188,6 +239,9 @@
         if (b?.dataset.confirm && !confirm(b.dataset.confirm + '\n\n' + names.join(', '))) e.preventDefault();
       });
     }
+    // Images page: reload while a download is running.
+    const ar = $('[data-auto-reload]');
+    if (ar && !ar.dataset.ready) { ar.dataset.ready = 1; setTimeout(() => { if (document.contains(ar)) location.reload(); }, +ar.dataset.autoReload * 1000); }
     // Volume sizes (docker df is slow): one request fills every [data-vsize].
     $$('[data-volume-sizes]:not([data-ready])').forEach(el => {
       el.dataset.ready = 1;
@@ -289,6 +343,16 @@
         $$('[data-show-for-custom]', np).forEach(e => { e.hidden = !custom; });
       };
       np.addEventListener('input', upd);
+      // A tile of "Mes images" fills the image, its ports and its launch mode.
+      np.addEventListener('change', e => {
+        const t = e.target;
+        if (t.name !== 'template' || t.dataset.image === undefined) return;
+        np.image.disabled = false;
+        np.image.value = t.dataset.image;
+        if (np.ports) np.ports.value = t.dataset.ports;
+        if (np.service) np.service.checked = t.dataset.service === '1';
+        upd();
+      });
       upd();
     }
     // App console: send a line, show it and the answer in the output above; ↑/↓ history.

@@ -87,6 +87,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS domains(host TEXT PRIMARY KEY, project TEXT NOT NULL, port INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS images(ref TEXT PRIMARY KEY, label TEXT NOT NULL, ports TEXT NOT NULL DEFAULT '', service INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS audit(
             id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
@@ -780,5 +781,36 @@ pub fn set_avatar(c: &Connection, profile_id: i64, image: Option<(&[u8], &str)>)
         )?,
         None => c.execute("UPDATE profiles SET avatar=NULL, avatar_type=NULL, avatar_ver=0 WHERE id=?1", [profile_id])?,
     };
+    Ok(())
+}
+
+/// An image of the catalog: offered as a tile when creating a project.
+#[derive(Clone)]
+pub struct CatalogImage {
+    pub reference: String,
+    pub label: String,
+    /// Default ports, as typed in the new-project form ("3000, 19132/udp").
+    pub ports: String,
+    pub service: bool,
+}
+
+pub fn catalog(c: &Connection) -> Vec<CatalogImage> {
+    let Ok(mut s) = c.prepare("SELECT ref, label, ports, service FROM images ORDER BY label COLLATE NOCASE") else { return vec![] };
+    s.query_map([], |r| Ok(CatalogImage { reference: r.get(0)?, label: r.get(1)?, ports: r.get(2)?, service: r.get::<_, i64>(3)? != 0 }))
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+}
+
+pub fn catalog_save(c: &Connection, i: &CatalogImage) -> anyhow::Result<()> {
+    c.execute(
+        "INSERT INTO images(ref, label, ports, service, created_at) VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(ref) DO UPDATE SET label=?2, ports=?3, service=?4",
+        params![i.reference, i.label, i.ports, i.service as i64, now()],
+    )?;
+    Ok(())
+}
+
+pub fn catalog_remove(c: &Connection, reference: &str) -> anyhow::Result<()> {
+    c.execute("DELETE FROM images WHERE ref=?1", [reference])?;
     Ok(())
 }

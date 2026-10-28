@@ -382,6 +382,8 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
     let suffix = format!(".{}", crate::proxy::base_host(&st));
     let v = |k: &str| q.get(k).cloned().unwrap_or_default();
     let chosen = q.get("template").cloned().unwrap_or_else(|| "site".into());
+    let catalog = db::catalog(&st.db.lock().unwrap());
+    let picked_image = |r: &str| chosen == "custom" && v("image") == r;
     let body = html! {
         div.page-head { div { h1 { "Nouveau projet" } p.lead { "Le modèle choisit l'image Docker de base (les outils déjà installés). Le dépôt Git, optionnel, est cloné dans " code { "/workspace" } " au premier démarrage." } } }
         (flash(&q))
@@ -408,10 +410,26 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                                 @for key in TEMPLATES.iter().map(|t| t.0).chain(["custom"]) {
                                     @let (label, sub) = tpl_label(key);
                                     label.tile {
-                                        input type="radio" name="template" value=(key) data-label=(label) checked[chosen == key];
+                                        input type="radio" name="template" value=(key) data-label=(label) checked[chosen == key && !(key == "custom" && catalog.iter().any(|c| picked_image(&c.reference)))];
                                         span.radio {}
                                         span.ic { (icon(tpl_icon(key))) }
                                         b { (label) } span.mono { (sub) }
+                                    }
+                                }
+                            }
+                            @if !catalog.is_empty() {
+                                div.row style="margin:18px 0 10px;justify-content:space-between" {
+                                    span.lbl style="margin:0" { "Mes images" }
+                                    a.link href="/images" style="font-size:12.5px" { "Gérer" }
+                                }
+                                div.tiles role="radiogroup" aria-label="Mes images" {
+                                    @for c in &catalog {
+                                        label.tile {
+                                            input type="radio" name="template" value="custom" data-label=(c.label) data-image=(c.reference) data-ports=(c.ports) data-service=(if c.service { "1" } else { "" }) checked[picked_image(&c.reference)];
+                                            span.radio {}
+                                            span.ic { (icon("layers")) }
+                                            b { (c.label) } span.mono style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" { (c.reference) }
+                                        }
                                     }
                                 }
                             }

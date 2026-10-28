@@ -14,6 +14,7 @@ pub mod resources;
 pub mod security;
 pub mod update;
 pub mod volumes;
+pub mod images;
 
 use crate::db::{self, Project};
 use crate::docker::Status;
@@ -102,6 +103,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "list" => r#"<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>"#,
         "refresh" => r#"<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>"#,
         "search" => r#"<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>"#,
+        "layers" => r#"<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>"#,
         "x" => r#"<path d="M6 6l12 12M18 6 6 18"/>"#,
         "plus" => r#"<path d="M12 5v14M5 12h14"/>"#,
         "play" => r#"<path d="M7 4.5v15l12-7.5z"/>"#,
@@ -547,6 +549,7 @@ pub enum Nav<'a> {
     Audit,
     Resources,
     Volumes,
+    Images,
     Update,
     Menu,
 }
@@ -654,7 +657,10 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
             nav.nav aria-label="Sections" {
                 a class=(on(Nav::Overview)) href="/" { "Vue d'ensemble" }
                 a class=(if matches!(nav, Nav::Projects) { "on" } else { "" }) href="/projects" { "Projets" span.count { (ctx.projects.len()) } }
-                @if ctx.profile.admin { a class=(on(Nav::Volumes)) href="/volumes" { "Volumes" } }
+                @if ctx.profile.admin {
+                    a class=(on(Nav::Images)) href="/images" { "Images" }
+                    a class=(on(Nav::Volumes)) href="/volumes" { "Volumes" }
+                }
                 @if !pinned.is_empty() {
                     div.nav-label { "Épinglés" }
                     @for p in &pinned {
@@ -712,7 +718,10 @@ fn bottom_nav(nav: Nav, admin: bool) -> Markup {
         nav.bottom-nav aria-label="Navigation" {
             a class=(on(nav == Nav::Overview)) href="/" { (icon("grid")) "Accueil" }
             a class=(on(matches!(nav, Nav::Projects | Nav::Project(_)))) href="/projects" { (icon("box")) "Projets" }
-            @if admin { a class=(on(nav == Nav::Volumes)) href="/volumes" { (icon("disk")) "Volumes" } }
+            @if admin {
+                a class=(on(nav == Nav::Images)) href="/images" { (icon("layers")) "Images" }
+                a class=(on(nav == Nav::Volumes)) href="/volumes" { (icon("disk")) "Volumes" }
+            }
             a class=(on(matches!(nav, Nav::Menu) || is_settings(nav))) href="/menu" { (icon("sliders")) "Paramètres" }
         }
     }

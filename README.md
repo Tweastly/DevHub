@@ -15,6 +15,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 ### Projets
 - **Création** à partir d'un modèle (Page web, Node, Rust, Python, Go, Debian, Minecraft Java, Minecraft Bedrock) ou de n'importe quelle image Docker, avec un dépôt Git optionnel cloné dans `/workspace`.
 - **Deux modes de lancement** pour une image perso : *Service* (la commande de l'image tourne, la console écrit sur son entrée standard) ou *Environnement de dev* (le conteneur reste allumé et lance `/workspace/start.sh` s'il existe, logs dans `/tmp/start.log`).
+- **Actions sans rechargement** : chaque bouton s'exécute en arrière-plan, la page se met à jour sur place et le résultat s'affiche en notification.
 - **Liste des projets** en cartes ou en liste : état, CPU et RAM en direct, badges (accès, ports, domaines, durée), filtres et tri. **Sélection multiple** pour démarrer, arrêter, redémarrer, recréer ou supprimer plusieurs projets d'un coup.
 - **Page projet** : même en-tête sur tous les onglets (état, accès, « Ouvrir le site », Redémarrer / Recréer / Arrêter) et six onglets :
   - **Aperçu** : CPU (historique 24 h), mémoire, adresses, console de l'app, activité récente.
@@ -34,6 +35,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Serveur
 - **Vue d'ensemble** : projets en ligne, CPU du serveur (colonnes 24 h / 7 j / 30 j avec l'heure et la valeur au survol), RAM réservée, activité récente.
+- **Images** : le catalogue « Mes images » (image, nom, ports et mode par défaut), proposé en tuiles à la création d'un projet, et les images Docker du serveur avec les projets qui les utilisent, leur taille, leur suppression et un nettoyage.
 - **Volumes** : les données de chaque projet (`/workspace`, `/data` pour les jeux) avec leur taille. Un volume orphelin (projet supprimé en gardant ses données) se récupère en recréant un projet du même nom, ou se supprime.
 - **Ressources** : limites RAM / CPU du conteneur DevHub lui-même et limites par défaut des projets, appliquées à chaud.
 - **Isolation** : chaque projet a son réseau, ses limites RAM / CPU / PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker.

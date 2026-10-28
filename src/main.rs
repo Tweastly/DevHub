@@ -59,6 +59,8 @@ pub struct AppState {
     /// Background builds (image download + container creation) in progress or failed, by project.
     pub builds: Arc<Mutex<HashMap<String, ops::Build>>>,
     pub data_dir: Arc<String>,
+    /// Image downloads started from the Images page: reference → step, or "erreur : …".
+    pub pulls: Arc<Mutex<HashMap<String, String>>>,
 }
 
 /// Settings of the Ressources page. Project defaults fall back to DEVHUB_MEMORY_MB / DEVHUB_CPUS.
@@ -157,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
         handoffs: Default::default(),
         host: Default::default(),
         builds: Default::default(),
+        pulls: Default::default(),
         data_dir: Arc::new(data_dir.clone()),
     };
     if let Some(me) = &st.cfg.self_container {
@@ -204,6 +207,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/invite/{token}", get(web::profiles::invite_page))
         .route("/audit", get(web::audit::page))
         .route("/audit.csv", get(web::audit::csv))
+        .route("/images", get(web::images::page))
+        .route("/images/pull", post(web::images::pull))
+        .route("/images/catalog", post(web::images::catalog_add))
+        .route("/images/catalog/remove", post(web::images::catalog_remove))
+        .route("/images/remove", post(web::images::remove))
+        .route("/images/prune", post(web::images::prune))
         .route("/volumes", get(web::volumes::page))
         .route("/volumes/sizes", get(web::volumes::sizes))
         .route("/volumes/prune", post(web::volumes::prune))
@@ -532,7 +541,29 @@ async fn project_action(
     };
     let is_domain = action == "domain-add";
     match ops::apply(&st, &name, change, &who.actor()).await {
-        Ok(()) => Ok(Redirect::to(&back)),
+        Ok(()) => {
+            // Shown as a toast by the page (actions are sent in the background).
+            let done = match action.as_str() {
+                "start" => format!("{name} démarré."),
+                "stop" => format!("{name} arrêté."),
+                "restart" => format!("{name} redémarré."),
+                "rebuild" => format!("{name} recréé."),
+                "public" => format!("{name} est public."),
+                "private" => format!("{name} est privé."),
+                "delete" => format!("{name} supprimé."),
+                "pin" => format!("{name} épinglé."),
+                "unpin" => format!("{name} retiré des épinglés."),
+                "resources" => "Ressources appliquées.".into(),
+                "env" | "env-set" | "env-remove" => "Variables enregistrées, conteneur recréé.".into(),
+                "ports" | "port-add" | "port-remove" => "Ports enregistrés, conteneur recréé.".into(),
+                "domain-add" => "Sous-domaine ajouté.".into(),
+                "domain-remove" => "Sous-domaine retiré.".into(),
+                "launch" => "Mode de lancement changé, conteneur recréé.".into(),
+                "rotate-token" => "Nouvelle URL MCP générée.".into(),
+                _ => String::new(),
+            };
+            Ok(Redirect::to(&if done.is_empty() { back } else { with_param(&back, "ok", &done) }))
+        }
         // Keep what was typed so the field isn't emptied by the error.
         Err(e) if is_domain => Ok(Redirect::to(&with_param(&with_param(&back, "err", &e), "host", field("host")))),
         Err(e) => Ok(fail(e)),
