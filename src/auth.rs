@@ -18,7 +18,6 @@ const SESSION_TTL: i64 = 7 * 24 * 3600;
 fn user_id(profile: i64) -> Uuid {
     Uuid::from_u128(0x6465_7668_7562_0000_0000_0000_0000_0000 + profile as u128)
 }
-pub const INVITE_TTL: i64 = 48 * 3600;
 
 pub struct PendingRegistration {
     name: String,

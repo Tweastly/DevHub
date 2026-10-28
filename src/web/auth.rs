@@ -72,24 +72,6 @@ pub fn private_project(project: &str, login_url: &str, origin: &str, footer: &st
     })
 }
 
-/// Invitation link: the invited person creates the passkey of their profile on their own device.
-pub fn invite(token: &str, profile: Option<&db::Profile>, footer: &str) -> Markup {
-    let t = serde_json::to_string(token).unwrap().replace("</", "<\\/");
-    shell("Invitation · DevHub", "", footer, false, html! {
-        @if let Some(p) = profile {
-            h1 { "Rejoindre DevHub" }
-            p.sub { "Tu es invité sur le profil " b style="color:var(--text)" { (p.name) } " (" (p.role()) "). Crée ton passkey sur cet appareil : il remplacera tout mot de passe." }
-            label.field { span.lbl { "Nom de l'appareil" } input #pkname value="Mon appareil"; }
-            button.btn.primary onclick="register(pkname.value, null, TOKEN).then(()=>location.href='/')" { (icon("key")) "Créer mon passkey" }
-            p #msg.err-text {}
-            script { (PreEscaped(format!("const TOKEN={t};"))) (PreEscaped(WEBAUTHN_JS)) }
-        } @else {
-            h1 { "Invitation expirée" }
-            p.sub { "Ce lien a déjà servi ou a dépassé 48 h. Demande un nouveau lien à l'administrateur de DevHub." }
-            a.btn href="/login" { "Aller à la connexion" }
-        }
-    })
-}
 
 /// OAuth consent: Claude Desktop sent the person here to approve the MCP connection.
 pub fn oauth_consent(client: &str, p: &db::Profile, enabled: bool, fields: &[(&str, String)], footer: &str) -> Markup {

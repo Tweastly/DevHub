@@ -87,6 +87,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS domains(host TEXT PRIMARY KEY, project TEXT NOT NULL, port INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS project_colors(name TEXT PRIMARY KEY, hue INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS images(ref TEXT PRIMARY KEY, label TEXT NOT NULL, ports TEXT NOT NULL DEFAULT '', service INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS audit(
@@ -156,7 +157,6 @@ pub struct Profile {
     pub can_manage: bool,
     /// Terminal and file changes.
     pub can_shell: bool,
-    pub created_at: i64,
     /// Version of the profile picture, 0 = none (see `avatar`).
     pub avatar_ver: i64,
 }
@@ -205,7 +205,6 @@ fn row_to_profile(r: &rusqlite::Row) -> rusqlite::Result<Profile> {
         projects: serde_json::from_str(&projects).unwrap_or_default(),
         can_manage: r.get::<_, i64>(5)? != 0,
         can_shell: r.get::<_, i64>(6)? != 0,
-        created_at: r.get(7)?,
         avatar_ver: r.get(8)?,
     })
 }
@@ -241,16 +240,6 @@ pub fn save_profile(c: &Connection, p: &Profile) -> anyhow::Result<i64> {
     }
 }
 
-/// Removes a profile with its passkeys, sessions and invitations (never the owner).
-pub fn delete_profile(c: &Connection, id: i64) -> anyhow::Result<()> {
-    anyhow::ensure!(id != OWNER, "le profil propriétaire ne peut pas être supprimé");
-    c.execute("DELETE FROM sessions WHERE passkey_id IN (SELECT id FROM passkeys WHERE profile_id=?1)", [id])?;
-    c.execute("DELETE FROM passkeys WHERE profile_id=?1", [id])?;
-    c.execute("DELETE FROM invites WHERE profile_id=?1", [id])?;
-    c.execute("DELETE FROM oauth_tokens WHERE profile_id=?1", [id])?;
-    c.execute("DELETE FROM profiles WHERE id=?1", [id])?;
-    Ok(())
-}
 
 /// Drops a deleted or renamed project from every profile's list.
 pub fn rename_in_profiles(c: &Connection, old: &str, new: Option<&str>) {
@@ -265,20 +254,12 @@ pub fn rename_in_profiles(c: &Connection, old: &str, new: Option<&str>) {
     }
 }
 
-pub fn create_invite(c: &Connection, token: &str, profile_id: i64, ttl: i64) -> anyhow::Result<()> {
-    c.execute("DELETE FROM invites WHERE expires < ?1 OR profile_id=?2", params![now(), profile_id])?;
-    c.execute("INSERT INTO invites(token, profile_id, expires) VALUES (?1,?2,?3)", params![token, profile_id, now() + ttl])?;
-    Ok(())
-}
 
 /// Profile an unexpired invitation is for.
 pub fn invite_profile(c: &Connection, token: &str) -> Option<(i64, i64)> {
     c.query_row("SELECT profile_id, expires FROM invites WHERE token=?1 AND expires > ?2", params![token, now()], |r| Ok((r.get(0)?, r.get(1)?))).ok()
 }
 
-pub fn invite_of(c: &Connection, profile_id: i64) -> Option<(String, i64)> {
-    c.query_row("SELECT token, expires FROM invites WHERE profile_id=?1 AND expires > ?2", params![profile_id, now()], |r| Ok((r.get(0)?, r.get(1)?))).ok()
-}
 
 pub fn delete_invite(c: &Connection, token: &str) {
     let _ = c.execute("DELETE FROM invites WHERE token=?1", [token]);
@@ -813,4 +794,33 @@ pub fn catalog_save(c: &Connection, i: &CatalogImage) -> anyhow::Result<()> {
 pub fn catalog_remove(c: &Connection, reference: &str) -> anyhow::Result<()> {
     c.execute("DELETE FROM images WHERE ref=?1", [reference])?;
     Ok(())
+}
+
+/// Hue (0–359) of each project, picked at random the first time a project is seen and
+/// kept. A new one goes as far as possible from the hues already taken.
+pub fn colors(c: &Connection, names: &[String]) -> std::collections::HashMap<String, i64> {
+    use rand::Rng;
+    let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    if let Ok(mut s) = c.prepare("SELECT name, hue FROM project_colors") {
+        if let Ok(rows) = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))) {
+            map.extend(rows.flatten());
+        }
+    }
+    let mut rng = rand::thread_rng();
+    for n in names {
+        if map.contains_key(n) {
+            continue;
+        }
+        let taken: Vec<i64> = map.values().copied().collect();
+        let dist = |h: i64| taken.iter().map(|t| { let d = (h - t).rem_euclid(360); d.min(360 - d) }).min().unwrap_or(180);
+        let start: i64 = rng.gen_range(0..360);
+        let hue = (0..24).map(|i| (start + i * 15) % 360).max_by_key(|h| dist(*h)).unwrap_or(start);
+        let _ = c.execute("INSERT OR REPLACE INTO project_colors(name, hue) VALUES (?1,?2)", params![n, hue]);
+        map.insert(n.clone(), hue);
+    }
+    map
+}
+
+pub fn forget_color(c: &Connection, name: &str) {
+    let _ = c.execute("DELETE FROM project_colors WHERE name=?1", [name]);
 }

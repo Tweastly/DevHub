@@ -43,7 +43,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Accès
 - **Passkeys** (WebAuthn), sans mot de passe, plusieurs appareils par profil.
-- **Profils** : chaque profil a ses passkeys et ses droits (*Administrateur*, *Développeur*, *Opérateur*, *Lecture seule*), sur tous les projets ou une sélection. Le profil propriétaire garde toujours tous les droits.
+- **Mon profil** : tes passkeys et ta photo.
 - **Claude (MCP)** : une URL fixe, `https://dev.example.com/mcp`, à ajouter dans Claude (Réglages → Connecteurs → Ajouter un connecteur personnalisé). On se connecte avec son passkey et on clique sur « Autoriser » (OAuth 2.1 + PKCE). Claude agit avec les droits du profil qui l'a autorisé. Un interrupteur coupe l'accès sans changer l'URL, et chaque connexion se révoque.
 - **MCP par projet** : une URL secrète par projet, limitée à ce seul conteneur (`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`), régénérable.
 

@@ -198,13 +198,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/handoff", get(proxy::handoff))
         .route("/security", get(web::security::page))
         .route("/security/{id}/delete", post(delete_passkey))
-        .route("/profiles", get(web::profiles::list))
-        .route("/profiles/{id}", get(web::profiles::edit).post(web::profiles::update))
-        .route("/profiles/{id}/invite", post(web::profiles::invite))
-        .route("/profiles/{id}/delete", post(web::profiles::delete))
         .route("/profiles/{id}/avatar", get(web::profiles::avatar_get).post(web::profiles::avatar_set).layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)))
         .route("/profiles/{id}/avatar/remove", post(web::profiles::avatar_remove))
-        .route("/invite/{token}", get(web::profiles::invite_page))
         .route("/audit", get(web::audit::page))
         .route("/audit.csv", get(web::audit::csv))
         .route("/images", get(web::images::page))
@@ -349,7 +344,7 @@ async fn delete_passkey(State(st): State<AppState>, jar: CookieJar, Path(id): Pa
         let _ = db::delete_passkey(&c, id);
         db::audit(&c, &me.actor(), "passkey.delete", &k.name);
     }
-    Ok(Redirect::to(if mine { "/security" } else { "/profiles" }))
+    Ok(Redirect::to("/security"))
 }
 
 #[derive(Deserialize)]

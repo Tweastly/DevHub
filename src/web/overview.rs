@@ -146,9 +146,9 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     div.card-b {
                         div.kpi-v style="font-size:24px" { (alloc_total) small { " / " (h.mem_total_mb) " Mo réservables" } }
                         div.alloc style="margin-top:14px" {
-                            @for (n, m) in &alloc { i style={"width:" (format!("{:.2}", *m as f64 / scale * 100.0)) "%;background:" (color_of(n))} title={(n) " · " (m) " Mo"} {} }
+                            @for (n, m) in &alloc { i style={"width:" (format!("{:.2}", *m as f64 / scale * 100.0)) "%;background:" (ctx.color(n))} title={(n) " · " (m) " Mo"} {} }
                         }
-                        div.legend { @for (n, m) in &alloc { span { i style={"background:" (color_of(n))} {} (n) " " (gb(*m)) " Go" } } }
+                        div.legend { @for (n, m) in &alloc { span { i style={"background:" (ctx.color(n))} {} (n) " " (gb(*m)) " Go" } } }
                         @if alloc_total > h.mem_total_mb && h.mem_total_mb > 0 {
                             div style="margin-top:16px" { (alert("warn", html! { b { (alloc_total) " Mo réservés pour " (h.mem_total_mb) " Mo." } " Le noyau tuera un conteneur si tous atteignent leur limite en même temps." })) }
                         } @else if cpu_total > h.ncpu as f64 && h.ncpu > 0 {

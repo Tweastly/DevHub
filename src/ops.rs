@@ -415,6 +415,7 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             let c = st.db.lock().unwrap();
             db::delete_project(&c, name).map_err(internal)?;
             db::rename_in_profiles(&c, name, None);
+            db::forget_color(&c, name);
             st.builds.lock().unwrap().remove(name);
         }
     }

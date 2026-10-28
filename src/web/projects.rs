@@ -141,7 +141,7 @@ pub fn table(ctx: &Ctx, rows: &[Row], back: &str, select: bool) -> Markup {
                 @for r in rows {
                     tr {
                         @if select { td.psel-c { (pick(ctx, &r.p.name)) } }
-                        td { a.cell-p href={"/projects/" (r.p.name)} { (avatar(&r.p.name, "")) span { b { (r.p.name) } span.mono { (r.p.image) } } } }
+                        td { a.cell-p href={"/projects/" (r.p.name)} { (ctx.avatar(&r.p.name, "", r.p.is_game().then_some("cube"))) span { b { (r.p.name) } span.mono { (r.p.image) } } } }
                         td { (state_pill(ctx, &r.p.name, &r.s.state)) }
                         td.num.mono { span data-live={(r.p.name) ":cpu"} { @if r.s.state == "running" { (format!("{:.1} %", r.s.cpu_pct)) } @else { "—" } } }
                         td.hide-m { (mem_cell(ctx, r)) }
@@ -181,7 +181,7 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
             (pick(ctx, n))
             a.ptop href=(base) aria-label={"Aperçu de " (n)} {
                 div.hd {
-                    @if p.is_game() { span class={"avatar g" (hue(n))} { (icon("cube")) } } @else { (avatar(n, "")) }
+                    (ctx.avatar(n, "", p.is_game().then_some("cube")))
                     div.t {
                         span.nm { (n) }
                         @if http && running {

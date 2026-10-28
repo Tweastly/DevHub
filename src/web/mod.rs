@@ -209,15 +209,6 @@ pub fn initials(name: &str) -> String {
     s.to_uppercase()
 }
 
-fn hue(name: &str) -> usize {
-    name.bytes().fold(7usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize)) % 6
-}
-
-/// Colour slot (g0…g5) of a project, shared by its avatar and its allocation segment.
-pub fn color_of(name: &str) -> &'static str {
-    ["#b4541f", "#56524b", "#c99b6b", "#8c877f", "#7d5a3c", "#d8c6b2"][hue(name)]
-}
-
 /// A profile's picture, or its initials.
 pub fn profile_avatar(p: &db::Profile, class: &str) -> Markup {
     html! {
@@ -227,10 +218,6 @@ pub fn profile_avatar(p: &db::Profile, class: &str) -> Markup {
             span class={"avatar round " (class)} { (initials(&p.name)) }
         }
     }
-}
-
-pub fn avatar(name: &str, class: &str) -> Markup {
-    html! { span class={"avatar g" (hue(name)) " " (class)} { (initials(name)) } }
 }
 
 /// Docker state → label shown next to the dot (app.js keeps the same table for live updates).
@@ -460,9 +447,23 @@ pub struct Ctx {
     pub theme: Option<&'static str>,
     /// Who is signed in; `projects` only holds what this profile may see.
     pub profile: db::Profile,
+    /// Hue of each project (its colour everywhere: avatar, allocation bar…).
+    pub colors: HashMap<String, i64>,
 }
 
 impl Ctx {
+    /// The project's own colour (random hue, kept), as a CSS colour.
+    pub fn color(&self, name: &str) -> String {
+        format!("hsl({} 62% 56%)", self.colors.get(name).copied().unwrap_or(25))
+    }
+    /// Project avatar tinted with its colour: initials, or `icon` (game servers).
+    pub fn avatar(&self, name: &str, class: &str, icon_name: Option<&str>) -> Markup {
+        html! {
+            span class={"avatar pc " (class)} style={"--pc:" (self.color(name))} {
+                @if let Some(i) = icon_name { (icon(i)) } @else { (initials(name)) }
+            }
+        }
+    }
     pub fn names(&self) -> Vec<String> {
         self.projects.iter().map(|p| p.name.clone()).collect()
     }
@@ -489,6 +490,7 @@ pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
     let profile = session::current_profile(st, jar).ok_or_else(|| axum::response::Redirect::to("/login").into_response())?;
     let c = st.db.lock().unwrap();
     let mut projects = db::list_projects(&c).unwrap_or_default();
+    let colors = db::colors(&c, &projects.iter().map(|p| p.name.clone()).collect::<Vec<_>>());
     projects.retain(|p| profile.sees(&p.name));
     let passkey_count = db::passkey_rows(&c).iter().filter(|k| k.profile_id == profile.id).count();
     let admin = db::setting(&c, crate::mcp_admin::ENABLED).is_some();
@@ -504,6 +506,7 @@ pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
         theme: theme(jar),
         projects,
         profile,
+        colors,
     })
 }
 
@@ -545,7 +548,6 @@ pub enum Nav<'a> {
     Project(&'a str),
     Claude,
     Passkeys,
-    Profiles,
     Audit,
     Resources,
     Volumes,
@@ -635,8 +637,6 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
     }
     v.push((Nav::Passkeys, "/security", "Mon profil", Some((ctx.passkey_count.to_string(), false))));
     if ctx.profile.admin {
-        let n = db::profiles(&ctx.st.db.lock().unwrap()).len();
-        v.push((Nav::Profiles, "/profiles", "Profils", Some((n.to_string(), false))));
         v.push((Nav::Resources, "/resources", "Ressources", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
@@ -645,7 +645,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
 }
 
 fn is_settings(nav: Nav) -> bool {
-    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Resources | Nav::Audit | Nav::Update)
+    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Resources | Nav::Audit | Nav::Update)
 }
 
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {

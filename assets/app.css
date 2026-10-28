@@ -875,3 +875,7 @@ img.avatar { object-fit: cover; padding: 0; background: var(--card-2); }
 .btn.busy, .icon-btn.busy { position: relative; color: transparent !important; }
 .btn.busy::after, .icon-btn.busy::after { content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--text-2); border-right-color: transparent; animation: spin .8s linear infinite; }
 .btn.primary.busy::after { border-color: var(--on-accent); border-right-color: transparent; }
+
+/* Project colour (random hue per project): tinted avatar. */
+.avatar.pc { background: color-mix(in srgb, var(--pc) 20%, var(--card)); border-color: color-mix(in srgb, var(--pc) 35%, transparent); color: color-mix(in srgb, var(--pc) 75%, var(--text)); }
+.avatar.pc svg { width: 16px; height: 16px; }
