@@ -89,7 +89,26 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                 }
             }))
         }
-        details.card style="margin-top:32px" {
+        @let groups = crate::mcp_admin::catalog();
+        details.card.mcp-tools style="margin-top:32px" {
+            summary.card-h style="cursor:pointer;border-bottom:0" {
+                h3 { "Outils MCP" } span.count style="margin-left:0" { (groups.iter().map(|g| g.1.len()).sum::<usize>()) }
+                span.sub style="margin-left:auto" { "ce que Claude peut appeler, selon les droits du profil" }
+            }
+            @for (group, list) in &groups {
+                div.tool-group {
+                    div.tool-group-h { span.label { (group) } span.count { (list.len()) } }
+                    @for (name, desc) in list {
+                        div.tool-row {
+                            code { (name) }
+                            span { (short_desc(desc)) }
+                        }
+                    }
+                }
+            }
+            div.card-f.help { "Chaque appel est vérifié avec les droits du profil qui a autorisé Claude, et noté dans le journal. Les passkeys, profils et autorisations restent hors d'atteinte." }
+        }
+        details.card style="margin-top:20px" {
             summary.card-h style="cursor:pointer;border-bottom:0" {
                 h3 { "URL limitées à un seul projet" } span.count style="margin-left:0" { (ctx.projects.len()) }
                 span.sub style="margin-left:auto" { "une URL secrète par projet, sans connexion" }
@@ -107,4 +126,19 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
         }
     };
     Ok(render(&ctx, Shell { title: "Claude", nav: Nav::Claude, crumbs: vec![("DevHub".into(), Some("/".into())), ("Paramètres".into(), None), ("Claude".into(), None)], actions: html! {} }, body))
+}
+
+/// First sentence of a tool's description: the rest is for Claude.
+/// (Cut at a ". " outside parentheses, so "(ex. 1.5)" stays.)
+fn short_desc(d: &str) -> &str {
+    let mut depth = 0;
+    for (i, ch) in d.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            '.' if depth == 0 && d[i + 1..].starts_with(' ') => return &d[..=i],
+            _ => {}
+        }
+    }
+    d
 }

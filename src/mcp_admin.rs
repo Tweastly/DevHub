@@ -161,7 +161,7 @@ fn tools() -> Value {
                 }, "required": ["project"] } }),
         json!({ "name": "audit_log", "description": "Journal d'audit de DevHub (actions du propriétaire, de Claude et du système).",
                 "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer", "default": 50 } } } }),
-        json!({ "name": "devhub_update", "description": "check : compare la version installée avec GitHub. apply : met DevHub à jour (il redémarre).",
+        json!({ "name": "devhub_update", "description": "Vérifie ou installe une mise à jour de DevHub. check : compare la version installée avec GitHub. apply : met DevHub à jour (il redémarre).",
                 "inputSchema": { "type": "object", "properties": {
                     "action": { "type": "string", "enum": ["check", "apply"] }
                 }, "required": ["action"] } }),
@@ -208,6 +208,24 @@ fn allowed(who: &db::Profile, tool: &str, project: &str) -> bool {
         Need::Manage => who.manages(project),
         Need::Shell => who.shell(project),
     }
+}
+
+/// Every tool, grouped by the right it needs, for the Claude page: (group, [(name, description)]).
+pub fn catalog() -> Vec<(&'static str, Vec<(String, String)>)> {
+    let mut groups: Vec<(&'static str, Vec<(String, String)>)> =
+        ["Tout le monde", "Voir le projet", "Gérer le projet", "Terminal et fichiers du projet", "Administrateur"].iter().map(|g| (*g, Vec::new())).collect();
+    for t in tools().as_array().into_iter().flatten() {
+        let name = t["name"].as_str().unwrap_or("").to_string();
+        let i = match need(&name) {
+            Need::Nothing => 0,
+            Need::See => 1,
+            Need::Manage => 2,
+            Need::Shell => 3,
+            Need::Admin => 4,
+        };
+        groups[i].1.push((name, t["description"].as_str().unwrap_or("").to_string()));
+    }
+    groups
 }
 
 /// Only the tools this profile can use at all.

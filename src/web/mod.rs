@@ -464,7 +464,7 @@ impl Ctx {
     pub fn avatar(&self, name: &str, class: &str, icon_name: Option<&str>) -> Markup {
         html! {
             @if let Some(v) = self.logos.get(name) {
-                img class={"avatar pc logo " (class)} style={"--pc:" (self.color(name))} src={"/projects/" (name) "/logo?v=" (v)} alt="";
+                img class={"avatar pc " (class)} style={"--pc:" (self.color(name))} src={"/projects/" (name) "/logo?v=" (v)} alt="";
             } @else {
                 span class={"avatar pc " (class)} style={"--pc:" (self.color(name))} {
                     @if let Some(i) = icon_name { (icon(i)) } @else { (initials(name)) }
