@@ -115,7 +115,8 @@ fn tools() -> Value {
                     "color": { "type": "integer", "minimum": 0, "maximum": 359 },
                     "autostart": { "type": "boolean" },
                     "pinned": { "type": "boolean" },
-                    "mode": { "type": "string", "enum": ["service", "dev"] }
+                    "mode": { "type": "string", "enum": ["service", "dev"] },
+                    "auto_domain": { "type": "boolean", "description": "false : coupe l'adresse automatique <projet>.<domaine> (et <projet>-<port>), seuls les domaines personnalisés répondent" }
                 }, "required": ["project"] } }),
         json!({ "name": "set_volumes", "description": "Remplace les volumes montés en plus de /workspace (conteneur recréé). Séparés par des virgules : « /chemin » crée un volume dédié, « volume:/chemin » monte un volume existant (voir list_volumes). Un volume retiré n'est pas effacé.",
                 "inputSchema": { "type": "object", "properties": {
@@ -252,7 +253,7 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
             if m.is_public() {
                 json!({ "container": m.container, "protocol": m.proto(), "address": proxy::public_address(st, m) })
             } else {
-                json!({ "container": m.container, "url": proxy::url_for(st, &p.name, Some(m.container)) })
+                json!({ "container": m.container, "url": proxy::auto_url(st, p, Some(m.container)) })
             }
         })
         .collect();
@@ -262,7 +263,7 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         "mode": if p.is_game() { "jeu" } else if p.service { "service" } else { "dev" },
         "color": db::colors(&st.db.lock().unwrap(), std::slice::from_ref(&p.name)).get(&p.name).copied(),
         "volumes": p.mounts.iter().map(|m| json!({ "volume": m.volume, "path": m.path })).collect::<Vec<_>>(),
-        "url": p.first_http().map(|_| proxy::url_for(st, &p.name, None)),
+        "url": p.first_http().and_then(|_| proxy::auto_url(st, p, None)), "auto_domain": p.auto_domain,
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
         "limits": {
             "memory_mb": p.memory_mb.unwrap_or(st.default_mb()),
@@ -398,6 +399,10 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                 if let Some(on) = a["pinned"].as_bool() {
                     ops::apply(st, &project, Change::Pin(on), "claude-admin").await?;
                     done.push("épinglage");
+                }
+                if let Some(on) = a["auto_domain"].as_bool() {
+                    ops::apply(st, &project, Change::AutoDomain(on), "claude-admin").await?;
+                    done.push("adresse automatique");
                 }
                 if let Some(m) = a["mode"].as_str() {
                     if m != "service" && m != "dev" {

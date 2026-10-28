@@ -72,7 +72,7 @@ fn access_cell(ctx: &Ctx, r: &Row) -> Markup {
         @if p.ports.is_empty() { span.dim { "aucun port" } }
         @else {
             div.row.tight {
-                @if r.s.state == "running" && p.first_http().is_some() { a.link.mono href=(crate::proxy::url_for(&ctx.st, &p.name, None)) target="_blank" style="font-size:12px" { "ouvrir ↗" } }
+                @if r.s.state == "running" && p.first_http().is_some() { @if let Some(u) = crate::proxy::auto_url(&ctx.st, p, None) { a.link.mono href=(u) target="_blank" style="font-size:12px" { "ouvrir ↗" } } }
                 @for m in &p.ports { span.chip { ":" (m.container) @if m.is_public() { " " (m.proto()) } } }
                 @if p.public && p.first_http().is_some() { span.pill.public { "Public" } }
             }
@@ -167,7 +167,7 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
     let domains = db::domains_of(&ctx.st.db.lock().unwrap(), n);
     let running = r.s.state == "running";
     let http = p.first_http().is_some();
-    let site = domains.first().map(|(h, _)| format!("https://{h}")).unwrap_or_else(|| crate::proxy::url_for(&ctx.st, n, None));
+    let site = domains.first().map(|(h, _)| format!("https://{h}")).or_else(|| crate::proxy::auto_url(&ctx.st, p, None)).unwrap_or_default();
     let manages = ctx.profile.manages(n);
     let console = p.is_service() || ctx.profile.shell(n);
     let game = match p.template.as_str() {

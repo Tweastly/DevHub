@@ -55,6 +55,12 @@ pub fn url_for(st: &AppState, p: &str, port: Option<u16>) -> String {
     }
 }
 
+/// The automatic address of a project (its first web port, or `port`), unless the
+/// project turned it off.
+pub fn auto_url(st: &AppState, p: &db::Project, port: Option<u16>) -> Option<String> {
+    p.auto_domain.then(|| url_for(st, &p.name, port))
+}
+
 /// Resolves a subdomain label to a project and port.
 pub fn resolve(st: &AppState, host: &str) -> Option<Target> {
     let label = host.strip_suffix(base_host(st))?.strip_suffix('.')?;
@@ -66,12 +72,15 @@ pub fn resolve(st: &AppState, host: &str) -> Option<Target> {
     if let Some((name, port)) = label.rsplit_once('-') {
         if let (Ok(port), Ok(Some(p))) = (port.parse::<u16>(), db::get_project(&c, name)) {
             let found = p.http_ports().find(|m| m.container == port).cloned();
-            if let Some(m) = found {
+            if let Some(m) = found.filter(|_| p.auto_domain) {
                 return Some(Target { project: p, container_port: m.container, host_port: m.host });
             }
         }
     }
     let p = db::get_project(&c, label).ok()??;
+    if !p.auto_domain {
+        return None;
+    }
     let m = p.first_http()?.clone();
     Some(Target { project: p, container_port: m.container, host_port: m.host })
 }

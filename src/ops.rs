@@ -86,6 +86,7 @@ pub enum Change {
     /// Hue (0–359) of the project's colour (avatar, charts).
     Color(i64),
     Autostart(bool),
+    AutoDomain(bool),
     Delete { keep_data: bool },
     /// `port: None` = the project's first port.
     AddDomain { host: String, port: Option<u16> },
@@ -113,6 +114,7 @@ impl Change {
             Change::Describe(_) => "describe",
             Change::Color(_) => "color",
             Change::Autostart(_) => "autostart",
+            Change::AutoDomain(_) => "auto-domain",
             Change::Delete { .. } => "delete",
             Change::AddDomain { .. } => "domain-add",
             Change::RemoveDomain(_) => "domain-remove",
@@ -355,6 +357,7 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         description: String::new(),
         volume: None,
         autostart: true,
+        auto_domain: true,
     };
     {
         let c = st.db.lock().unwrap();
@@ -521,6 +524,11 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
         Change::Color(hue) => {
             db::set_color(&st.db.lock().unwrap(), name, hue).map_err(internal)?;
             return Ok(());
+        }
+        Change::AutoDomain(on) => {
+            p.auto_domain = on;
+            detail = format!("{name} → {}", if on { "adresse automatique activée" } else { "adresse automatique désactivée" });
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
         }
         Change::Autostart(on) => {
             p.autostart = on;

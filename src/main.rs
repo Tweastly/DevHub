@@ -510,6 +510,7 @@ async fn project_action(
         "describe" => ops::Change::Describe(field("description").to_string()),
         "color" => ops::Change::Color(field("hue").trim().parse().map_err(|_| fail("couleur invalide".into()).into_response())?),
         "autostart" => ops::Change::Autostart(field("on") == "1"),
+        "auto-domain" => ops::Change::AutoDomain(field("on") == "1"),
         "launch" => ops::Change::Launch { service: field("mode") == "service" },
         "unpin" => ops::Change::Pin(false),
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),
@@ -595,6 +596,8 @@ async fn project_action(
                 "color" => "Couleur enregistrée.".into(),
                 "autostart" if field("on") == "1" => "Démarrage automatique activé.".into(),
                 "autostart" => "Démarrage automatique désactivé.".into(),
+                "auto-domain" if field("on") == "1" => "Adresse automatique réactivée.".into(),
+                "auto-domain" => "Adresse automatique désactivée.".into(),
                 _ => String::new(),
             };
             // A renamed project lives at a new address: follow it.

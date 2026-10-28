@@ -43,11 +43,11 @@ pub async fn load(ctx: &Ctx, name: &str) -> Result<P, Response> {
 /// Every public address of the project: automatic subdomains, then custom ones.
 pub fn addresses(ctx: &Ctx, x: &P) -> Vec<(String, u16)> {
     let mut v = Vec::new();
-    if let Some(first) = x.p.first_http() {
+    if let (Some(first), true) = (x.p.first_http(), x.p.auto_domain) {
         v.push((proxy::url_for(&ctx.st, &x.p.name, None), first.container));
-    }
-    for m in x.p.http_ports() {
-        v.push((proxy::url_for(&ctx.st, &x.p.name, Some(m.container)), m.container));
+        for m in x.p.http_ports() {
+            v.push((proxy::url_for(&ctx.st, &x.p.name, Some(m.container)), m.container));
+        }
     }
     let scheme = if ctx.st.cfg.origin.starts_with("https") { "https" } else { "http" };
     for (h, port) in &x.domains {
@@ -56,8 +56,13 @@ pub fn addresses(ctx: &Ctx, x: &P) -> Vec<(String, u16)> {
     v
 }
 
+/// The address to open: the automatic one, else (turned off) the first custom domain.
 fn main_url(ctx: &Ctx, x: &P) -> Option<String> {
-    x.p.first_http().map(|_| proxy::url_for(&ctx.st, &x.p.name, None))
+    x.p.first_http()?;
+    proxy::auto_url(&ctx.st, &x.p, None).or_else(|| {
+        let scheme = if ctx.st.cfg.origin.starts_with("https") { "https" } else { "http" };
+        x.domains.first().map(|(h, _)| format!("{scheme}://{h}"))
+    })
 }
 
 pub fn back_field(v: &str) -> Markup {
@@ -399,7 +404,9 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
     let open: Vec<Option<bool>> = open.into_iter().zip(&x.p.ports).map(|(o, m)| if m.udp && game.is_some() { Some(true) } else { o }).collect();
     let game_port = x.p.public_ports().next().cloned();
     let host_of = |url: &str| url.split("://").nth(1).unwrap_or(url).to_string();
-    let site = proxy::url_for(&st, n, None);
+    let auto = x.p.auto_domain;
+    let site = main_url(&ctx, &x).unwrap_or_default();
+    let auto_host = host_of(&proxy::url_for(&st, n, None));
     let err = q.get("err");
     let state = |o: Option<bool>| html! {
         @match o {
@@ -428,23 +435,43 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             span.chip.end { @if x.p.public { "Public" } @else { "Privé" } }
                         }
                     }
-                    div.nbig {
-                        a.nurl href=(site) target="_blank" rel="noopener" { (site) }
-                        button.icon-btn.sm type="button" data-copy=(site) title="Copier" aria-label="Copier l'adresse" { (icon_c("copy", "sm")) }
-                        a.btn.sm.primary href=(site) target="_blank" rel="noopener" { "Ouvrir" (icon_c("external", "sm")) }
+                    @if site.is_empty() {
+                        div.nbig.nnone {
+                            span.muted { "Aucune adresse : l'adresse automatique est désactivée et le projet n'a pas de domaine personnalisé. Ajoute un sous-domaine plus bas, ou réactive l'adresse automatique." }
+                        }
+                    } @else {
+                        div.nbig {
+                            a.nurl href=(site) target="_blank" rel="noopener" { (site) }
+                            button.icon-btn.sm type="button" data-copy=(site) title="Copier" aria-label="Copier l'adresse" { (icon_c("copy", "sm")) }
+                            a.btn.sm.primary href=(site) target="_blank" rel="noopener" { "Ouvrir" (icon_c("external", "sm")) }
+                        }
                     }
                     div.nalso {
-                        @if !x.domains.is_empty() || x.p.http_ports().count() > 1 {
+                        @let others: Vec<&(String, u16)> = x.domains.iter().filter(|(h, _)| !site.ends_with(&format!("://{h}"))).collect();
+                        @if !others.is_empty() || (auto && x.p.http_ports().count() > 1) {
                             span { "Aussi sur" }
-                            @for (h, _) in &x.domains { a.chip href={"https://" (h)} target="_blank" rel="noopener" { (h) } }
-                            @for m in x.p.http_ports().filter(|m| Some(m.container) != first_http) {
-                                @let u = proxy::url_for(&st, n, Some(m.container));
-                                a.chip href=(u) target="_blank" rel="noopener" { (host_of(&u)) }
+                            @for (h, _) in &others { a.chip href={"https://" (h)} target="_blank" rel="noopener" { (h) } }
+                            @if auto {
+                                @for m in x.p.http_ports().filter(|m| Some(m.container) != first_http) {
+                                    @let u = proxy::url_for(&st, n, Some(m.container));
+                                    a.chip href=(u) target="_blank" rel="noopener" { (host_of(&u)) }
+                                }
                             }
                         }
                         span.end {
                             @if x.p.public { "Public : tout le monde peut ouvrir ces adresses" } @else { "Privé : passkey obligatoire pour toutes ces adresses" }
                             @if let Some(t) = since { ", depuis " (ago(t)) } "."
+                        }
+                    }
+                    @if manages {
+                        form.nauto method="post" action={(base) "/auto-domain"}
+                            data-confirm=[auto.then(|| format!("Désactiver {auto_host} ?"))]
+                            data-confirm-body=(if x.domains.is_empty() { "Le projet n'aura plus aucune adresse web tant que tu n'ajoutes pas de domaine personnalisé. Les adresses <nom>-<port> s'arrêtent aussi." } else { "Seuls tes domaines personnalisés serviront le site. Les adresses <nom>-<port> s'arrêtent aussi." })
+                            data-tone="warn" data-confirm-ok="Désactiver" {
+                            (back_field(&here))
+                            input type="hidden" name="on" value=(if auto { "0" } else { "1" });
+                            div { b { "Adresse automatique" } span.mono.muted { " " (auto_host) } p.help { @if auto { "Elle et les adresses par port répondent." } @else { "Désactivée : seuls les domaines personnalisés répondent." } } }
+                            button.switch role="switch" aria-checked=(auto) aria-label="Adresse automatique" { span {} }
                         }
                     }
                 }
@@ -490,7 +517,8 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                                 }
                                 span.mono.addr-c role="cell" {
                                     @if m.is_public() { (proxy::public_address(&st, m)) }
-                                    @else if Some(m.container) == first_http { (host_of(&site)) }
+                                    @else if !auto { @if let Some((h, _)) = x.domains.iter().find(|(_, p)| *p == m.container) { (h) } @else { span.dim { "pas d'adresse" } } }
+                                    @else if Some(m.container) == first_http { (auto_host) }
                                     @else { (host_of(&proxy::url_for(&st, n, Some(m.container)))) }
                                 }
                                 span.hide-m role="cell" { (state(*o)) }

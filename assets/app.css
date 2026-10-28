@@ -1197,3 +1197,10 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .flist-out .frow { grid-template-columns: 20px minmax(0, 1fr) 64px auto; }
 .flist-out .frow .dt { display: none; }
 @media (max-width: 900px) { .flist-out .frow { grid-template-columns: 20px minmax(0, 1fr) auto; } }
+/* Réseau: automatic address switch */
+.nauto { display: flex; align-items: center; gap: 16px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.nauto > div { flex: 1; min-width: 0; font-size: 13.5px; }
+.nauto b { font-weight: 600; }
+.nauto .mono { font-size: 12.5px; overflow-wrap: anywhere; }
+.nauto .help { margin-top: 2px; }
+.nnone { padding: 4px 0; font-size: 14px; }
