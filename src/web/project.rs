@@ -794,18 +794,12 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     }
                 }
                 div.card #volumes {
-                    div.card-h { h3 { "Volumes" } span.sub { "les données gardées quand le conteneur est recréé" } }
+                    div.card-h { h3 { "Volumes" } span.sub { "ce qui reste quand le conteneur est recréé" } }
                     div.card-b {
-                        div.vol-fixed {
-                            span.mono { (crate::docker::volume_name(n).strip_prefix(crate::docker::VOLUME_PREFIX).unwrap_or(n)) }
-                            span.dim { "monté sur " }
-                            span.mono { @if x.p.is_game() { "/workspace et /data" } @else { "/workspace" } }
-                            span.tag { "principal" }
-                        }
-                        form method="post" action={(base) "/volumes"} data-confirm="Appliquer les volumes ?" data-confirm-body="Le conteneur est recréé avec ces volumes. Un volume retiré n'est pas effacé : il reste dans la page Volumes." data-tone="warn" data-confirm-ok="Appliquer" style="margin-top:12px" {
+                        form method="post" action={(base) "/volumes"} data-confirm="Appliquer les volumes ?" data-confirm-body="Le conteneur est recréé avec ces volumes. Un volume retiré n'est pas effacé : il reste dans la page Volumes." data-tone="warn" data-confirm-ok="Appliquer" {
                             (back_field(&format!("{here}#volumes")))
-                            (super::volumes::editor(&crate::ops::volumes_text(&x.p), &vols, &ctx.projects, Some(n)))
-                            div.row style="margin-top:14px" { span.muted { "Chaque changement recrée le conteneur." } span.spacer {} button.btn.primary { "Appliquer" } }
+                            (super::volumes::editor(&crate::ops::volumes_text(&x.p), &vols, &ctx.projects, Some(&x.p)))
+                            div.row style="margin-top:16px" { span.muted data-vol-changes { "Aucun changement" } span.spacer {} button.btn.ghost type="button" data-vol-reset disabled { "Annuler" } button.btn.primary data-vol-apply disabled { "Appliquer" } }
                         }
                     }
                 }

@@ -62,6 +62,9 @@
   async function go(url, push) {
     ctrl?.abort();
     ctrl = new AbortController();
+    // The address changes right away: a reload while the page loads opens the new one.
+    if (push) history.pushState({}, '', url);
+    const mine = ctrl;
     const content = $('.content');
     const t = setTimeout(() => { if (content) { content.innerHTML = SK; scrollTo(0, 0); } }, 120);
     let res;
@@ -72,11 +75,14 @@
     const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
     const app = $('.app', doc);
     if (!app || $('meta[http-equiv=refresh]', doc)) { location.href = res.url; return; }
+    if (ctrl !== mine) return;
     const swap = () => {
       document.title = doc.title;
       $('.app').replaceWith(app);
-      if (push) history.pushState({}, '', res.url);
-      const hash = new URL(res.url).hash;
+      // Where the server redirected to, keeping the #fragment of the link.
+      const final = new URL(res.url), hash = new URL(url, location.href).hash;
+      final.hash = hash;
+      history.replaceState({}, '', final.href);
       if (hash && $(hash)) $(hash).scrollIntoView(); else scrollTo(0, 0);
       document.dispatchEvent(new Event('devhub:load'));
       // Inline scripts inserted via the DOM don't run: recreate them, block-scoped so
@@ -392,49 +398,83 @@
       ['dragleave', 'drop'].forEach(ev => z.addEventListener(ev, () => z.classList.remove('over')));
       z.addEventListener('drop', e => { e.preventDefault(); input.files = e.dataTransfer.files; z.closest('form').requestSubmit(); });
     });
-    // Volumes editor: one row per volume (new, or an existing one) and its path, kept in
-    // the hidden "volumes" field as "path" / "volume:path" lines.
+    // Volumes editor, drawn as a mounting plan: one row per attached volume (card, arrow,
+    // folder in the container), chips for the volumes not attached yet. The rows are kept
+    // in the hidden "volumes" field as "path" / "volume:path" lines.
     $$('[data-vols]').forEach(box => {
       if (box.dataset.ready) return;
       box.dataset.ready = 1;
-      const field = $('input[name=volumes]', box), list = $('.vols-list', box), opts = $('[data-vol-options]', box);
+      const field = $('input[name=volumes]', box), rows = $('.vrows', box), avail = $('.vavail', box), chips = $('.vchips', box);
+      const choices = JSON.parse(box.dataset.choices || '[]');
+      const initial = field.value;
+      let sizes = {};
+      const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+      const arrow = () => { const t = el('span'); t.innerHTML = $('.varrow', box).outerHTML; return t.firstChild; };
+      const bars = () => {
+        const max = Math.max(1, ...Object.keys(sizes).filter(k => k.endsWith('#b')).map(k => +sizes[k]));
+        $$('.vcard', box).forEach(c => {
+          const v = c.dataset.v || $('[data-vsize]', c)?.dataset.vsize;
+          const sz = $('.vsz', c);
+          if (sz && v) sz.textContent = sizes[v] || '';
+          const b = sizes[v + '#b'];
+          $('.vbar i', c).style.width = b === undefined ? '0' : Math.max(2, +b / max * 100) + '%';
+        });
+      };
       const sync = () => {
-        field.value = $$('.vol-row', list).map(r => {
-          const v = $('select', r).value, p = $('input', r).value.trim();
+        field.value = $$('.vrow', rows).map(r => {
+          const v = r.dataset.v, p = $('input', r).value.trim();
           return p ? (v ? v + ':' + p : p) : '';
         }).filter(Boolean).join('\n');
+        const used = new Set($$('.vrow', rows).map(r => r.dataset.v));
+        chips.replaceChildren(...choices.filter(c => !used.has(c.v)).map(c => {
+          const b = el('button', 'vchip');
+          b.type = 'button';
+          b.append(el('span', 'mono', c.s));
+          if (c.orphan) b.append(el('span', 'warn', 'orphelin'));
+          else if (c.with) b.append(el('span', 'dim', 'utilisé par ' + c.with));
+          if (sizes[c.v]) b.append(el('span', 'dim mono', sizes[c.v]));
+          b.addEventListener('click', () => { $('input', row(c.v, '')).focus(); sync(); });
+          return b;
+        }));
+        avail.hidden = !chips.children.length;
+        const form = box.closest('form'), info = form && $('[data-vol-changes]', form);
+        if (info) {
+          const changed = field.value !== initial;
+          info.textContent = changed ? 'Changements non appliqués · le conteneur redémarre pour les appliquer' : 'Aucun changement';
+          $$('[data-vol-apply], [data-vol-reset]', form).forEach(b => { b.disabled = !changed; });
+        }
       };
       const row = (vol, path) => {
-        const r = document.createElement('div');
-        r.className = 'vol-row';
-        const sel = opts.cloneNode(true);
-        sel.hidden = false;
-        sel.removeAttribute('data-vol-options');
-        sel.setAttribute('aria-label', 'Volume');
-        if (vol && ![...sel.options].some(o => o.value === vol)) sel.add(new Option(vol, vol));
-        sel.value = vol || '';
-        const inp = document.createElement('input');
-        inp.className = 'mono-input';
+        const c = choices.find(x => x.v === vol);
+        const r = el('div', 'vrow');
+        r.dataset.v = vol || '';
+        const card = el('div', 'vcard' + (c && c.with ? ' shared' : ''));
+        card.dataset.v = vol || '';
+        const top = el('div', 'vtop');
+        top.append(vol ? el('b', 'mono', c ? c.s : vol.replace(/^devhub-vol-/, '')) : el('b', '', 'Nouveau volume'));
+        if (c && c.with) top.append(el('span', 'tag shared', 'partagé avec ' + c.with));
+        top.append(el('span', 'spacer'), el('span', 'vsz mono'));
+        const bar = el('div', 'vbar');
+        bar.append(el('i'));
+        card.append(top, bar);
+        const inp = el('input', 'mono-input vpath-in');
         inp.placeholder = '/data';
-        inp.setAttribute('aria-label', 'Monté sur');
         inp.spellcheck = false;
+        inp.setAttribute('aria-label', 'Dossier dans le conteneur');
         inp.value = path || '';
-        const on = document.createElement('span');
-        on.className = 'dim';
-        on.textContent = 'sur';
-        const del = document.createElement('button');
+        const del = el('button', 'icon-btn sm bare');
         del.type = 'button';
-        del.className = 'icon-btn sm bare';
         del.title = 'Retirer';
         del.setAttribute('aria-label', 'Retirer ce volume');
         del.textContent = '×';
         del.addEventListener('click', () => { r.remove(); sync(); });
-        r.append(sel, on, inp, del);
-        list.append(r);
+        r.append(card, arrow(), inp, del);
+        rows.append(r);
+        bars();
         return r;
       };
       const load = text => {
-        list.replaceChildren();
+        rows.replaceChildren();
         text.split(/[,\n]/).map(x => x.trim()).filter(Boolean).forEach(e => {
           const i = e.lastIndexOf(':');
           i > 0 ? row(e.slice(0, i), e.slice(i + 1)) : row('', e);
@@ -442,9 +482,49 @@
       };
       box.load = t => { load(t); sync(); };
       load(field.value);
+      sync();
       box.addEventListener('input', sync);
-      box.addEventListener('change', sync);
-      $('[data-vol-add]', box).addEventListener('click', () => { $('input', row('', '')).focus(); });
+      $('[data-vol-add]', box).addEventListener('click', () => { $('input', row('', '')).focus(); sync(); });
+      const form = box.closest('form');
+      if (form) $$('[data-vol-reset]', form).forEach(b => b.addEventListener('click', () => box.load(initial)));
+      fetch(box.dataset.sizes).then(r => r.ok ? r.json() : {}).then(m => { sizes = m; bars(); sync(); }).catch(() => {});
+    });
+    // Folder chips (catalog images): type a path, Enter or comma adds it; kept in the
+    // hidden "volumes" field as "/a, /b".
+    $$('[data-paths]').forEach(box => {
+      if (box.dataset.ready) return;
+      box.dataset.ready = 1;
+      const field = $('input[type=hidden]', box), inp = $('.paths-in', box);
+      const list = () => field.value.split(',').map(x => x.trim()).filter(Boolean);
+      const draw = () => {
+        $$('.pchip', box).forEach(c => c.remove());
+        list().forEach(p => {
+          const c = document.createElement('span');
+          c.className = 'pchip mono';
+          c.textContent = p;
+          const x = document.createElement('button');
+          x.type = 'button';
+          x.setAttribute('aria-label', 'Retirer ' + p);
+          x.textContent = '×';
+          x.addEventListener('click', () => { field.value = list().filter(q => q !== p).join(', '); draw(); });
+          c.append(x);
+          box.insertBefore(c, inp);
+        });
+      };
+      const add = () => {
+        const v = inp.value.replace(/,/g, '').trim();
+        if (v && !list().includes(v)) field.value = [...list(), v].join(', ');
+        inp.value = '';
+        draw();
+      };
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); }
+        else if (e.key === 'Backspace' && !inp.value && list().length) { field.value = list().slice(0, -1).join(', '); draw(); }
+      });
+      inp.addEventListener('blur', add);
+      // A path still being typed counts when the form is saved.
+      box.closest('form')?.addEventListener('submit', add, true);
+      draw();
     });
     // New project: live summary.
     const np = $('#new-project');

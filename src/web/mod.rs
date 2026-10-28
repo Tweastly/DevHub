@@ -140,6 +140,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "phone" => r#"<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18h2"/>"#,
         "back" => r#"<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/>"#,
         "chevron-left" => r#"<path d="m15 18-6-6 6-6"/>"#,
+        "chevron-down" => r#"<path d="m6 9 6 6 6-6"/>"#,
         "arrow-right" => r#"<path d="M5 12h14M13 6l6 6-6 6"/>"#,
         "pin" => r#"<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.2l5.9-.9z"/>"#,
         "cpu" => r#"<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>"#,

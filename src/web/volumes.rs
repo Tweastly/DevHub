@@ -50,25 +50,50 @@ fn uses<'a>(projects: &'a [Project], volume: &str) -> Vec<(&'a str, String)> {
     out
 }
 
-/// The volumes editor of the new-project form and of Paramètres: one row per volume
-/// (a new one, or an existing DevHub volume, and where it is mounted), kept in the hidden
-/// `volumes` field as "path" / "volume:path" lines (see ops::parse_volumes).
-pub(crate) fn editor(value: &str, vols: &[Vol], projects: &[Project], this: Option<&str>) -> Markup {
+const ARROW: &str = r#"<svg class="varrow" width="56" height="14" viewBox="0 0 56 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h46M44 2l6 5-6 5"/></svg>"#;
+
+/// The volumes editor of the new-project form and of Paramètres, drawn as a mounting
+/// plan: each volume on the server, an arrow, the folder it appears as in the container.
+/// The project's own volume comes first and stays; the rows below are kept in the hidden
+/// `volumes` field as "path" / "volume:path" lines (see ops::parse_volumes), and the
+/// volumes not attached yet are offered as chips.
+pub(crate) fn editor(value: &str, vols: &[Vol], projects: &[Project], this: Option<&Project>) -> Markup {
+    let choices: Vec<serde_json::Value> = vols
+        .iter()
+        .filter(|v| this.is_none_or(|p| v.name != docker::volume_name(&p.name)))
+        .map(|v| {
+            let users: Vec<&str> = uses(projects, &v.name).into_iter().map(|(p, _)| p).filter(|p| this.is_none_or(|t| t.name != *p)).collect();
+            let orphan = uses(projects, &v.name).is_empty();
+            serde_json::json!({ "v": v.name, "s": v.name.strip_prefix(PREFIX).unwrap_or(&v.name), "orphan": orphan, "with": users.first() })
+        })
+        .collect();
+    let main = this.map(|p| p.name.as_str());
     html! {
-        div.vols data-vols {
+        div.vols data-vols data-sizes="/volumes/sizes" data-choices=(serde_json::Value::Array(choices)) {
             input type="hidden" name="volumes" value=(value);
-            div.vols-list {}
-            button.btn.sm.ghost type="button" data-vol-add { (icon("plus")) "Ajouter un volume" }
-            select hidden data-vol-options {
-                option value="" { "Nouveau volume" }
-                @for v in vols {
-                    @let all: Vec<&str> = uses(projects, &v.name).into_iter().map(|(p, _)| p).collect();
-                    @let other = all.iter().find(|p| Some(**p) != this);
-                    option value=(v.name) {
-                        (v.name.strip_prefix(PREFIX).unwrap_or(&v.name))
-                        @if all.is_empty() { " · orphelin" } @else if let Some(o) = other { " · utilisé par " (o) }
+            div.vmap {
+                span.vh { "Sur le serveur" } span {} span.vh { "Dans le conteneur" } span {}
+                div.vcard {
+                    div.vtop {
+                        @match main { Some(n) => b.mono { (n) }, None => b { "Volume du projet" } }
+                        span.tag { "principal" }
+                        span.spacer {}
+                        @if let Some(n) = main { span.vsz.mono data-vsize=(docker::volume_name(n)) {} }
                     }
+                    div.vbar { i {} }
                 }
+                (PreEscaped(ARROW))
+                span.vpath.mono { @if this.is_some_and(|p| p.is_game()) { "/workspace, /data" } @else { "/workspace" } }
+                span.vlock title="Le volume principal ne se retire pas" { (icon_c("lock", "sm")) }
+                div.vrows {}
+                button.vadd type="button" data-vol-add { (icon_c("plus", "sm")) "Nouveau volume" }
+                span.varrow.dash { (PreEscaped(ARROW)) }
+                span.dim.vaddhint { "puis le dossier dans le conteneur" }
+                span {}
+            }
+            div.vavail hidden {
+                div.row.tight { b { "Volumes disponibles" } span.dim { "clique pour l'attacher, puis choisis son dossier" } }
+                div.vchips {}
             }
         }
     }
@@ -164,6 +189,7 @@ pub async fn sizes(State(st): State<AppState>, jar: CookieJar) -> Result<axum::J
         }
         let size = v.usage_data.map(|u| u.size).unwrap_or(-1);
         total += size.max(0);
+        out.insert(format!("{}#b", v.name), size.max(0).to_string());
         out.insert(v.name, human(size));
     }
     out.insert("_total".into(), format!("{} en tout", human(total)));

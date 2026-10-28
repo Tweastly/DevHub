@@ -61,6 +61,30 @@ pub fn spawn_refresh(st: AppState) {
     });
 }
 
+/// The defaults of a catalog image, edited in its row (or the "Ajouter" one).
+fn fields(label: &str, ports: &str, volumes: &str, service: bool) -> Markup {
+    html! {
+        div.grid2 {
+            label.field { span.lbl { "Nom affiché" } input name="label" value=(label) placeholder="Mon app"; }
+            label.field { span.lbl { "Ports par défaut" } input.mono-input name="ports" value=(ports) placeholder="3000, 19132/udp"; }
+        }
+        div.field {
+            span.lbl { "Dossiers à garder " span.dim { "· chaque projet reçoit son propre volume pour chacun" } }
+            div.paths data-paths {
+                input type="hidden" name="volumes" value=(volumes);
+                input.mono-input.paths-in aria-label="Ajouter un dossier" placeholder="+ /dossier" spellcheck="false";
+            }
+        }
+        div.field {
+            span.lbl { "Au démarrage" }
+            div.access {
+                label.tile { input type="radio" name="mode" value="service" checked[service]; span.radio {} b { "Service" } span.d { "la commande de l'image tourne (serveur, bot, app)" } }
+                label.tile { input type="radio" name="mode" value="dev" checked[!service]; span.radio {} b { "Environnement de dev" } span.d { "lance " code { "/workspace/start.sh" } } }
+            }
+        }
+    }
+}
+
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx_admin(&st, &jar)?;
     let catalog = db::catalog(&st.db.lock().unwrap());
@@ -94,48 +118,57 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         (flash(&q))
         @if pulling { span data-auto-reload="4" hidden {} }
         div.stack {
-            div.card {
-                div.card-h { h3 { "Mes images" } span.sub { "proposées dans « Nouveau projet »" } }
-                @if catalog.is_empty() {
-                    div.card-b.muted { "Aucune pour l'instant. Ajoute une image ci-dessous : elle sera téléchargée sur le serveur et proposée à la création d'un projet." }
-                } @else {
-                    @for c in &catalog {
-                        @let tag = docker::with_tag(&c.reference);
-                        div.list-row {
-                            span.avatar { (icon("layers")) }
-                            div.t {
-                                b { (c.label) }
-                                div.mono.dim style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" {
-                                    (c.reference)
-                                    @if !c.ports.is_empty() { " · ports " (c.ports) }
-                                    @if !c.volumes.is_empty() { " · volumes " (c.volumes) }
-                                    " · " @if c.service { "service" } @else { "environnement de dev" }
-                                }
+            div.card.imgcat {
+                div.card-h {
+                    h3 { "Mes images" }
+                    span.sub { (catalog.len()) " image" @if catalog.len() > 1 { "s" } " · proposées dans « Nouveau projet »" }
+                }
+                @for (i, c) in catalog.iter().enumerate() {
+                    @let tag = docker::with_tag(&c.reference);
+                    @let ports: Vec<&str> = c.ports.split([',', ' ']).filter(|x| !x.is_empty()).collect();
+                    @let nvol = c.volumes.split(',').filter(|x| !x.trim().is_empty()).count();
+                    @let fid = format!("img-edit-{i}");
+                    details.imgrow {
+                        summary.imgsum {
+                            div.t { b { (c.label) } span.mono.dim { (c.reference) } }
+                            span.imgchips {
+                                @for p in &ports { span.mono { (p) } }
+                                @if nvol > 0 { span.mono { (nvol) " volume" @if nvol > 1 { "s" } } }
+                                @if !c.service { span { "dev" } }
                             }
                             @match pulls.get(&tag) {
-                                Some(s) if s.starts_with("erreur") => span.chip.bad title=(s) { "échec du téléchargement" },
-                                Some(s) => span.chip { span.spin {} (s) },
-                                None if have.contains(&tag) => span.chip.ok { "sur le serveur" },
-                                None => form.inline method="post" action="/images/pull" { input type="hidden" name="image" value=(c.reference); button.btn.sm { "Télécharger" } },
+                                Some(s) if s.starts_with("erreur") => span.imgst.bad title=(s) { span.dot.dead {} "échec" },
+                                Some(s) => span.imgst { span.spin {} (s) },
+                                None if have.contains(&tag) => span.imgst.ok { span.dot.running {} "prête" },
+                                None => span.imgst { span.dot.exited {} "pas téléchargée" },
                             }
-                            a.btn.sm.primary href=(new_link(c)) { "Créer un projet" }
+                            span.chev { (icon_c("chevron-down", "sm")) }
+                        }
+                        form.imgedit #(fid) method="post" action="/images/catalog" {
+                            input type="hidden" name="image" value=(c.reference);
+                            (fields(&c.label, &c.ports, &c.volumes, c.service))
+                        }
+                        div.imgfoot {
                             form.inline method="post" action="/images/catalog/remove" data-confirm={"Retirer " (c.label) " du catalogue ?"} data-confirm-body="Elle ne sera plus proposée dans « Nouveau projet ». L'image reste sur le serveur et les projets qui l'utilisent continuent de tourner." data-tone="neutral" data-confirm-ok="Retirer" {
                                 input type="hidden" name="image" value=(c.reference);
-                                button.icon-btn.sm.bare type="submit" title="Retirer du catalogue" aria-label={"Retirer " (c.label) " du catalogue"} { (icon_c("x", "sm")) }
+                                button.btn.sm.ghost style="color:var(--err)" { "Retirer du catalogue" }
                             }
+                            span.spacer {}
+                            @if pulls.get(&tag).is_none() && !have.contains(&tag) {
+                                form.inline method="post" action="/images/pull" { input type="hidden" name="image" value=(c.reference); button.btn.sm { "Télécharger" } }
+                            }
+                            a.btn.sm href=(new_link(c)) { "Créer un projet" }
+                            button.btn.sm.primary type="submit" form=(fid) { "Enregistrer" }
                         }
                     }
                 }
-                form.card-f method="post" action="/images/catalog" {
-                    div.row style="gap:12px;align-items:flex-end" {
-                        label.field style="flex:2;min-width:220px" { span.lbl { "Image" } input.mono-input name="image" required placeholder="ghcr.io/moi/app:1.2 ou nginx" value=[q.get("image")]; }
-                        label.field style="flex:1;min-width:140px" { span.lbl { "Nom affiché " span.dim { "(optionnel)" } } input name="label" placeholder="Mon app"; }
-                        label.field style="flex:1;min-width:140px" { span.lbl { "Ports " span.dim { "(optionnel)" } } input.mono-input name="ports" placeholder="3000, 19132/udp"; }
-                        label.field style="flex:1;min-width:140px" { span.lbl { "Volumes " span.dim { "(optionnel)" } } input.mono-input name="volumes" placeholder="/data, /config"; }
-                        label.row.tight style="padding-bottom:10px;font-size:13px" { input type="checkbox" name="service" value="1" checked; "service" }
-                        button.btn.primary { (icon("plus")) "Ajouter" }
+                details.imgrow.add open[catalog.is_empty() || q.contains_key("image")] {
+                    summary.imgsum { span.imgadd { (icon_c("plus", "sm")) "Ajouter une image" } span.dim { "n'importe quelle image Docker, téléchargée tout de suite" } }
+                    form.imgedit method="post" action="/images/catalog" {
+                        label.field { span.lbl { "Image" } input.mono-input name="image" required placeholder="ghcr.io/moi/app:1.2 ou nginx" value=[q.get("image")]; }
+                        (fields("", "", "", true))
+                        div.imgfoot style="padding:0;border:0" { span.spacer {} button.btn.sm.primary { (icon("plus")) "Ajouter" } }
                     }
-                    p.help style="margin-top:8px" { "« service » : la commande de l'image tourne (serveur, bot, app). Décoché : conteneur de dev qui lance " code { "/workspace/start.sh" } ". « Volumes » : les dossiers de l'image à garder (base de données, config…), chacun dans son volume. L'image est téléchargée tout de suite." }
                 }
             }
 
@@ -158,7 +191,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                             tr {
                                 td {
                                     @if i.tags.is_empty() { span.mono.dim { "sans nom · " (i.id.trim_start_matches("sha256:").chars().take(12).collect::<String>()) } }
-                                    @for t in &i.tags { div.mono style="font-size:12.5px" { (t) } }
+                                    @for t in &i.tags { div.mono style="font-size:12.5px;overflow-wrap:anywhere" { (t) } }
                                     @if system { span.chip style="margin-top:4px" { "DevHub" } }
                                 }
                                 td.hide-m {
@@ -168,7 +201,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                                 td.num.mono { (human(i.size)) }
                                 td.num.hide-m.dim { (timefmt::date_short(i.created)) }
                                 td.num {
-                                    div.row.tight.end {
+                                    div.row.tight.end style="flex-wrap:wrap" {
                                         @if let Some(t) = i.tags.first() {
                                             @if !system && !in_catalog.contains(t) {
                                                 form.inline method="post" action="/images/catalog" {
@@ -265,14 +298,16 @@ pub async fn catalog_add(State(st): State<AppState>, jar: CookieJar, Form(f): Fo
     let volumes = volumes.split(',').map(|v| v.trim().trim_end_matches('/')).filter(|v| !v.is_empty()).collect::<Vec<_>>().join(", ");
     // Default name: the image without registry, owner or tag ("ghcr.io/moi/app:1" → "app").
     let label = Some(get("label")).filter(|l| !l.is_empty()).unwrap_or_else(|| image.rsplit('/').next().unwrap_or(&image).split([':', '@']).next().unwrap_or(&image).to_string());
-    let item = db::CatalogImage { reference: image.clone(), label, ports, service: f.contains_key("service"), volumes };
+    let item = db::CatalogImage { reference: image.clone(), label, ports, service: f.get("mode").map_or(f.contains_key("service"), |m| m != "dev"), volumes };
+    let existed = db::catalog(&st.db.lock().unwrap()).iter().any(|c| c.reference == image);
     db::catalog_save(&st.db.lock().unwrap(), &item).map_err(|e| crate::AppError(e).into_response())?;
     db::audit(&st.db.lock().unwrap(), &who.actor(), "image.catalog-add", &image);
     let present = st.docker.inspect_image(&docker::with_tag(&image)).await.is_ok();
     if !present {
         start_pull(&st, &image);
     }
-    Ok(Redirect::to(&crate::with_param("/images", "ok", &format!("« {} » ajoutée au catalogue{}.", item.label, if present { "" } else { ", téléchargement en cours" }))))
+    let msg = if existed { format!("« {} » enregistrée.", item.label) } else { format!("« {} » ajoutée au catalogue{}.", item.label, if present { "" } else { ", téléchargement en cours" }) };
+    Ok(Redirect::to(&crate::with_param("/images", "ok", &msg)))
 }
 
 pub async fn catalog_remove(State(st): State<AppState>, jar: CookieJar, Form(f): Form<HashMap<String, String>>) -> Result<Redirect, Response> {
