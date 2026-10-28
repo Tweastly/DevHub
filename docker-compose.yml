@@ -15,6 +15,9 @@ services:
       DEVHUB_BIND_IP: 127.0.0.1
       # Fine-grained token, read-only "Contents" on this repo (needed: the repo is private).
       DEVHUB_GITHUB_TOKEN: ${DEVHUB_GITHUB_TOKEN:-}
+      # Optional OAuth app for "Se connecter avec GitHub" in Mon profil.
+      DEVHUB_GITHUB_CLIENT_ID: ${DEVHUB_GITHUB_CLIENT_ID:-}
+      DEVHUB_GITHUB_CLIENT_SECRET: ${DEVHUB_GITHUB_CLIENT_SECRET:-}
     volumes:
       - ./data:/data
       # Only the orchestrator gets the Docker socket — never the project containers.

@@ -526,6 +526,13 @@
       box.closest('form')?.addEventListener('submit', add, true);
       draw();
     });
+    // Git field of a new project: the connected GitHub account's repositories.
+    $$('datalist[data-gh-repos]:not([data-ready])').forEach(dl => {
+      dl.dataset.ready = 1;
+      fetch(dl.dataset.ghRepos).then(r => r.ok ? r.json() : []).then(list => {
+        dl.replaceChildren(...list.map(r => { const o = new Option(r.name + (r.private ? ' · privé' : ''), r.url); return o; }));
+      }).catch(() => {});
+    });
     // New project: live summary.
     const np = $('#new-project');
     if (np && !np.dataset.ready) {

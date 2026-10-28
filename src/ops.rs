@@ -354,8 +354,13 @@ async fn build(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
         set_step(st, &p.name, "Clonage du dépôt Git".into());
     }
     if let Some(url) = &p.git_url {
-        let cmd = format!("if [ -z \"$(ls -A /workspace)\" ]; then git clone '{}' /workspace; fi", url.replace('\'', ""));
-        let r = docker::exec(&st.docker, &p.name, &cmd, Some("/"), Duration::from_secs(600)).await?;
+        // A private github.com repository: the account connected in "Mon profil", passed
+        // as an env var for this clone only (the remote URL stays plain).
+        let auth = crate::github::git_auth(url);
+        let header = if auth.is_some() { "-c http.extraHeader=\"$DEVHUB_GIT_AUTH\" " } else { "" };
+        let cmd = format!("if [ -z \"$(ls -A /workspace)\" ]; then git {header}clone '{}' /workspace; fi", url.replace('\'', ""));
+        let env: Vec<String> = auth.map(|a| format!("DEVHUB_GIT_AUTH={a}")).into_iter().collect();
+        let r = docker::exec_env(&st.docker, &p.name, &cmd, Some("/"), Duration::from_secs(600), &env).await?;
         anyhow::ensure!(r.exit_code == 0, "git clone: {}", r.output);
     } else if p.template == "site" {
         seed_site(st, p).await?;

@@ -1047,3 +1047,15 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
   .imgfoot { padding: 0 16px 16px; }
   .imgedit .access { grid-template-columns: 1fr; }
 }
+
+/* Mon profil → GitHub */
+.gh-acc { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.gh-acc .t { flex: 1; min-width: 0; }
+.gh-acc b { font-size: 15px; }
+.gh-uses { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.gh-uses > div { padding: 12px; border-radius: 10px; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.gh-uses .ic { color: var(--accent); }
+.gh-uses .dim { font-size: 12px; }
+.gh-token { margin-top: 14px; }
+.gh-token summary { cursor: pointer; font-size: 13px; font-weight: 500; }
+@media (max-width: 900px) { .gh-uses { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

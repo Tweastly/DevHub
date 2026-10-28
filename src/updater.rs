@@ -106,8 +106,10 @@ fn github_slug(dir: &str) -> Option<String> {
     Some(path.trim_end_matches(".git").trim_end_matches('/').to_string())
 }
 
+/// DEVHUB_GITHUB_TOKEN (read-only, this repository), else the GitHub account connected
+/// in "Mon profil".
 fn token() -> Option<String> {
-    std::env::var("DEVHUB_GITHUB_TOKEN").ok().filter(|t| !t.is_empty())
+    std::env::var("DEVHUB_GITHUB_TOKEN").ok().filter(|t| !t.is_empty()).or_else(|| crate::github::cred().map(|c| c.token))
 }
 
 #[derive(Deserialize)]

@@ -452,8 +452,13 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                         div.card-b.grid2 {
                             label.field {
                                 span.lbl { "Dépôt Git" }
-                                div.ig { span.pre { (icon_c("git", "sm")) } input.mono-input name="git_url" placeholder="https://github.com/moi/projet.git" value=(v("git_url")); }
-                                p.help { "Cloné dans /workspace au premier démarrage." }
+                                div.ig { span.pre { (icon_c("git", "sm")) } input.mono-input name="git_url" placeholder="https://github.com/moi/projet.git" value=(v("git_url")) list="gh-repos" autocomplete="off"; }
+                                @if let Some(c) = crate::github::cred() {
+                                    datalist #gh-repos data-gh-repos="/github/repos" {}
+                                    p.help { "Cloné dans /workspace au premier démarrage. Tes dépôts GitHub (@" (c.login) ") sont proposés, privés compris." }
+                                } @else {
+                                    p.help { "Cloné dans /workspace au premier démarrage. Dépôt privé : " a.link href="/security#github" { "connecte GitHub" } "." }
+                                }
                             }
                             label.field {
                                 span.lbl { "Ports à exposer" }

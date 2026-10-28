@@ -95,10 +95,11 @@ pub async fn prune_template_tags(d: &Docker) {
 pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(String)) -> anyhow::Result<()> {
     let tagged = with_tag(image);
     let image = tagged.as_str();
+    // Private ghcr.io images: the GitHub account connected in "Mon profil".
     let mut s = docker.create_image(
         Some(CreateImageOptions { from_image: image, ..Default::default() }),
         None,
-        None,
+        crate::github::docker_auth(image),
     );
     // Layer id → (bytes downloaded, layer size, downloaded, extracted).
     let mut layers: HashMap<String, (i64, i64, bool, bool)> = HashMap::new();
@@ -155,7 +156,9 @@ fn pull_error(e: &str) -> String {
         format!("le serveur n'arrive pas à résoudre le registre (DNS). {e}")
     } else if e.contains("no space left") {
         "disque plein sur le serveur.".into()
-    } else if e.contains("not found") || e.contains("manifest unknown") || e.contains("denied") {
+    } else if (e.contains("unauthorized") || e.contains("denied")) && crate::github::cred().is_none() {
+        format!("image privée ou introuvable. Pour une image ghcr.io privée, connecte GitHub dans Mon profil. {e}")
+    } else if e.contains("not found") || e.contains("manifest unknown") || e.contains("denied") || e.contains("unauthorized") {
         format!("image introuvable ou privée. {e}")
     } else {
         e.to_string()
@@ -517,21 +520,27 @@ pub struct ExecResult {
 const MAX_OUTPUT: usize = 100_000;
 
 pub async fn exec(d: &Docker, p: &str, cmd: &str, workdir: Option<&str>, timeout: Duration) -> anyhow::Result<ExecResult> {
-    exec_argv(d, p, vec!["bash", "-lc", cmd], workdir, timeout).await
+    exec_argv(d, p, vec!["bash", "-lc", cmd], workdir, timeout, &[]).await
+}
+
+/// `exec` with extra environment variables (secrets stay out of the command line).
+pub async fn exec_env(d: &Docker, p: &str, cmd: &str, workdir: Option<&str>, timeout: Duration, env: &[String]) -> anyhow::Result<ExecResult> {
+    exec_argv(d, p, vec!["bash", "-lc", cmd], workdir, timeout, env).await
 }
 
 /// Like `exec`, with plain `sh` instead of a bash login shell: no profile to load (nvm,
 /// conda… can take a second), for DevHub's own quick commands (the Files tab).
 pub async fn exec_sh(d: &Docker, p: &str, cmd: &str, workdir: Option<&str>, timeout: Duration) -> anyhow::Result<ExecResult> {
-    exec_argv(d, p, vec!["sh", "-c", cmd], workdir, timeout).await
+    exec_argv(d, p, vec!["sh", "-c", cmd], workdir, timeout, &[]).await
 }
 
-async fn exec_argv(d: &Docker, p: &str, argv: Vec<&str>, workdir: Option<&str>, timeout: Duration) -> anyhow::Result<ExecResult> {
+async fn exec_argv(d: &Docker, p: &str, argv: Vec<&str>, workdir: Option<&str>, timeout: Duration, env: &[String]) -> anyhow::Result<ExecResult> {
     let e = d
         .create_exec(
             &container_name(p),
             CreateExecOptions {
                 cmd: Some(argv),
+                env: (!env.is_empty()).then(|| env.iter().map(String::as_str).collect()),
                 working_dir: Some(workdir.unwrap_or("/workspace")),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),

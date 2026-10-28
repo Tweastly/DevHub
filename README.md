@@ -45,7 +45,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Accès
 - **Passkeys** (WebAuthn), sans mot de passe, plusieurs appareils par profil.
-- **Mon profil** : tes passkeys et ta photo.
+- **Mon profil** : tes passkeys, ta photo et ton **compte GitHub**. Une fois connecté (« Se connecter avec GitHub » ou un jeton collé), DevHub télécharge les images ghcr.io privées, clone les dépôts privés, lit son propre dépôt pour les mises à jour et propose tes dépôts dans « Nouveau projet ».
 - **Claude (MCP)** : une URL fixe, `https://dev.example.com/mcp`, à ajouter dans Claude (Réglages → Connecteurs → Ajouter un connecteur personnalisé). On se connecte avec son passkey et on clique sur « Autoriser » (OAuth 2.1 + PKCE). Claude agit avec les droits du profil qui l'a autorisé. Un interrupteur coupe l'accès sans changer l'URL, et chaque connexion se révoque.
 - **MCP par projet** : une URL secrète par projet, limitée à ce seul conteneur (`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`), régénérable.
 
@@ -95,7 +95,8 @@ Par défaut, chaque projet reçoit son certificat à la première visite, et un 
 | `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
 | `DEVHUB_DATA` | `./data` | base SQLite |
 | `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés |
-| `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour les mises à jour (dépôt privé) |
+| `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour les mises à jour (dépôt privé) ; sinon le compte GitHub de Mon profil |
+| `DEVHUB_GITHUB_CLIENT_ID` / `DEVHUB_GITHUB_CLIENT_SECRET` | — | OAuth App GitHub pour « Se connecter avec GitHub » (retour : `https://$DOMAIN/github/callback`) |
 | `DEVHUB_REPO` | `/repo` | où le dépôt est monté dans le conteneur |
 | `DEVHUB_PUBLIC_HOST` | `DEVHUB_DOMAIN` | nom affiché pour rejoindre les ports de jeu (ex. `mc.example.com`) |
 | `HTTP_PORT` | `80` | port HTTP de Caddy s'il est déjà pris |
@@ -106,8 +107,8 @@ Le dépôt ne contient aucun secret : tout ce qui est sensible vit **uniquement 
 
 | Où | Contenu | Publié ? |
 |---|---|---|
-| `.env` | domaine, jeton GitHub, jeton Cloudflare | non (`.gitignore`) |
-| `data/devhub.sqlite` | passkeys (clés publiques), sessions, profils, jetons OAuth (hachés), URL MCP des projets, journal, variables d'environnement des projets | non (`/data` ignoré) |
+| `.env` | domaine, jeton GitHub, jeton Cloudflare, secret de l'OAuth App | non (`.gitignore`) |
+| `data/devhub.sqlite` | jeton du compte GitHub connecté, passkeys (clés publiques), sessions, profils, jetons OAuth (hachés), URL MCP des projets, journal, variables d'environnement des projets | non (`/data` ignoré) |
 | volumes Docker | code et données des projets | non (hors du dépôt) |
 | `.env.example` | modèle sans valeurs | oui |
 

@@ -2,6 +2,7 @@ mod auth;
 mod db;
 mod docker;
 mod files;
+mod github;
 mod host;
 mod live;
 mod mcp;
@@ -145,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
     let data_dir = env("DEVHUB_DATA", "./data");
     std::fs::create_dir_all(&data_dir)?;
     let conn = db::open(&format!("{data_dir}/devhub.sqlite"))?;
+    github::load(&conn);
     let needs_setup = !db::passkey_rows(&conn).iter().any(|k| k.profile_id == db::OWNER);
 
     let webauthn = WebauthnBuilder::new(&domain, &Url::parse(&origin)?)?.rp_name("DevHub").build()?;
@@ -201,6 +203,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/login/finish", post(auth::login_finish))
         .route("/auth/handoff", get(proxy::handoff))
         .route("/security", get(web::security::page))
+        .route("/github/connect", get(github::connect))
+        .route("/github/callback", get(github::callback))
+        .route("/github/token", post(github::set_token))
+        .route("/github/disconnect", post(github::disconnect))
+        .route("/github/repos", get(github::repos))
         .route("/security/{id}/delete", post(delete_passkey))
         .route("/profiles/{id}/avatar", get(web::profiles::avatar_get).post(web::profiles::avatar_set).layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)))
         .route("/profiles/{id}/avatar/remove", post(web::profiles::avatar_remove))
