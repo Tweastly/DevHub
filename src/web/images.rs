@@ -10,7 +10,7 @@ use axum::Form;
 use bollard::image::{ListImagesOptions, PruneImagesOptions, RemoveImageOptions};
 
 /// Images DevHub itself runs on: never offered for removal.
-fn is_system(tag: &str) -> bool {
+pub(crate) fn is_system(tag: &str) -> bool {
     let repo = tag.split(':').next().unwrap_or("");
     repo == "devhub" || repo.starts_with("devhub-") || repo.ends_with("-devhub") || repo == "caddy" || repo.ends_with("/caddy") || repo == "docker"
 }
@@ -21,10 +21,10 @@ fn human(bytes: i64) -> String {
 
 #[derive(Clone)]
 pub struct Local {
-    tags: Vec<String>,
-    id: String,
-    size: i64,
-    created: i64,
+    pub tags: Vec<String>,
+    pub id: String,
+    pub size: i64,
+    pub created: i64,
 }
 
 /// Asks Docker for the images (slow with many images and layers): only the background
@@ -43,7 +43,7 @@ pub async fn reload(st: &AppState) -> Vec<Local> {
     v
 }
 
-async fn local(st: &AppState) -> Vec<Local> {
+pub(crate) async fn local(st: &AppState) -> Vec<Local> {
     let cached = st.images.lock().unwrap().clone();
     match cached {
         Some(v) => v,
@@ -229,14 +229,14 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
 }
 
 /// Checks an image reference typed in a form.
-fn reference(s: &str) -> Result<String, String> {
+pub(crate) fn reference(s: &str) -> Result<String, String> {
     let r = s.trim().to_string();
     let ok = !r.is_empty() && r.len() <= 255 && r.chars().all(|c| c.is_ascii_alphanumeric() || "./:-_@".contains(c)) && !r.starts_with(['-', '.', '/', ':']);
     if ok { Ok(r) } else { Err(format!("image invalide : « {r} »")) }
 }
 
 /// Downloads an image in the background; the page shows the step until it's done.
-fn start_pull(st: &AppState, image: &str) {
+pub(crate) fn start_pull(st: &AppState, image: &str) {
     let tag = docker::with_tag(image);
     {
         let mut p = st.pulls.lock().unwrap();

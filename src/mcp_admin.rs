@@ -107,6 +107,40 @@ fn tools() -> Value {
                 "inputSchema": { "type": "object", "properties": {
                     "project": p, "memory_mb": { "type": ["integer", "null"] }, "cpus": { "type": ["number", "null"] }
                 }, "required": ["project"] } }),
+        json!({ "name": "update_project", "description": "Change les réglages généraux d'un projet ; seuls les champs donnés changent. name : renomme (conteneur recréé, données, volumes et domaines personnalisés gardés, l'adresse automatique change). description : une phrase (140 max). color : teinte 0-359 de l'avatar et des graphiques. autostart : relancé au démarrage du serveur. pinned : épinglé dans la barre latérale. mode : \"service\" (commande de l'image) ou \"dev\" (conteneur qui lance /workspace/start.sh), recrée le conteneur.",
+                "inputSchema": { "type": "object", "properties": {
+                    "project": p,
+                    "name": { "type": "string", "description": "Nouveau nom : a-z, 0-9, -, 32 max" },
+                    "description": { "type": "string" },
+                    "color": { "type": "integer", "minimum": 0, "maximum": 359 },
+                    "autostart": { "type": "boolean" },
+                    "pinned": { "type": "boolean" },
+                    "mode": { "type": "string", "enum": ["service", "dev"] }
+                }, "required": ["project"] } }),
+        json!({ "name": "set_volumes", "description": "Remplace les volumes montés en plus de /workspace (conteneur recréé). Séparés par des virgules : « /chemin » crée un volume dédié, « volume:/chemin » monte un volume existant (voir list_volumes). Un volume retiré n'est pas effacé.",
+                "inputSchema": { "type": "object", "properties": {
+                    "project": p, "volumes": { "type": "string", "description": "ex. \"/data, partage:/srv/shared\" ; vide = aucun" }
+                }, "required": ["project", "volumes"] } }),
+        json!({ "name": "list_volumes", "description": "Volumes DevHub du serveur, avec les projets qui les montent (orphelin = aucun).",
+                "inputSchema": { "type": "object", "properties": {} } }),
+        json!({ "name": "delete_volume", "description": "Supprime définitivement un volume orphelin (refusé s'il est monté). DEMANDE CONFIRMATION à l'utilisateur avant : les données sont perdues.",
+                "inputSchema": { "type": "object", "properties": { "volume": { "type": "string", "description": "Nom complet (devhub-vol-…) ou court" } }, "required": ["volume"] } }),
+        json!({ "name": "list_images", "description": "Images Docker : le catalogue « Mes images » (proposé à la création) et celles présentes sur le serveur, avec taille et projets qui les utilisent.",
+                "inputSchema": { "type": "object", "properties": {} } }),
+        json!({ "name": "pull_image", "description": "Télécharge une image Docker sur le serveur, en arrière-plan (ghcr.io privé : avec le compte GitHub connecté).",
+                "inputSchema": { "type": "object", "properties": { "image": { "type": "string" } }, "required": ["image"] } }),
+        json!({ "name": "save_catalog_image", "description": "Ajoute ou modifie une image de « Mes images » (téléchargée si absente).",
+                "inputSchema": { "type": "object", "properties": {
+                    "image": { "type": "string" },
+                    "label": { "type": "string", "description": "Nom affiché (défaut : tiré de l'image)" },
+                    "ports": { "type": "string", "description": "Ports par défaut, ex. \"3000, 19132/udp\"" },
+                    "volumes": { "type": "string", "description": "Chemins à garder dans un volume, ex. \"/data\"" },
+                    "service": { "type": "boolean", "default": true }
+                }, "required": ["image"] } }),
+        json!({ "name": "remove_catalog_image", "description": "Retire une image de « Mes images » (l'image reste sur le serveur).",
+                "inputSchema": { "type": "object", "properties": { "image": { "type": "string" } }, "required": ["image"] } }),
+        json!({ "name": "github_repos", "description": "Dépôts du compte GitHub connecté dans DevHub (pour git_url de create_project ; les privés sont clonés avec ce compte).",
+                "inputSchema": { "type": "object", "properties": {} } }),
         json!({ "name": "server_resources", "description": "Capacité du serveur (cœurs, RAM) et total alloué aux projets.",
                 "inputSchema": { "type": "object", "properties": {} } }),
         json!({ "name": "add_domain", "description": "Sert un projet sur un sous-domaine personnalisé : host = juste le nom (ex. \"new\" → new.<domaine racine>, voir l'URL renvoyée). port : un des ports exposés (défaut : le premier).",
@@ -156,10 +190,11 @@ enum Need {
 
 fn need(tool: &str) -> Need {
     match tool {
-        "create_project" | "delete_project" | "devhub_update" | "audit_log" | "list_templates" => Need::Admin,
+        "create_project" | "delete_project" | "devhub_update" | "audit_log" | "list_templates" | "list_volumes" | "delete_volume" | "list_images" | "pull_image"
+        | "save_catalog_image" | "remove_catalog_image" | "github_repos" => Need::Admin,
         "list_projects" | "server_resources" => Need::Nothing,
         "get_project" | "logs" => Need::See,
-        "project_action" | "set_ports" | "set_env" | "set_public" | "set_resources" | "add_domain" | "remove_domain" => Need::Manage,
+        "project_action" | "set_ports" | "set_env" | "set_public" | "set_resources" | "add_domain" | "remove_domain" | "update_project" | "set_volumes" => Need::Manage,
         _ => Need::Shell, // in-container tools
     }
 }
@@ -205,7 +240,9 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         .collect();
     let mut v = json!({
         "name": p.name, "state": crate::ops::shown_state(st, &p.name, &s.state), "build": crate::ops::build_text(st, &p.name), "template": p.template, "image": p.image, "git_url": p.git_url,
-        "public": p.public, "ports": ports,
+        "public": p.public, "ports": ports, "description": p.description, "autostart": p.autostart, "pinned": p.pinned,
+        "mode": if p.is_game() { "jeu" } else if p.service { "service" } else { "dev" },
+        "color": db::colors(&st.db.lock().unwrap(), std::slice::from_ref(&p.name)).get(&p.name).copied(),
         "volumes": p.mounts.iter().map(|m| json!({ "volume": m.volume, "path": m.path })).collect::<Vec<_>>(),
         "url": p.first_http().map(|_| proxy::url_for(st, &p.name, None)),
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
@@ -324,6 +361,117 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                 ops::apply(st, &project, c, "claude-admin").await?;
                 pretty(&project_json(st, &ops::load(st, &project)?, false).await)
             }
+            "update_project" => {
+                // Each field is its own change; the rename goes last so the others apply
+                // to the project under its current name.
+                let mut done = Vec::new();
+                if let Some(d) = a["description"].as_str() {
+                    ops::apply(st, &project, Change::Describe(d.to_string()), "claude-admin").await?;
+                    done.push("description");
+                }
+                if let Some(h) = a["color"].as_i64() {
+                    ops::apply(st, &project, Change::Color(h), "claude-admin").await?;
+                    done.push("couleur");
+                }
+                if let Some(on) = a["autostart"].as_bool() {
+                    ops::apply(st, &project, Change::Autostart(on), "claude-admin").await?;
+                    done.push("démarrage automatique");
+                }
+                if let Some(on) = a["pinned"].as_bool() {
+                    ops::apply(st, &project, Change::Pin(on), "claude-admin").await?;
+                    done.push("épinglage");
+                }
+                if let Some(m) = a["mode"].as_str() {
+                    if m != "service" && m != "dev" {
+                        return Err(format!("mode inconnu : {m} (service ou dev)"));
+                    }
+                    ops::apply(st, &project, Change::Launch { service: m == "service" }, "claude-admin").await?;
+                    done.push("mode de lancement");
+                }
+                let mut current = project.clone();
+                if let Some(n) = a["name"].as_str().map(|n| n.trim().to_ascii_lowercase()).filter(|n| *n != project) {
+                    ops::apply(st, &project, Change::Rename(n.clone()), "claude-admin").await?;
+                    done.push("nom");
+                    current = n;
+                }
+                if done.is_empty() {
+                    return Err("rien à changer : donne au moins un champ".into());
+                }
+                let mut v = project_json(st, &ops::load(st, &current)?, false).await;
+                v["changed"] = json!(done);
+                pretty(&v)
+            }
+            "set_volumes" => {
+                ops::apply(st, &project, Change::Volumes(s("volumes")), "claude-admin").await?;
+                pretty(&project_json(st, &ops::load(st, &project)?, false).await)
+            }
+            "list_volumes" => {
+                let projects = db::list_projects(&st.db.lock().unwrap()).map_err(|e| e.to_string())?;
+                let vols = crate::web::volumes::list(st).await;
+                pretty(&json!(vols
+                    .iter()
+                    .map(|v| {
+                        let used: Vec<Value> = crate::web::volumes::uses(&projects, &v.name).into_iter().map(|(p, path)| json!({ "project": p, "path": path })).collect();
+                        json!({ "volume": v.name, "short": v.name.strip_prefix(docker::VOLUME_PREFIX), "created": v.created, "orphan": used.is_empty(), "mounted_by": used })
+                    })
+                    .collect::<Vec<_>>()))
+            }
+            "delete_volume" => {
+                let v = s("volume");
+                let full = if v.starts_with(docker::VOLUME_PREFIX) { v } else { format!("{}{v}", docker::VOLUME_PREFIX) };
+                crate::web::volumes::remove(st, &full).await?;
+                audit(&full);
+                text(format!("Volume {full} supprimé"), false)
+            }
+            "list_images" => {
+                let projects = db::list_projects(&st.db.lock().unwrap()).map_err(|e| e.to_string())?;
+                let catalog = db::catalog(&st.db.lock().unwrap());
+                let local = crate::web::images::local(st).await;
+                let pulls = st.pulls.lock().unwrap().clone();
+                pretty(&json!({
+                    "catalog": catalog.iter().map(|c| json!({ "image": c.reference, "label": c.label, "ports": c.ports, "volumes": c.volumes, "service": c.service })).collect::<Vec<_>>(),
+                    "on_server": local.iter().map(|i| json!({
+                        "tags": i.tags, "size_mb": i.size / 1_048_576, "created": i.created,
+                        "system": i.tags.iter().any(|t| crate::web::images::is_system(t)),
+                        "used_by": projects.iter().filter(|p| i.tags.contains(&docker::with_tag(&p.image))).map(|p| p.name.clone()).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+                    "downloading": pulls,
+                }))
+            }
+            "pull_image" => {
+                let image = crate::web::images::reference(&s("image"))?;
+                crate::web::images::start_pull(st, &image);
+                audit(&image);
+                text(format!("Téléchargement de {image} lancé ; list_images montre l'avancement."), false)
+            }
+            "save_catalog_image" => {
+                let image = crate::web::images::reference(&s("image"))?;
+                let ports = s("ports");
+                ops::parse_ports(&ports)?;
+                let volumes = s("volumes");
+                if volumes.contains(':') {
+                    return Err("volumes : seulement des chemins, ex. /data".into());
+                }
+                ops::parse_volumes(&volumes, "x", &["/workspace"])?;
+                let volumes = volumes.split(',').map(|v| v.trim().trim_end_matches('/')).filter(|v| !v.is_empty()).collect::<Vec<_>>().join(", ");
+                let label = Some(s("label")).filter(|l| !l.trim().is_empty()).unwrap_or_else(|| image.rsplit('/').next().unwrap_or(&image).split([':', '@']).next().unwrap_or(&image).to_string());
+                let item = db::CatalogImage { reference: image.clone(), label: label.clone(), ports, service: a["service"].as_bool().unwrap_or(true), volumes };
+                db::catalog_save(&st.db.lock().unwrap(), &item).map_err(|e| e.to_string())?;
+                audit(&image);
+                if st.docker.inspect_image(&docker::with_tag(&image)).await.is_err() {
+                    crate::web::images::start_pull(st, &image);
+                }
+                text(format!("« {label} » ({image}) enregistrée dans Mes images"), false)
+            }
+            "remove_catalog_image" => {
+                db::catalog_remove(&st.db.lock().unwrap(), &s("image")).map_err(|e| e.to_string())?;
+                audit(&s("image"));
+                text(format!("{} retirée de Mes images", s("image")), false)
+            }
+            "github_repos" => match crate::github::cred() {
+                None => text("Aucun compte GitHub connecté : connecte-le dans Mon profil de DevHub.", true),
+                Some(c) => pretty(&json!({ "account": c.login, "repos": crate::github::repo_list().await })),
+            },
             "server_resources" => {
                 let (ncpu, mem_total) = docker::host_resources(&st.docker).await;
                 let def_mb = st.default_mb();

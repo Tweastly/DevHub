@@ -13,7 +13,7 @@ const PREFIX: &str = docker::VOLUME_PREFIX;
 
 pub(crate) struct Vol {
     pub name: String,
-    created: Option<i64>,
+    pub created: Option<i64>,
 }
 
 pub(crate) async fn list(st: &AppState) -> Vec<Vol> {
@@ -36,7 +36,7 @@ pub(crate) async fn list(st: &AppState) -> Vec<Vol> {
 }
 
 /// Where each volume is mounted: (project, path) pairs.
-fn uses<'a>(projects: &'a [Project], volume: &str) -> Vec<(&'a str, String)> {
+pub(crate) fn uses<'a>(projects: &'a [Project], volume: &str) -> Vec<(&'a str, String)> {
     let mut out = Vec::new();
     for p in projects {
         if p.main_volume() == volume {
@@ -235,7 +235,7 @@ fn in_use(st: &AppState, volume: &str) -> bool {
     !uses(&projects, volume).is_empty()
 }
 
-async fn remove(st: &AppState, volume: &str) -> Result<(), String> {
+pub(crate) async fn remove(st: &AppState, volume: &str) -> Result<(), String> {
     let short = volume.strip_prefix(PREFIX).ok_or("pas un volume DevHub")?;
     if in_use(st, volume) {
         return Err(format!("« {short} » est monté par un projet : retire-le de ses Paramètres d'abord."));

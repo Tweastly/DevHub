@@ -230,7 +230,12 @@ pub async fn disconnect(State(st): State<AppState>, jar: CookieJar) -> Result<Re
 /// of "Nouveau projet".
 pub async fn repos(State(st): State<AppState>, jar: CookieJar) -> Result<axum::Json<Vec<serde_json::Value>>, Response> {
     auth::require_admin(&st, &jar)?;
-    let Some(c) = cred() else { return Ok(axum::Json(vec![])) };
+    Ok(axum::Json(repo_list().await))
+}
+
+/// The connected account's repositories: name, clone URL, private (empty when none is connected).
+pub async fn repo_list() -> Vec<serde_json::Value> {
+    let Some(c) = cred() else { return vec![] };
     #[derive(Deserialize)]
     struct Repo {
         full_name: String,
@@ -241,5 +246,5 @@ pub async fn repos(State(st): State<AppState>, jar: CookieJar) -> Result<axum::J
         Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
         _ => vec![],
     };
-    Ok(axum::Json(list.into_iter().map(|r| serde_json::json!({ "name": r.full_name, "url": r.clone_url, "private": r.private })).collect()))
+    list.into_iter().map(|r| serde_json::json!({ "name": r.full_name, "url": r.clone_url, "private": r.private })).collect()
 }
