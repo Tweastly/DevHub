@@ -24,6 +24,9 @@ pub const AUTO_SETTING: &str = "auto_deploy";
 /// How often the branch head is polled when automatic deployment is on. Conditional
 /// requests (ETag) answered 304 don't count against GitHub's rate limit.
 const WATCH_EVERY: Duration = Duration::from_secs(20);
+/// Without a token GitHub allows 60 API calls an hour per IP: a slower watch keeps room
+/// for the full checks.
+const WATCH_EVERY_ANON: Duration = Duration::from_secs(90);
 const CHECK_EVERY: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone)]
@@ -229,9 +232,19 @@ pub fn spawn_periodic(st: AppState) {
                 last_check = db::now();
             }
             if auto_deploy(&st) {
-                if let Ok(Some((sha, tag))) = branch_head(etag.as_deref()).await {
-                    remote = Some(sha);
-                    etag = Some(tag);
+                let mut pause = if token().is_some() { WATCH_EVERY } else { WATCH_EVERY_ANON };
+                match branch_head(etag.as_deref()).await {
+                    Ok(Some((sha, tag))) => {
+                        remote = Some(sha);
+                        etag = Some(tag);
+                    }
+                    Ok(None) => {}
+                    // Rate limited: wait for GitHub's reset instead of failing silently.
+                    Err(Watch::Limited(wait)) => {
+                        tracing::warn!("GitHub limite les requêtes : surveillance en pause {} s", wait.as_secs());
+                        pause = wait;
+                    }
+                    Err(Watch::Other(e)) => tracing::warn!("surveillance de la branche : {e:#}"),
                 }
                 let local = running_head().ok().map(|h| h.0);
                 if let (Some(r), Some(l)) = (&remote, &local) {
@@ -245,7 +258,7 @@ pub fn spawn_periodic(st: AppState) {
                         }
                     }
                 }
-                tokio::time::sleep(WATCH_EVERY).await;
+                tokio::time::sleep(pause).await;
             } else {
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
@@ -254,7 +267,19 @@ pub fn spawn_periodic(st: AppState) {
 }
 
 /// Head sha of the branch, or Ok(None) when unchanged since `etag` (HTTP 304).
-async fn branch_head(etag: Option<&str>) -> anyhow::Result<Option<(String, String)>> {
+enum Watch {
+    /// GitHub's rate limit is reached: how long until it resets.
+    Limited(Duration),
+    Other(anyhow::Error),
+}
+
+impl<E: Into<anyhow::Error>> From<E> for Watch {
+    fn from(e: E) -> Self {
+        Watch::Other(e.into())
+    }
+}
+
+async fn branch_head(etag: Option<&str>) -> Result<Option<(String, String)>, Watch> {
     let dir = repo_dir();
     let (_, branch) = local_head(&dir)?;
     let slug = github_slug(&dir).context("dépôt GitHub introuvable")?;
@@ -267,6 +292,11 @@ async fn branch_head(etag: Option<&str>) -> anyhow::Result<Option<(String, Strin
     let resp = req.send().await?;
     if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
         return Ok(None);
+    }
+    let h = |k: &str| resp.headers().get(k).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<i64>().ok());
+    if matches!(resp.status().as_u16(), 403 | 429) && h("x-ratelimit-remaining") == Some(0) {
+        let wait = h("x-ratelimit-reset").map(|r| r - db::now()).unwrap_or(600).clamp(30, 3600);
+        return Err(Watch::Limited(Duration::from_secs(wait as u64 + 5)));
     }
     let resp = resp.error_for_status()?;
     let tag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
