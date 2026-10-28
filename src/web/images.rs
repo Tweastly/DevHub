@@ -95,7 +95,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                                 None => form.inline method="post" action="/images/pull" { input type="hidden" name="image" value=(c.reference); button.btn.sm { "Télécharger" } },
                             }
                             a.btn.sm.primary href=(new_link(c)) { "Créer un projet" }
-                            form.inline method="post" action="/images/catalog/remove" onsubmit="return confirm('Retirer cette image du catalogue ? Elle reste sur le serveur.')" {
+                            form.inline method="post" action="/images/catalog/remove" data-confirm={"Retirer " (c.label) " du catalogue ?"} data-confirm-body="Elle ne sera plus proposée dans « Nouveau projet ». L'image reste sur le serveur et les projets qui l'utilisent continuent de tourner." data-tone="neutral" data-confirm-ok="Retirer" {
                                 input type="hidden" name="image" value=(c.reference);
                                 button.icon-btn.sm.bare type="submit" title="Retirer du catalogue" aria-label={"Retirer " (c.label) " du catalogue"} { (icon_c("x", "sm")) }
                             }
@@ -119,7 +119,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     h3 { "Sur le serveur" }
                     span.sub { (images.len()) " image" @if images.len() > 1 { "s" } " · " (human(total)) }
                     div.end {
-                        form.inline method="post" action="/images/prune" onsubmit="return confirm('Supprimer les images qu\\'aucun conteneur n\\'utilise et qui n\\'ont plus de nom ? Les images nommées restent.')" {
+                        form.inline method="post" action="/images/prune" data-confirm="Nettoyer les images inutilisées ?" data-confirm-body="Supprime les images sans nom qu'aucun conteneur n'utilise (anciennes versions). Les images nommées restent." data-tone="neutral" data-confirm-ok="Nettoyer" {
                             button.btn.sm { "Nettoyer" @if unused > 0 { " (" (unused) ")" } }
                         }
                     }
@@ -153,7 +153,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                                             }
                                         }
                                         @if !system && used.is_empty() {
-                                            form.inline method="post" action="/images/remove" onsubmit="return confirm('Supprimer cette image du serveur ? Elle sera retéléchargée si un projet en a besoin.')" {
+                                            form.inline method="post" action="/images/remove" data-confirm={"Supprimer " (i.tags.first().cloned().unwrap_or_else(|| "cette image".into())) " du serveur ?"} data-confirm-body={"Libère " (human(i.size)) ". Aucun projet ne l'utilise ; elle sera retéléchargée si un projet en a besoin."} data-tone="neutral" data-confirm-ok="Supprimer l'image" {
                                                 input type="hidden" name="id" value=(i.id);
                                                 button.icon-btn.sm.bare type="submit" title="Supprimer du serveur" aria-label="Supprimer l'image" { (icon_c("trash", "sm")) }
                                             }

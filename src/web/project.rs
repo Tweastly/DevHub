@@ -116,10 +116,10 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                     }
                     @if manage && x.s.state == "absent" { (build_button(ctx, n, &here, "")) }
                     @if manage && x.s.state != "absent" {
-                        form.inline method="post" action={(base) "/rebuild"} onsubmit="return confirm('Recréer le conteneur ? /workspace est conservé.')" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { "Recréer" } }
+                        form.inline method="post" action={(base) "/rebuild"} data-confirm={"Recréer le conteneur de " (n) " ?"} data-confirm-body="Il est supprimé puis recréé depuis son image : /workspace est gardé, ce qui a été installé ailleurs est perdu. Quelques secondes d'interruption." data-tone="warn" data-confirm-ok="Recréer" title="Recrée le conteneur, garde /workspace" { (back_field(&here)) button.btn { "Recréer" } }
                     }
                     @if manage && running {
-                        form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { (back_field(&here)) button.btn.danger-outline { "Arrêter" } }
+                        form.inline method="post" action={(base) "/stop"} data-confirm={"Arrêter " (n) " ?"} data-confirm-body="Le conteneur s'arrête, ses fichiers restent. Ses adresses affichent « Projet arrêté » jusqu'au redémarrage." data-tone="neutral" data-confirm-ok="Arrêter" { (back_field(&here)) button.btn.danger-outline { "Arrêter" } }
                     }
                 }
             }
@@ -254,7 +254,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         div.copy { code { (mcp_url) } (copy_btn(&mcp_url)) }
                         p.help.row.tight style="margin-top:12px" { (icon_c("alert", "sm")) "Cette URL est secrète et ne donne accès qu'à ce conteneur. Si elle fuite, régénère-la." }
                         div.row style="margin-top:14px" {
-                            form.inline method="post" action={(base) "/rotate-token"} onsubmit="return confirm('L’ancienne URL cessera de fonctionner. Continuer ?')" { (back_field(&base)) button.btn.sm { "Régénérer l'URL" } }
+                            form.inline method="post" action={(base) "/rotate-token"} data-confirm={"Régénérer l'URL MCP de " (n) " ?"} data-confirm-body="L'ancienne URL cesse de fonctionner tout de suite : il faudra coller la nouvelle dans Claude." data-tone="warn" data-confirm-ok="Régénérer" { (back_field(&base)) button.btn.sm { "Régénérer l'URL" } }
                             span.dim style="font-size:12px" { @if let Some(t) = x.p.mcp_last_used { "Utilisée " (ago(t)) } @else { "Jamais utilisée" } }
                         }
                     }
@@ -407,7 +407,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                                 }
                                 span.hide-m role="cell" { (state(*o)) }
                                 @if manages {
-                                    form.inline method="post" action={(base) "/port-remove"} onsubmit={"return confirm('Retirer le port " (m.container) " ? Le conteneur est recréé, les fichiers sont gardés.')"} {
+                                    form.inline method="post" action={(base) "/port-remove"} data-confirm={"Retirer le port " (m.container) " ?"} data-confirm-body="Son adresse ne répondra plus. Le conteneur est recréé, les fichiers sont gardés." data-tone="warn" data-confirm-ok="Retirer le port" {
                                         (back_field(&here)) input type="hidden" name="spec" value=(m.spec());
                                         button.icon-btn.sm.bare type="submit" title="Retirer" aria-label={"Retirer le port " (m.container)} { (icon_c("x", "sm")) }
                                     }
@@ -419,7 +419,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                 @if manages {
                     details.nadd open[err.is_some() && q.contains_key("port")] {
                         summary { (icon_c("plus", "sm")) "Ajouter un port" }
-                        form.row method="post" action={(base) "/port-add"} onsubmit="return confirm('Ajouter ce port recrée le conteneur (les fichiers sont gardés). Continuer ?')" {
+                        form.row method="post" action={(base) "/port-add"} data-confirm="Ajouter ce port ?" data-confirm-body="Un port TCP ou UDP est ouvert à tout Internet, sans passkey. Le conteneur est recréé, les fichiers sont gardés." data-tone="warn" data-confirm-ok="Ajouter le port" {
                             (back_field(&here))
                             div.seg.radio role="radiogroup" aria-label="Type de port" {
                                 @for (v, l) in [("web", "Site web"), ("tcp", "TCP"), ("udp", "UDP")] {
@@ -451,7 +451,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                                 a.mono href={"https://" (h)} target="_blank" rel="noopener" { (h) }
                                 span.dim { "→ :" (port) }
                                 @if manages {
-                                    form.inline method="post" action={(base) "/domain-remove"} onsubmit="return confirm('Retirer ce sous-domaine ?')" {
+                                    form.inline method="post" action={(base) "/domain-remove"} data-confirm={"Retirer " (h) " ?"} data-confirm-body={"Cette adresse ne mènera plus à " (n) ". Tu pourras la rajouter plus tard."} data-tone="neutral" data-confirm-ok="Retirer" {
                                         (back_field(&here)) input type="hidden" name="host" value=(h);
                                         button type="submit" aria-label={"Retirer " (h)} { (icon_c("x", "sm")) }
                                     }
@@ -771,7 +771,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 @if !x.p.is_game() {
                     div.card #launch {
                         div.card-h { h3 { "Lancement" } span.sub { "ce que le conteneur fait au démarrage" } }
-                        form.card-b method="post" action={(base) "/launch"} onsubmit="return confirm('Changer le mode recrée le conteneur (/workspace est conservé). Continuer ?')" {
+                        form.card-b method="post" action={(base) "/launch"} data-confirm="Changer le mode de lancement ?" data-confirm-body="Le conteneur est recréé avec le nouveau mode. /workspace est gardé." data-tone="warn" data-confirm-ok="Changer le mode" {
                             (back_field(&format!("{here}#launch")))
                             div.access {
                                 label.tile {
@@ -805,7 +805,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                                     }
                                     span.acts {
                                         button.btn.sm.ghost type="button" data-env-edit=(k) data-env-value=[(!is_secret(k)).then_some(v.as_str())] { "Modifier" }
-                                        form.inline method="post" action={(base) "/env-remove"} onsubmit={"return confirm('Supprimer " (k) " ? Le conteneur est recréé.')"} {
+                                        form.inline method="post" action={(base) "/env-remove"} data-confirm={"Supprimer " (k) " ?"} data-confirm-body="Le conteneur est recréé sans cette variable. Si l'app en a besoin, elle peut ne plus démarrer." data-tone="warn" data-confirm-ok="Supprimer la variable" {
                                             (back_field(&format!("{here}#env")))
                                             input type="hidden" name="key" value=(k);
                                             button.btn.sm.ghost style="color:var(--err)" { "Supprimer" }
@@ -823,7 +823,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     }
                     div.card-f {
                         span.help style="margin:0" { "Astuce : colle une ligne " code { "CLE=valeur" } " dans « Nom », elle se découpe toute seule. Chaque changement recrée le conteneur (" code { "/workspace" } " est conservé)." }
-                        form method="post" action={(base) "/env"} onsubmit="return confirm('Appliquer les variables recrée le conteneur. Continuer ?')" {
+                        form method="post" action={(base) "/env"} data-confirm="Appliquer les variables ?" data-confirm-body="Le conteneur est recréé pour les prendre en compte, les fichiers sont gardés." data-tone="warn" data-confirm-ok="Appliquer" {
                             (back_field(&format!("{here}#env")))
                             details #envraw style="margin-top:12px" {
                                 summary style="cursor:pointer;font-weight:500;font-size:13px;margin-bottom:10px" { "Modifier en texte brut (coller un .env entier)" }
@@ -838,7 +838,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     div.card-h { (icon("alert")) h3 { "Zone dangereuse" } }
                     div.card-b {
                         b { "Supprimer " (n) } p.muted style="margin:4px 0 14px" { "Le conteneur, ses ports et ses sous-domaines sont supprimés. Cette action est définitive." }
-                        form method="post" action={(base) "/delete"} onsubmit="return confirm('Supprimer définitivement ce projet ?')" {
+                        form method="post" action={(base) "/delete"} data-confirm={"Supprimer définitivement " (n) " ?"} data-confirm-body="Le conteneur, son réseau, ses adresses et son URL MCP disparaissent. Le volume suit la case cochée ci-dessus." data-tone="danger" data-confirm-ok="Supprimer le projet" {
                             (back_field("/projects"))
                             label.row.tight style="margin-bottom:14px" { input type="checkbox" name="keep_data" value="1" checked; "Garder le volume de données (" code { "/workspace" } @if x.s.state == "running" { span data-fetch-text={(base) "/workspace-size"} {} } ")" }
                             label.field style="max-width:360px" { span.lbl { "Tape " code style="color:var(--err)" { (n) } " pour confirmer" } input.mono-input name="confirm" required pattern=(regex_escape(n)) placeholder=(n) autocomplete="off"; }

@@ -263,6 +263,16 @@ pub fn auto_deploy(st: &AppState) -> bool {
 /// and a deployment as soon as it moves.
 pub fn spawn_periodic(st: AppState) {
     let _ = running_head();
+    tokio::spawn({
+        let st = st.clone();
+        async move {
+            // The update that restarted DevHub ends a few seconds later (Caddy reload).
+            for _ in 0..12 {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                finalize(&st).await;
+            }
+        }
+    });
     tokio::spawn(prepare_git_image(st.clone()));
     tokio::spawn(async move {
         let mut last_check = 0;
@@ -397,6 +407,7 @@ pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Respons
 }
 
 pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
+    finalize(st).await;
     let d = &st.docker;
     let me = st.cfg.self_container.as_deref().context("mise à jour possible seulement quand DevHub tourne via docker compose")?;
     let me_info = d.inspect_container(me, None::<InspectContainerOptions>).await?;
@@ -486,8 +497,103 @@ step "terminé""#;
     };
     d.create_container(Some(CreateContainerOptions { name: UPDATER, platform: None }), cfg).await?;
     d.start_container::<String>(UPDATER, None).await?;
-    st.update.lock().unwrap().running = true;
+    let (sha, message) = {
+        let mut i = st.update.lock().unwrap();
+        i.running = true;
+        let sha = i.target.clone().map(|t| t[..7.min(t.len())].to_string()).unwrap_or_default();
+        (sha, i.pending.first().map(|p| p.message.clone()).unwrap_or_default())
+    };
+    let _ = db::deploy_start(&st.db.lock().unwrap(), &sha, &message);
     Ok(())
+}
+
+/// Records how the last update ended, once its helper container has exited: success,
+/// binary or server build, and the error lines when it failed.
+pub async fn finalize(st: &AppState) {
+    let Some(last) = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next() else { return };
+    if last.finished_at.is_some() {
+        return;
+    }
+    let d = &st.docker;
+    let Ok(c) = d.inspect_container(UPDATER, None::<InspectContainerOptions>).await else {
+        // Helper gone (removed by hand): judge by the version that runs.
+        let ok = running_head().map(|(h, _)| h.starts_with(&last.sha)).unwrap_or(false);
+        let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, db::now(), ok, "", if ok { "" } else { "mise à jour interrompue" });
+        return;
+    };
+    let state = c.state.unwrap_or_default();
+    if state.running.unwrap_or(false) {
+        return;
+    }
+    let log = full_log(st).await;
+    let ok = state.exit_code == Some(0) && log.contains("== terminé");
+    let method = if log.contains("binaire précompilé par GitHub") { "binaire GitHub" } else { "compilé" };
+    let finished = state.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339).unwrap_or_else(db::now);
+    let error = if ok { String::new() } else { error_excerpt(&log) };
+    let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, finished, ok, method, &error);
+}
+
+async fn full_log(st: &AppState) -> String {
+    let mut s = st.docker.logs::<String>(UPDATER, Some(LogsOptions { stdout: true, stderr: true, tail: "2000".into(), ..Default::default() }));
+    let mut out = String::new();
+    while let Some(Ok(l)) = s.next().await {
+        out.push_str(&l.to_string());
+    }
+    out
+}
+
+/// The lines that explain a failed update (errors, or else the last lines).
+fn error_excerpt(log: &str) -> String {
+    let lines: Vec<&str> = log.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let errs: Vec<&str> = lines.iter().copied().filter(|l| { let x = l.to_lowercase(); x.contains("error") || x.contains("fatal") || x.contains("failed") || x.contains("denied") || x.contains("no space") }).collect();
+    let pick = if errs.is_empty() { &lines[lines.len().saturating_sub(4)..] } else { &errs[errs.len().saturating_sub(4)..] };
+    pick.join("\n")
+}
+
+/// One step of an update as the page shows it.
+pub struct Step {
+    pub label: &'static str,
+    pub detail: String,
+    /// "done", "now", "fail" or "todo".
+    pub state: &'static str,
+}
+
+/// The five steps of an update, read from the helper's log ("== step (N s)" lines and
+/// compose's output). `failed`: the update ended in error, at the step it reached.
+pub fn steps(log: &str, failed: bool) -> Vec<Step> {
+    let mark = |needle: &str| log.lines().find(|l| l.contains(needle)).and_then(|l| l.rsplit_once('(')).and_then(|(_, r)| r.trim_end_matches(|c| c == ')' || c == ' ').trim_end_matches(" s").trim().parse::<i64>().ok());
+    let built = log.contains("binaire précompilé par GitHub") || log.contains("pas de binaire précompilé");
+    let reached = [
+        log.contains("== récupération du code"),
+        log.contains("== reconstruction de DevHub"),
+        log.contains("Recreate") || log.contains("Recreated"),
+        log.contains("== rechargement de Caddy"),
+        log.contains("== terminé"),
+    ];
+    let t_build = mark("== reconstruction de DevHub");
+    let t_caddy = mark("== rechargement de Caddy");
+    let t_end = mark("== terminé");
+    let secs = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(a), Some(b)) if b >= a => format!("{} s", b - a), _ => String::new() };
+    let method = if log.contains("binaire précompilé par GitHub") { "binaire GitHub" } else if built { "compilation" } else { "" };
+    let details = [
+        format!("git pull{}", t_build.map(|t| format!(" · {t} s")).unwrap_or_default()),
+        [method.to_string(), secs(t_build, t_caddy)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
+        "devhub et caddy".to_string(),
+        secs(t_caddy, t_end),
+        "nouvelle version".to_string(),
+    ];
+    let labels = ["Code récupéré", "Construction", "Redémarrage", "Caddy rechargé", "En ligne"];
+    // The current step is the last one reached that has no successor yet.
+    let current = reached.iter().rposition(|r| *r).map(|i| if reached[4] { 5 } else { i }).unwrap_or(0);
+    labels
+        .iter()
+        .enumerate()
+        .map(|(i, l)| Step {
+            label: l,
+            detail: details[i].clone(),
+            state: if i < current { "done" } else if i == current && current < 5 { if failed { "fail" } else { "now" } } else { "todo" },
+        })
+        .collect()
 }
 
 /// Updates the "running / last log" part of the shared info (for the update page).
@@ -537,4 +643,33 @@ pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
     });
     let s = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|e| (Ok::<_, std::convert::Infallible>(e), rx)) });
     Sse::new(s).keep_alive(KeepAlive::default()).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::steps;
+
+    const LOG: &str = "== récupération du code (0 s)\nUpdating 6ee7269..bc49915\n== pas de binaire précompilé pour ce commit : compilation sur le serveur (dépendances en cache)\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n Container devhub  Recreate\n Container devhub  Recreated\n Container devhub  Started\n== rechargement de Caddy (49 s)\n== terminé (50 s)\n";
+
+    fn states(log: &str, failed: bool) -> Vec<&'static str> {
+        steps(log, failed).iter().map(|s| s.state).collect()
+    }
+
+    #[test]
+    fn finished_update_is_all_done() {
+        assert_eq!(states(LOG, false), ["done"; 5]);
+        assert_eq!(steps(LOG, false)[1].detail, "compilation · 47 s");
+    }
+
+    #[test]
+    fn running_build_is_the_current_step() {
+        let log = &LOG[..LOG.find("#27").unwrap()];
+        assert_eq!(states(log, false), ["done", "now", "todo", "todo", "todo"]);
+    }
+
+    #[test]
+    fn failed_build_marks_its_step() {
+        let log = &LOG[..LOG.find("#27").unwrap()];
+        assert_eq!(states(log, true), ["done", "fail", "todo", "todo", "todo"]);
+    }
 }

@@ -49,7 +49,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                             }
                             @if only_one { div.dim style="font-size:12px;margin-top:2px" { "Impossible de retirer ton dernier passkey : tu ne pourrais plus te connecter." } }
                         }
-                        form.inline method="post" action={"/security/" (k.id) "/delete"} onsubmit="return confirm('Retirer ce passkey ? Cet appareil ne pourra plus se connecter.')" {
+                        form.inline method="post" action={"/security/" (k.id) "/delete"} data-confirm={"Retirer le passkey « " (k.name) " » ?"} data-confirm-body="Cet appareil ne pourra plus se connecter. Garde au moins un autre passkey sous la main." data-tone="danger" data-confirm-ok="Retirer le passkey" {
                             button.btn.sm disabled[only_one] { "Retirer" }
                         }
                     }

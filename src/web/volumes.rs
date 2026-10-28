@@ -62,7 +62,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 span.sub { (vols.len()) " volume" @if vols.len() > 1 { "s" } " · " span data-vsize="_total" { "taille…" } }
                 @if orphans > 0 {
                     div.end {
-                        form.inline method="post" action="/volumes/prune" onsubmit={"return confirm('Supprimer définitivement les " (orphans) " volume(s) orphelin(s) et toutes leurs données ?')"} {
+                        form.inline method="post" action="/volumes/prune" data-confirm={"Supprimer les " (orphans) " volume(s) orphelin(s) ?"} data-confirm-body="Leurs données sont effacées pour de bon." data-tone="danger" data-confirm-ok="Supprimer" data-confirm-type="supprimer" {
                             button.btn.sm.danger-outline { "Supprimer les " (orphans) " orphelin" @if orphans > 1 { "s" } }
                         }
                     }
@@ -91,7 +91,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                                     @if let Some(p) = p {
                                         a.btn.sm.ghost href={"/projects/" (p.name) "/files"} { "Fichiers" }
                                     } @else {
-                                        form.inline method="post" action={"/volumes/" (v.project) "/delete"} onsubmit={"return confirm('Supprimer définitivement le volume de « " (v.project) " » et toutes ses données ?')"} {
+                                        form.inline method="post" action={"/volumes/" (v.project) "/delete"} data-confirm={"Supprimer le volume de " (v.project) " ?"} data-confirm-body="Ses données sont effacées pour de bon. Il ne pourra plus être récupéré en recréant le projet." data-tone="danger" data-confirm-ok="Supprimer le volume" data-confirm-type=(v.project) {
                                             button.btn.sm.danger-outline { "Supprimer" }
                                         }
                                     }

@@ -87,7 +87,7 @@ fn row_actions(ctx: &Ctx, r: &Row, back: &str) -> Markup {
             div.row.end { a.btn.sm href=(base) { "Ouvrir" } }
         } @else if r.s.state == "running" {
             div.row.tight.end {
-                form.inline method="post" action={(base) "/stop"} onsubmit="return confirm('Arrêter ce projet ?')" { input type="hidden" name="back" value=(back); button.btn.sm.danger-outline { "Arrêter" } }
+                form.inline method="post" action={(base) "/stop"} data-confirm={"Arrêter " (r.p.name) " ?"} data-confirm-body="Le conteneur s'arrête, ses fichiers restent. Ses adresses affichent « Projet arrêté » jusqu'au redémarrage." data-tone="neutral" data-confirm-ok="Arrêter" { input type="hidden" name="back" value=(back); button.btn.sm.danger-outline { "Arrêter" } }
                 form.inline method="post" action={(base) "/restart"} { input type="hidden" name="back" value=(back); button.btn.sm { "Redémarrer" } }
             }
         } @else if r.s.state == "absent" {
@@ -121,11 +121,11 @@ fn bulk_bar(ctx: &Ctx) -> Markup {
             button.btn.sm name="action" value="start" { (icon_c("play", "sm")) "Démarrer" }
             button.btn.sm name="action" value="stop" { "Arrêter" }
             button.btn.sm name="action" value="restart" { (icon_c("refresh", "sm")) "Redémarrer" }
-            button.btn.sm name="action" value="rebuild" data-confirm="Recréer les conteneurs sélectionnés ? Leurs données sont gardées." { "Recréer" }
+            button.btn.sm name="action" value="rebuild" data-confirm="Recréer les conteneurs sélectionnés ?" data-confirm-body="Chacun est recréé depuis son image ; les volumes sont gardés. Ils seront indisponibles quelques secondes." data-tone="warn" data-confirm-ok="Recréer" { "Recréer" }
             @if ctx.profile.admin {
                 span.sep {}
                 label.row.tight.keep { input type="checkbox" name="keep_data" value="1" checked; "garder les données" }
-                button.btn.sm.danger-outline name="action" value="delete" data-confirm="Supprimer définitivement les projets sélectionnés ?" { "Supprimer" }
+                button.btn.sm.danger-outline name="action" value="delete" data-confirm="Supprimer définitivement les projets sélectionnés ?" data-confirm-body="Leurs conteneurs, réseaux, adresses et URL MCP disparaissent. Les volumes suivent la case « garder les données »." data-tone="danger" data-confirm-ok="Supprimer" data-confirm-type="supprimer" { "Supprimer" }
             }
             button.icon-btn.sm.bare.end type="button" data-pick-cancel title="Annuler la sélection" aria-label="Annuler la sélection" { (icon_c("x", "sm")) }
         }

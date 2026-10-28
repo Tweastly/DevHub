@@ -87,6 +87,8 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS domains(host TEXT PRIMARY KEY, project TEXT NOT NULL, port INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS deploys(id INTEGER PRIMARY KEY, sha TEXT NOT NULL, message TEXT NOT NULL, started_at INTEGER NOT NULL,
+            finished_at INTEGER, ok INTEGER, method TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '');
          CREATE TABLE IF NOT EXISTS project_colors(name TEXT PRIMARY KEY, hue INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS images(ref TEXT PRIMARY KEY, label TEXT NOT NULL, ports TEXT NOT NULL DEFAULT '', service INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
@@ -823,4 +825,46 @@ pub fn colors(c: &Connection, names: &[String]) -> std::collections::HashMap<Str
 
 pub fn forget_color(c: &Connection, name: &str) {
     let _ = c.execute("DELETE FROM project_colors WHERE name=?1", [name]);
+}
+
+/// One DevHub update: started from the Mise à jour page or the automatic deployment.
+#[derive(Clone)]
+pub struct Deploy {
+    pub id: i64,
+    pub sha: String,
+    pub message: String,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub ok: Option<bool>,
+    /// "binaire GitHub" or "compilé".
+    pub method: String,
+    pub error: String,
+}
+
+pub fn deploy_start(c: &Connection, sha: &str, message: &str) -> anyhow::Result<()> {
+    c.execute("INSERT INTO deploys(sha, message, started_at) VALUES (?1,?2,?3)", params![sha, message, now()])?;
+    Ok(())
+}
+
+pub fn deploy_finish(c: &Connection, id: i64, finished_at: i64, ok: bool, method: &str, error: &str) -> anyhow::Result<()> {
+    c.execute("UPDATE deploys SET finished_at=?2, ok=?3, method=?4, error=?5 WHERE id=?1", params![id, finished_at, ok as i64, method, error])?;
+    Ok(())
+}
+
+pub fn deploys(c: &Connection, limit: i64) -> Vec<Deploy> {
+    let Ok(mut s) = c.prepare("SELECT id, sha, message, started_at, finished_at, ok, method, error FROM deploys ORDER BY id DESC LIMIT ?1") else { return vec![] };
+    s.query_map([limit], |r| {
+        Ok(Deploy {
+            id: r.get(0)?,
+            sha: r.get(1)?,
+            message: r.get(2)?,
+            started_at: r.get(3)?,
+            finished_at: r.get(4)?,
+            ok: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
+            method: r.get(6)?,
+            error: r.get(7)?,
+        })
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
 }

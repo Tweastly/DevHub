@@ -102,6 +102,74 @@
   });
   addEventListener('popstate', () => go(location.href, false));
 
+  // ---------- Confirmations: DevHub's own dialog instead of the browser's ----------
+  // A form (or its submit button) declares it: data-confirm (title), data-confirm-body,
+  // data-tone (neutral | warn | danger), data-confirm-ok (button label), and optionally
+  // data-confirm-type (a word to type first) or data-prompt / data-prompt-field /
+  // data-prompt-value (a value to enter, written into that field of the form).
+  const ICONS = {
+    neutral: '<path d="M12 11v5M12 8h.01"/><circle cx="12" cy="12" r="9"/>',
+    warn: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
+    danger: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  };
+  function ask(src, form) {
+    return new Promise(resolve => {
+      const d = src.dataset, tone = d.tone || 'neutral';
+      const items = form.id === 'bulk' ? $$('[data-pick]').filter(x => x.checked).map(x => x.value) : (d.confirmItems || '').split(',').map(x => x.trim()).filter(Boolean);
+      const dlg = document.createElement('dialog');
+      dlg.className = 'cdlg ' + tone;
+      dlg.innerHTML = '<form method="dialog"><div class="cdlg-h"><span class="cdlg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICONS[tone] + '</svg></span>' +
+        '<div><h2></h2><p></p></div></div><div class="cdlg-items" hidden></div><label class="cdlg-field" data-f="prompt" hidden><span></span><input autocomplete="off"></label>' +
+        '<label class="cdlg-field" data-f="type" hidden><span>Pour confirmer, tape <b></b></span><input autocomplete="off" spellcheck="false"></label>' +
+        '<div class="cdlg-ft"><span class="cdlg-esc">Échap pour annuler</span><button type="button" class="btn" value="no">Annuler</button><button class="btn ok" value="ok"></button></div></form>';
+      $('h2', dlg).textContent = d.confirm;
+      $('p', dlg).textContent = d.confirmBody || '';
+      $('p', dlg).hidden = !d.confirmBody;
+      if (items.length) { const box = $('.cdlg-items', dlg); box.hidden = false; items.forEach(n => { const c = document.createElement('span'); c.textContent = n; box.append(c); }); }
+      const ok = $('.ok', dlg); ok.textContent = d.confirmOk || 'Confirmer';
+      const pf = $('[data-f=prompt]', dlg), tf = $('[data-f=type]', dlg);
+      if (d.prompt) { pf.hidden = false; $('span', pf).textContent = d.prompt; $('input', pf).value = d.promptValue || ''; }
+      if (d.confirmType) {
+        tf.hidden = false; $('b', tf).textContent = d.confirmType; $('input', tf).placeholder = d.confirmType;
+        const check = () => { ok.disabled = $('input', tf).value.trim() !== d.confirmType; };
+        $('input', tf).addEventListener('input', check); check();
+      }
+      let done = false;
+      const finish = v => { if (done) return; done = true; dlg.close(); dlg.remove(); resolve(v); };
+      $('[value=no]', dlg).addEventListener('click', () => finish(false));
+      dlg.addEventListener('cancel', e => { e.preventDefault(); finish(false); });
+      dlg.addEventListener('click', e => { if (e.target === dlg) finish(false); });
+      $('form', dlg).addEventListener('submit', e => {
+        e.preventDefault();
+        if (ok.disabled) return;
+        if (d.prompt) {
+          const v = $('input', pf).value.trim();
+          if (!v || v === (d.promptValue || '')) return finish(false);
+          form.elements[d.promptField].value = v;
+        }
+        finish(true);
+      });
+      document.body.append(dlg);
+      dlg.showModal();
+      // Destructive: focus stays on Annuler; otherwise on the field or the main button.
+      ($('input:not([hidden])', d.prompt ? pf : d.confirmType ? tf : dlg) || (tone === 'danger' ? $('[value=no]', dlg) : ok)).focus();
+      if (d.prompt) $('input', pf).select();
+    });
+  }
+  document.addEventListener('submit', e => {
+    const f = e.target, b = e.submitter;
+    if (f.dataset.confirmed) { delete f.dataset.confirmed; return; }
+    const src = b?.dataset.confirm ? b : f.dataset.confirm ? f : null;
+    if (!src || e.defaultPrevented) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    ask(src, f).then(yes => {
+      if (!yes) return;
+      f.dataset.confirmed = 1;
+      f.requestSubmit(b && b.form === f ? b : undefined);
+    });
+  }, true);
+
   // ---------- Action buttons (POST forms) without reloading the page ----------
   // The form is sent in the background; the answer (the page the server redirects to)
   // replaces the current one in place, keeping the scroll, and its message shows as a toast.
@@ -234,10 +302,6 @@
       $('[data-pick-all]', bar).addEventListener('click', () => { const all = picks().every(x => x.checked); picks().forEach(x => { x.checked = !all; }); update(); });
       $('[data-pick-cancel]', bar).addEventListener('click', () => setMode(false));
       $('[data-back]', bar).value = location.pathname + location.search;
-      bar.addEventListener('submit', e => {
-        const b = e.submitter, names = picks().filter(x => x.checked).map(x => x.value);
-        if (b?.dataset.confirm && !confirm(b.dataset.confirm + '\n\n' + names.join(', '))) e.preventDefault();
-      });
     }
     // Images page: reload while a download is running.
     const ar = $('[data-auto-reload]');

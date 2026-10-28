@@ -15,6 +15,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 ### Projets
 - **Création** à partir d'un modèle (Page web, Node, Rust, Python, Go, Debian, Minecraft Java, Minecraft Bedrock) ou de n'importe quelle image Docker, avec un dépôt Git optionnel cloné dans `/workspace`.
 - **Deux modes de lancement** pour une image perso : *Service* (la commande de l'image tourne, la console écrit sur son entrée standard) ou *Environnement de dev* (le conteneur reste allumé et lance `/workspace/start.sh` s'il existe, logs dans `/tmp/start.log`).
+- **Confirmations** : un dialogue DevHub (neutre, attention, danger) remplace ceux du navigateur ; les suppressions de données irréversibles demandent de taper le nom.
 - **Actions sans rechargement** : chaque bouton s'exécute en arrière-plan, la page se met à jour sur place et le résultat s'affiche en notification.
 - **Liste des projets** en cartes ou en liste : état, CPU et RAM en direct, badges (accès, ports, domaines, durée), filtres et tri. **Sélection multiple** pour démarrer, arrêter, redémarrer, recréer ou supprimer plusieurs projets d'un coup.
 - **Page projet** : même en-tête sur tous les onglets (état, accès, « Ouvrir le site », Redémarrer / Recréer / Arrêter) et six onglets :
@@ -48,6 +49,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 - **MCP par projet** : une URL secrète par projet, limitée à ce seul conteneur (`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`), régénérable.
 
 ### Mises à jour
+- **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 5 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, binaire ou compilation, résultat).
 - DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull` puis `docker compose up -d --build` depuis un conteneur temporaire, puis rechargement de Caddy).
 - **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
 - **Binaire précompilé** : GitHub Actions compile à chaque push (`.github/workflows/binary.yml`) ; la mise à jour télécharge le binaire et le panel redémarre en moins d'une minute. Sinon, le serveur compile avec un cache, seul le code modifié est recompilé.

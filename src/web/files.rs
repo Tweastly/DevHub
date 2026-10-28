@@ -65,11 +65,11 @@ fn listing(project: &str, dir: &str, entries: &[Entry], selected: Option<&str>) 
                         span.ac {
                             @if !e.dir && !e.link { a.icon-btn.bare href={(base) "/download?path=" (url_q(&path))} title="Télécharger" download { (icon_c("download", "sm")) } }
                             form.inline method="post" action={(base) "/rename"} data-name=(e.name)
-                                onsubmit="const n=prompt('Nouveau nom',this.dataset.name);if(!n||n===this.dataset.name)return false;this.to.value=n" {
+                                data-confirm={"Renommer " (e.name)} data-confirm-body="Le contenu ne change pas." data-tone="neutral" data-confirm-ok="Renommer" data-prompt="Nouveau nom" data-prompt-field="to" data-prompt-value=(e.name) {
                                 input type="hidden" name="path" value=(path); input type="hidden" name="to";
                                 button.icon-btn.bare title="Renommer" { (icon_c("pencil", "sm")) }
                             }
-                            form.inline method="post" action={(base) "/delete"} onsubmit={"return confirm('Supprimer " (e.name) (if e.dir { " et tout son contenu" } else { "" }) " ?')"} {
+                            form.inline method="post" action={(base) "/delete"} data-confirm={"Supprimer " (if e.dir { "le dossier " } else { "" }) (e.name) " ?"} data-confirm-body=(if e.dir { "Le dossier et tout son contenu sont supprimés pour de bon : il n'y a pas de corbeille." } else { "Le fichier est supprimé pour de bon : il n'y a pas de corbeille." }) data-tone="danger" data-confirm-ok="Supprimer" {
                                 input type="hidden" name="path" value=(path);
                                 button.icon-btn.bare title="Supprimer" { (icon_c("trash", "sm")) }
                             }

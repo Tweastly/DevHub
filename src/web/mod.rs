@@ -129,6 +129,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "moon" => r#"<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>"#,
         "logout" => r#"<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10"/>"#,
         "server" => r#"<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/>"#,
+        "arrow-up" => r#"<path d="M12 19V5M5 12l7-7 7 7"/>"#,
         "check" => r#"<path d="m5 12 5 5 9-10"/>"#,
         "check-circle" => r#"<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>"#,
         "alert" => r#"<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>"#,
@@ -621,7 +622,7 @@ fn update_pill(ctx: &Ctx) -> Markup {
         @if u.running {
             a.update-pill href="/update" { "Mise à jour en cours…" span.go { "Suivre" } }
         } @else if u.available() {
-            form.update-pill method="post" action="/update/apply" onsubmit="return confirm('Mettre à jour DevHub maintenant ? Il redémarrera.')" {
+            form.update-pill method="post" action="/update/apply" data-confirm="Mettre à jour DevHub ?" data-confirm-body="Le panel redémarre pendant environ 1 min ; tes projets continuent de tourner." data-tone="neutral" data-confirm-ok="Mettre à jour" {
                 b { (u.pending.len()) } span.hide-m { " nouvelle" @if u.pending.len() > 1 { "s" } " version" @if u.pending.len() > 1 { "s" } }
                 button { "Mettre à jour" }
             }
