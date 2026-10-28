@@ -1,11 +1,7 @@
 //! Self-update: compares the deployed commit (read from the repo mounted at DEVHUB_REPO)
 //! with the GitHub branch, and on request runs `git pull && docker compose up -d --build`
 //! from a short-lived helper container, since DevHub cannot rebuild itself in place.
-//!
-//! To keep that under a minute, GitHub Actions publishes each commit's binary on the "edge"
-//! release (.github/workflows/binary.yml). DevHub downloads it before starting the helper,
-//! and the image build only copies it. Without it (CI still running, other CPU), the build
-//! compiles on the server with cached dependencies.
+//! The build compiles on the server; cached dependencies keep it around a minute.
 
 use crate::{auth, db, AppError, AppState};
 use anyhow::Context;
@@ -50,8 +46,6 @@ pub struct Info {
     pub last_log: String,
     /// Full sha of the branch head on GitHub.
     pub target: Option<String>,
-    /// Whether GitHub Actions has published the binary of `target` (None: unknown).
-    pub prebuilt: Option<bool>,
 }
 
 impl Info {
@@ -144,55 +138,6 @@ fn github(url: &str) -> reqwest::RequestBuilder {
     req
 }
 
-/// Name of the binary GitHub Actions publishes for `sha` on this CPU (only x86_64 is built).
-fn asset_name(sha: &str) -> Option<String> {
-    (std::env::consts::ARCH == "x86_64").then(|| format!("devhub-x86_64-{sha}"))
-}
-
-#[derive(Deserialize)]
-struct Release {
-    assets: Vec<Asset>,
-}
-#[derive(Deserialize)]
-struct Asset {
-    name: String,
-    url: String,
-}
-
-/// API url of the prebuilt binary of `sha`, if published.
-async fn prebuilt_asset(slug: &str, sha: &str) -> anyhow::Result<Option<String>> {
-    let Some(name) = asset_name(sha) else { return Ok(None) };
-    let resp = github(&format!("https://api.github.com/repos/{slug}/releases/tags/edge")).timeout(Duration::from_secs(15)).send().await?;
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    let r: Release = resp.error_for_status()?.json().await?;
-    Ok(r.assets.into_iter().find(|a| a.name == name).map(|a| a.url))
-}
-
-/// Downloads the binary of `sha` into <data>/prebuilt (devhub + SHA). The helper only uses it
-/// if SHA is the commit it pulled; anything else falls back to compiling.
-async fn fetch_prebuilt(st: &AppState, slug: &str, sha: &str) -> anyhow::Result<bool> {
-    let dir = format!("{}/prebuilt", st.data_dir);
-    let _ = std::fs::remove_file(format!("{dir}/SHA"));
-    let Some(url) = prebuilt_asset(slug, sha).await? else { return Ok(false) };
-    // reqwest drops the Authorization header when GitHub redirects to its storage host.
-    let bytes = github(&url)
-        .header("Accept", "application/octet-stream")
-        .timeout(Duration::from_secs(120))
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    anyhow::ensure!(bytes.len() > 1_000_000 && bytes.starts_with(b"\x7fELF"), "binaire invalide");
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(format!("{dir}/devhub.tmp"), &bytes)?;
-    std::fs::rename(format!("{dir}/devhub.tmp"), format!("{dir}/devhub"))?;
-    std::fs::write(format!("{dir}/SHA"), sha)?;
-    Ok(true)
-}
-
 pub async fn check(st: &AppState) {
     let dir = repo_dir();
     let mut info = st.update.lock().unwrap().clone();
@@ -224,10 +169,6 @@ pub async fn check(st: &AppState) {
                 .collect()
         } else {
             Vec::new()
-        };
-        info.prebuilt = match (&info.target, info.pending.is_empty()) {
-            (Some(t), false) => Some(prebuilt_asset(&slug, t).await.ok().flatten().is_some()),
-            _ => None,
         };
         Ok(())
     }
@@ -412,27 +353,10 @@ pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
     let me = st.cfg.self_container.as_deref().context("mise à jour possible seulement quand DevHub tourne via docker compose")?;
     let me_info = d.inspect_container(me, None::<InspectContainerOptions>).await?;
     let labels = me_info.config.clone().and_then(|c| c.labels).unwrap_or_default();
-    // Host path of DevHub's data dir, where the prebuilt binary is downloaded.
-    let data_host = me_info
-        .mounts
-        .unwrap_or_default()
-        .into_iter()
-        .find(|m| m.destination.as_deref() == Some(st.data_dir.as_str()))
-        .and_then(|m| m.source);
     let host_dir = labels.get("com.docker.compose.project.working_dir").context("label compose manquant")?.clone();
     let project = labels.get("com.docker.compose.project").context("label compose manquant")?.clone();
     let branch = st.update.lock().unwrap().branch.clone();
     let branch = if branch.is_empty() { "main".to_string() } else { branch };
-
-    let (slug, target) = {
-        let i = st.update.lock().unwrap();
-        (i.repo.clone(), i.target.clone())
-    };
-    if let (Some(slug), Some(sha), Some(_)) = (&slug, &target, &data_host) {
-        if let Err(e) = fetch_prebuilt(st, slug, sha).await {
-            tracing::warn!("binaire précompilé indisponible : {e:#}");
-        }
-    }
 
     // Never cut an update in progress (it would stop halfway through `docker compose up`).
     anyhow::ensure!(!updater_running(st).await, "une mise à jour est déjà en cours");
@@ -461,15 +385,6 @@ if [ -n "$TOKEN" ]; then
 else
   git pull --ff-only origin "$BRANCH"
 fi
-HEAD=$(git rev-parse HEAD)
-mkdir -p prebuilt
-rm -f prebuilt/devhub
-if [ -n "$PREBUILT" ] && [ -f "$PREBUILT/SHA" ] && [ "$(cat "$PREBUILT/SHA")" = "$HEAD" ]; then
-  cp "$PREBUILT/devhub" prebuilt/devhub && chmod +x prebuilt/devhub
-  step "binaire précompilé par GitHub pour $(echo "$HEAD" | cut -c1-7)"
-else
-  step "pas de binaire précompilé pour ce commit : compilation sur le serveur (dépendances en cache)"
-fi
 step "reconstruction de DevHub"
 docker compose -p "$PROJECT" build devhub
 # Caddy is rebuilt only when its image changes: recreating it cuts every site
@@ -482,13 +397,7 @@ step "rechargement de Caddy"
 docker compose -p "$PROJECT" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "Caddy non rechargé"
 step "terminé""#;
     let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}")];
-    let mut binds = vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")];
-    if let Some(dh) = &data_host {
-        env.push(format!("PREBUILT={dh}/prebuilt"));
-        if !dh.starts_with(&format!("{host_dir}/")) {
-            binds.push(format!("{dh}:{dh}:ro"));
-        }
-    }
+    let binds = vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")];
     if let Some(t) = token() {
         env.push(format!("TOKEN={t}"));
     }
@@ -534,7 +443,7 @@ pub async fn finalize(st: &AppState) {
     }
     let log = full_log(st).await;
     let ok = state.exit_code == Some(0) && log.contains("== terminé");
-    let method = if log.contains("binaire précompilé par GitHub") { "binaire GitHub" } else { "compilé" };
+    let method = "compilé";
     let finished = state.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339).unwrap_or_else(db::now);
     let error = if ok { String::new() } else { error_excerpt(&log) };
     let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, finished, ok, method, &error);
@@ -569,7 +478,6 @@ pub struct Step {
 /// compose's output). `failed`: the update ended in error, at the step it reached.
 pub fn steps(log: &str, failed: bool) -> Vec<Step> {
     let mark = |needle: &str| log.lines().find(|l| l.contains(needle)).and_then(|l| l.rsplit_once('(')).and_then(|(_, r)| r.trim_end_matches(|c| c == ')' || c == ' ').trim_end_matches(" s").trim().parse::<i64>().ok());
-    let built = log.contains("binaire précompilé par GitHub") || log.contains("pas de binaire précompilé");
     let reached = [
         log.contains("== récupération du code"),
         log.contains("== reconstruction de DevHub"),
@@ -581,7 +489,7 @@ pub fn steps(log: &str, failed: bool) -> Vec<Step> {
     let t_caddy = mark("== rechargement de Caddy");
     let t_end = mark("== terminé");
     let secs = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(a), Some(b)) if b >= a => format!("{} s", b - a), _ => String::new() };
-    let method = if log.contains("binaire précompilé par GitHub") { "binaire GitHub" } else if built { "compilation" } else { "" };
+    let method = if reached[1] { "compilation" } else { "" };
     let details = [
         format!("git pull{}", t_build.map(|t| format!(" · {t} s")).unwrap_or_default()),
         [method.to_string(), secs(t_build, t_caddy)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
@@ -656,7 +564,7 @@ pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
 mod tests {
     use super::steps;
 
-    const LOG: &str = "== récupération du code (0 s)\nUpdating 6ee7269..bc49915\n== pas de binaire précompilé pour ce commit : compilation sur le serveur (dépendances en cache)\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n Container devhub  Recreate\n Container devhub  Recreated\n Container devhub  Started\n== rechargement de Caddy (49 s)\n== terminé (50 s)\n";
+    const LOG: &str = "== récupération du code (0 s)\nUpdating 6ee7269..bc49915\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n Container devhub  Recreate\n Container devhub  Recreated\n Container devhub  Started\n== rechargement de Caddy (49 s)\n== terminé (50 s)\n";
 
     fn states(log: &str, failed: bool) -> Vec<&'static str> {
         steps(log, failed).iter().map(|s| s.state).collect()

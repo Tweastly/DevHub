@@ -100,7 +100,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                                 div.upd-title { (u.pending.len()) " nouveauté" @if u.pending.len() > 1 { "s" } " à installer" }
                                 div.upd-sub {
                                     "De " b.mono { (short(&local)) } " vers " b.mono.accent { (short(&target)) } " · "
-                                    @match u.prebuilt { Some(true) => "binaire GitHub prêt, environ 30 s", _ => "compilation sur le serveur, environ 1 min" }
+                                    "compilation sur le serveur, environ 1 min"
                                     " · tes projets continuent de tourner"
                                 }
                             }

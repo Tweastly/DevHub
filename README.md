@@ -49,11 +49,11 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 - **MCP par projet** : une URL secrète par projet, limitée à ce seul conteneur (`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`), régénérable.
 
 ### Mises à jour
-- **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 5 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, binaire ou compilation, résultat).
+- **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 5 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, résultat).
 - DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull`, reconstruction de DevHub depuis un conteneur temporaire, puis rechargement de Caddy). Caddy n'est reconstruit que si `caddy/Dockerfile` change : les sites ne sont jamais coupés.
 - **Pas de page d'erreur** pendant le redémarrage : Caddy affiche « DevHub redémarre… », qui se recharge toute seule dès que le panel répond.
 - **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
-- **Binaire précompilé** : GitHub Actions compile à chaque push (`.github/workflows/binary.yml`) ; la mise à jour télécharge le binaire et le panel redémarre en moins d'une minute. Sinon, le serveur compile avec un cache, seul le code modifié est recompilé.
+- **Compilation sur le serveur** avec un cache : seul le code de DevHub est recompilé, le panel redémarre en environ une minute.
 
 ## Déploiement sur le VPS
 
@@ -108,7 +108,6 @@ Le dépôt ne contient aucun secret : tout ce qui est sensible vit **uniquement 
 | `.env` | domaine, jeton GitHub, jeton Cloudflare | non (`.gitignore`) |
 | `data/devhub.sqlite` | passkeys (clés publiques), sessions, profils, jetons OAuth (hachés), URL MCP des projets, journal, variables d'environnement des projets | non (`/data` ignoré) |
 | volumes Docker | code et données des projets | non (hors du dépôt) |
-| `prebuilt/` | binaire téléchargé | non (ignoré) |
 | `.env.example` | modèle sans valeurs | oui |
 
 Avant de publier ou de pousser :
