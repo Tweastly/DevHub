@@ -455,6 +455,7 @@ dependencies = [
  "axum-extra",
  "base64 0.22.1",
  "bollard",
+ "bytes",
  "cookie",
  "futures-util",
  "hyper",

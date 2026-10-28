@@ -817,6 +817,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let mem_max = mb(x.s.mem_limit);
     let cpu_lim = x.p.cpus.unwrap_or(def_cpu);
     let vols = super::volumes::list(&st).await;
+    let image_vols = crate::docker::image_volumes(&st.docker, &x.p.image).await;
     let env_text: String = x.p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     let body = html! {
         (flash(&q))
@@ -827,7 +828,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 a href="#resources" { "Ressources" }
                 @if !x.p.is_game() { a href="#launch" { "Lancement" } }
                 a href="#env" { "Variables d'environnement" span.count { (x.p.env.len()) } }
-                a href="#volumes" { "Volumes" span.count { (x.p.mounts.len() + 1) } }
+                a href="#volumes" { "Dossiers gardés" span.count { (x.p.mounts.len() + 1) } }
                 @if ctx.profile.admin { a href="#danger" style="color:var(--err)" { "Zone dangereuse" } }
             }
             div.stack {
@@ -879,16 +880,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         }
                     }
                 }
-                div.card #volumes {
-                    div.card-h { h3 { "Volumes" } span.sub { "ce qui reste quand le conteneur est recréé" } }
-                    div.card-b {
-                        form method="post" action={(base) "/volumes"} data-confirm="Appliquer les volumes ?" data-confirm-body="Le conteneur est recréé avec ces volumes. Un volume retiré n'est pas effacé : il reste dans la page Volumes." data-tone="warn" data-confirm-ok="Appliquer" {
-                            (back_field(&format!("{here}#volumes")))
-                            (super::volumes::editor(&crate::ops::volumes_text(&x.p), &vols, &ctx.projects, Some(&x.p)))
-                            div.row style="margin-top:16px" { span.muted data-vol-changes { "Aucun changement" } span.spacer {} button.btn.ghost type="button" data-vol-reset disabled { "Annuler" } button.btn.primary data-vol-apply disabled { "Appliquer" } }
-                        }
-                    }
-                }
+                (super::volumes::kept_card(&x.p, &vols, &ctx.projects, &image_vols, &base, &format!("{here}#volumes")))
                 div.card #env {
                     div.card-h { h3 { "Variables d'environnement" } span.sub { "injectées au démarrage du conteneur" } }
                     @if !x.p.env.is_empty() {

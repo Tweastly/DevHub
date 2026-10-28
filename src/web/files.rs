@@ -22,30 +22,114 @@ fn entry_icon(e: &Entry) -> &'static str {
     }
 }
 
-fn path_crumbs(project: &str, rel: &str) -> Markup {
-    let mut acc = String::new();
+fn path_crumbs(project: &str, rel: &str, root: bool) -> Markup {
+    let outside = fs::outside(rel);
     let parts: Vec<&str> = rel.split('/').filter(|p| !p.is_empty()).collect();
+    // Links rebuild each level in the same notation as fs::clean.
+    let mut acc = if outside { "/".to_string() } else { String::new() };
     html! {
         span.crumb-path {
-            @if parts.is_empty() { b { "workspace" } } @else { a href=(fs::files_url(project, "")) { "workspace" } }
+            @if root {
+                @if rel == "/" { b { "/" } } @else { a href=(fs::files_url(project, "/")) title="Tout le conteneur" { "/" } }
+                " "
+            }
+            @if !outside {
+                @if parts.is_empty() { b { "workspace" } } @else { a href=(fs::files_url(project, "")) { "workspace" } }
+            }
             @for (i, part) in parts.iter().enumerate() {
-                " / "
-                @let _ = { if !acc.is_empty() { acc.push('/'); } acc.push_str(part); };
+                @if i > 0 || !outside { " / " }
+                @let _ = { acc = fs::join(&acc, part); };
                 @if i + 1 == parts.len() { b { (part) } } @else { a href=(fs::files_url(project, &acc)) { (part) } }
             }
         }
     }
 }
 
-fn listing(project: &str, dir: &str, entries: &[Entry], selected: Option<&str>) -> Markup {
+/// The kept folders of a project (absolute), and what a folder is to them.
+pub struct Kept {
+    paths: Vec<String>,
+    reserved: &'static [&'static str],
+    project: String,
+    /// The profile may change the project's folders (and so keep one).
+    can: bool,
+}
+
+enum KeptState {
+    Kept,
+    Inside,
+    Holds,
+    Free,
+}
+
+impl Kept {
+    fn of(x: &super::project::P, can: bool) -> Kept {
+        let reserved = crate::ops::reserved_paths(x.p.is_game());
+        let mut paths: Vec<String> = reserved.iter().map(|s| s.to_string()).collect();
+        paths.extend(x.p.mounts.iter().map(|m| m.path.clone()));
+        Kept { paths, reserved, project: x.p.name.clone(), can }
+    }
+    fn state(&self, path: &str) -> KeptState {
+        if self.paths.iter().any(|k| k == path) {
+            KeptState::Kept
+        } else if self.paths.iter().any(|k| path.starts_with(&format!("{k}/"))) {
+            KeptState::Inside
+        } else if path == "/" || self.paths.iter().any(|k| k.starts_with(&format!("{path}/"))) {
+            KeptState::Holds
+        } else {
+            KeptState::Free
+        }
+    }
+    /// Shown with a "Garder" button: free, and a folder ops::parse_volumes accepts.
+    fn keepable(&self, path: &str) -> bool {
+        self.can && matches!(self.state(path), KeptState::Free) && crate::ops::parse_volumes(path, &self.project, self.reserved).is_ok()
+    }
+}
+
+fn keep_form(project: &str, path: &str, back: &str, label: &str, class: &str) -> Markup {
+    html! {
+        form.inline method="post" action={"/projects/" (project) "/keep"}
+            data-confirm={"Garder " (path) " ?"} data-confirm-body="Son contenu actuel est copié dans un dossier gardé, puis le conteneur redémarre (quelques secondes). Ensuite il survit à Recréer, aux changements d'image et au renommage." data-tone="neutral" data-confirm-ok="Garder et redémarrer" {
+            input type="hidden" name="path" value=(path);
+            input type="hidden" name="back" value=(back);
+            button class=(class) { (icon_c("plus", "sm")) (label) }
+        }
+    }
+}
+
+/// Above the listing: where this folder stands (outside /workspace only).
+fn kept_banner(project: &str, dir: &str, kept: &Kept) -> Markup {
+    let back = fs::files_url(project, dir);
+    html! {
+        @if fs::outside(dir) {
+            @match kept.state(dir) {
+                KeptState::Kept | KeptState::Inside => {
+                    div.kbanner.ok { (icon_c("check", "sm")) span { b { "Dossier gardé." } " Son contenu survit quand le conteneur est recréé." } }
+                }
+                KeptState::Holds => {
+                    div.kbanner { (icon_c("folder", "sm")) span { "Seuls les dossiers " span.okt { "gardés" } " survivent quand le conteneur est recréé ; le reste revient à l'état de l'image." } }
+                }
+                KeptState::Free => {
+                    div.kbanner.warn {
+                        (icon_c("alert", "sm"))
+                        span { b { "Tu es hors des dossiers gardés." } " Ce qui est dans " span.mono { (dir) } " disparaît si le conteneur est recréé." }
+                        @if kept.keepable(dir) { span.spacer {} (keep_form(project, dir, &back, &format!("Garder {dir}"), "btn sm")) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn listing(project: &str, dir: &str, entries: &[Entry], selected: Option<&str>, kept: &Kept, root: bool) -> Markup {
     let base = format!("/projects/{project}/files");
-    let child = |n: &str| if dir.is_empty() { n.to_string() } else { format!("{dir}/{n}") };
+    let child = |n: &str| fs::join(dir, n);
+    let back = fs::files_url(project, dir);
     let recent = db::now() - 600;
     html! {
-        div.card {
-            div.card-h { (path_crumbs(project, dir)) span.sub style="margin-left:auto" { (entries.len()) " élément" @if entries.len() > 1 { "s" } } }
+        div class={"card" (if fs::outside(dir) && kept.can { " flist-out" } else { "" })} {
+            div.card-h { (path_crumbs(project, dir, root)) span.sub style="margin-left:auto" { (entries.len()) " élément" @if entries.len() > 1 { "s" } } }
             div {
-                @if !dir.is_empty() {
+                @if !dir.is_empty() && dir != "/" {
                     div.frow { (icon("back")) span.n { a href=(fs::files_url(project, fs::parent(dir))) { ".." } } }
                 }
                 @if entries.is_empty() {
@@ -53,16 +137,20 @@ fn listing(project: &str, dir: &str, entries: &[Entry], selected: Option<&str>) 
                 }
                 @for e in entries {
                     @let path = child(&e.name);
-                    div class={"frow" (if selected == Some(path.as_str()) { " on" } else { "" })} {
+                    @let full = fs::abs(&path);
+                    @let is_kept = e.dir && fs::outside(dir) && matches!(kept.state(&full), KeptState::Kept);
+                    div class={"frow" (if selected == Some(path.as_str()) { " on" } else { "" }) (if is_kept { " kept" } else { "" })} {
                         (icon(entry_icon(e)))
                         span.n {
                             @if e.link { span.dim { "→ " (e.name) } }
                             @else { a href=(fs::files_url(project, &path)) { (e.name) } }
+                            @if is_kept { span.badge-kept { "gardé" } }
                             @if !e.dir && e.mtime > recent { span.modified title="modifié il y a moins de 10 min" {} }
                         }
                         span.sz { @if e.dir { "—" } @else if e.link { "lien" } @else { (size(e.size)) } }
                         span.dt { (crate::timefmt::ymd_hm(e.mtime)) }
                         span.ac {
+                            @if e.dir && !e.link && kept.keepable(&full) { span.keep-btn { (keep_form(project, &full, &back, "Garder", "btn sm ghost")) } }
                             @if !e.dir && !e.link { a.icon-btn.bare href={(base) "/download?path=" (url_q(&path))} title="Télécharger" download { (icon_c("download", "sm")) } }
                             form.inline method="post" action={(base) "/rename"} data-name=(e.name)
                                 data-confirm={"Renommer " (e.name)} data-confirm-body="Le contenu ne change pas." data-tone="neutral" data-confirm-ok="Renommer" data-prompt="Nouveau nom" data-prompt-field="to" data-prompt-value=(e.name) {
@@ -83,7 +171,7 @@ fn listing(project: &str, dir: &str, entries: &[Entry], selected: Option<&str>) 
                     input type="file" name="files" multiple;
                     (icon_c("upload", "lg"))
                     div { b { "Glisse des fichiers ici" } " ou clique pour parcourir" }
-                    p.help { "Vers /workspace/" (dir) " · 200 Mo max par envoi · les fichiers existants sont remplacés" }
+                    p.help { "Vers " (fs::abs(dir)) " · 200 Mo max par envoi · les fichiers existants sont remplacés" }
                 }
                 noscript { div style="padding:10px 22px 0" { button.btn.sm { "Envoyer" } } }
             }
@@ -141,6 +229,11 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
         return Ok(frame(&ctx, &x, Tab::Files, body));
     }
     let rel = fs::clean(q.get("path").map(String::as_str).unwrap_or(""))?;
+    let root = ctx.profile.shell(&name);
+    if fs::outside(&rel) && !root {
+        return Err((axum::http::StatusCode::FORBIDDEN, "hors de /workspace : il faut le droit Terminal et fichiers").into_response());
+    }
+    let kept = Kept::of(&x, ctx.profile.manages(&name));
     let (is_dir, entries) = fs::browse(&st, &name, &rel).await?;
     let dir = if is_dir { rel.clone() } else { fs::parent(&rel).to_string() };
     let file_view = if is_dir {
@@ -153,8 +246,9 @@ pub async fn browse(State(st): State<AppState>, jar: CookieJar, Path(name): Path
     };
     let body = html! {
         (flash(&q))
+        (kept_banner(&name, &dir, &kept))
         div.files {
-            (listing(&name, &dir, &entries, (!is_dir).then_some(rel.as_str())))
+            (listing(&name, &dir, &entries, (!is_dir).then_some(rel.as_str()), &kept, root))
             @if let Some(v) = file_view { (v) }
             @else {
                 div.card.hide-m { (empty("search", "Aucun fichier ouvert", html! { "Clique sur un fichier texte pour l'éditer ici." }, html! {})) }

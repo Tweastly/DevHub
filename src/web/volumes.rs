@@ -245,3 +245,88 @@ pub(crate) async fn remove(st: &AppState, volume: &str) -> Result<(), String> {
         e => format!("volume « {short} » : {e}"),
     })
 }
+
+/// Paramètres' "Dossiers gardés" card: the folders whose content survives the container
+/// being recreated. /workspace always; the others switch off (their volume stays, see
+/// /volumes); folders the image declares and volumes no project mounts are offered.
+/// The rows are sent as the hidden `volumes` field (ops::parse_volumes).
+pub(crate) fn kept_card(p: &Project, vols: &[Vol], projects: &[Project], image_vols: &[String], base: &str, back: &str) -> Markup {
+    let reserved = crate::ops::reserved_paths(p.is_game());
+    let own = format!("{}.", p.main_volume());
+    let suggested: Vec<&String> = image_vols
+        .iter()
+        .filter(|v| !reserved.contains(&v.as_str()) && !p.mounts.iter().any(|m| &m.path == *v) && crate::ops::parse_volumes(v, &p.name, reserved).is_ok())
+        .collect();
+    let orphans: Vec<&Vol> = vols.iter().filter(|v| v.name != p.main_volume() && uses(projects, &v.name).is_empty()).collect();
+    let main_paths = if p.is_game() { "/workspace, /data" } else { "/workspace" };
+    html! {
+        form.card #volumes method="post" action={(base) "/volumes"} data-kept {
+            input type="hidden" name="back" value=(back);
+            input type="hidden" name="volumes" value=(crate::ops::volumes_text(p));
+            div.card-h { h3 { "Dossiers gardés" } span.sub { "leur contenu survit quand le conteneur est recréé" } }
+            div.kexplain {
+                div.kx { span.kxi.dash { (icon("cube")) } span { b { "Le conteneur" } br; span.muted { "jetable : Recréer, changer d'image, de port ou de nom repart de zéro" } } }
+                span.kxa aria-hidden="true" { (PreEscaped(ARROW)) }
+                div.kx { span.kxi.ok { (icon("folder")) } span { b { "Les dossiers gardés" } br; span.muted { "rebranchés tels quels sur le nouveau conteneur" } } }
+            }
+            ul.klist data-volume-sizes="/volumes/sizes" {
+                li.krow {
+                    span.kic { (icon("folder")) }
+                    span.kt { b.mono { (main_paths) } span.ks { "Tes fichiers de projet (onglet Fichiers, git, start.sh)" } }
+                    span.ksz.mono data-vsize=(p.main_volume()) { "…" }
+                    span.kact.muted { (icon_c("lock", "sm")) "toujours gardé" }
+                }
+                @for m in &p.mounts {
+                    @let others: Vec<&str> = uses(projects, &m.volume).into_iter().map(|(n, _)| n).filter(|n| *n != p.name).collect();
+                    @let short = m.volume.strip_prefix(PREFIX).unwrap_or(&m.volume);
+                    li.krow data-spec={(m.volume) ":" (m.path)} {
+                        span.kic.ok { (icon("folder")) }
+                        span.kt {
+                            b.mono { (m.path) }
+                            span.ks {
+                                @if m.volume.starts_with(&own) { "Gardé pour ce projet" } @else { "Données de « " (short) " »" }
+                                @if image_vols.contains(&m.path) { " · " span.okt { "proposé par l'image" } }
+                                @if !others.is_empty() { " · " span.warnt { "partagé avec " (others.join(", ")) } }
+                            }
+                        }
+                        span.ksz.mono data-vsize=(m.volume) { "…" }
+                        span.kact {
+                            span.koff { "retiré à l'application" }
+                            button.switch type="button" role="switch" aria-checked="true" data-kept-toggle aria-label={"Garder " (m.path)} { span {} }
+                        }
+                    }
+                }
+            }
+            div.kadd {
+                @if !suggested.is_empty() {
+                    span.muted { "L'image propose aussi :" }
+                    div.kchips { @for s in &suggested { button.kchip type="button" data-kept-path=(s) { span.plus { "+" } (s) } } }
+                }
+                @if !orphans.is_empty() {
+                    span.muted { "Reprendre les données d'un ancien projet :" }
+                    div.kchips { @for v in &orphans { button.kchip type="button" data-kept-vol=(v.name) { span.plus { "+" } (v.name.strip_prefix(PREFIX).unwrap_or(&v.name)) } } }
+                }
+                div.kform {
+                    label.kin { span.muted { "Dossier" } input.mono-input type="text" data-kept-input placeholder="/data" autocomplete="off" spellcheck="false" aria-label="Dossier à garder"; }
+                    button.btn type="button" data-kept-add { "Garder ce dossier" }
+                }
+                p.help data-kept-err hidden {}
+            }
+            div.kbar data-kept-bar hidden {
+                (icon_c("alert", "sm"))
+                span { b data-kept-count {} " · le conteneur redémarre (quelques secondes)" }
+                span.spacer {}
+                button.btn.ghost type="button" data-kept-reset { "Annuler" }
+                button.btn.primary { "Appliquer" }
+            }
+            template data-kept-new {
+                li.krow.new {
+                    span.kic.ok { (icon("folder")) }
+                    span.kt { span.knew { b.mono data-path {} span.badge-new { "nouveau" } } span.ks data-sub { "Son contenu actuel est gardé" } }
+                    span.ksz.mono { "—" }
+                    span.kact { button.icon-btn.bare type="button" data-kept-drop aria-label="Retirer" { (icon_c("x", "sm")) } }
+                }
+            }
+        }
+    }
+}

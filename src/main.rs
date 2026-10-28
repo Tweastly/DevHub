@@ -526,6 +526,12 @@ async fn project_action(
         }
         "env" => ops::Change::Env(ops::parse_env(field("env"))),
         "volumes" => ops::Change::Volumes(field("volumes").to_string()),
+        // From the Fichiers tab: one more kept folder.
+        "keep" => {
+            let p = ops::load(&st, &name).map_err(|e| fail(e).into_response())?;
+            let path = field("path").trim().trim_end_matches('/');
+            ops::Change::Volumes(format!("{}\n{path}", ops::volumes_text(&p)))
+        }
         // One variable at a time (the table's add / edit / delete); the same key replaces.
         "env-set" | "env-remove" => {
             let key = field("key").trim().to_string();
@@ -571,7 +577,8 @@ async fn project_action(
                 "unpin" => format!("{name} retiré des épinglés."),
                 "resources" => "Ressources appliquées.".into(),
                 "env" | "env-set" | "env-remove" => "Variables enregistrées, conteneur recréé.".into(),
-                "volumes" => "Volumes enregistrés, conteneur recréé.".into(),
+                "volumes" => "Dossiers gardés enregistrés, conteneur redémarré.".into(),
+                "keep" => format!("{} est maintenant gardé.", field("path").trim().trim_end_matches('/')),
                 "ports" | "port-add" | "port-remove" => "Ports enregistrés, conteneur recréé.".into(),
                 "domain-add" => "Sous-domaine ajouté.".into(),
                 "domain-remove" => "Sous-domaine retiré.".into(),

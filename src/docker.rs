@@ -614,3 +614,56 @@ pub async fn read_file(d: &Docker, p: &str, path: &str) -> anyhow::Result<Vec<u8
 fn absolute(path: &str) -> String {
     if path.starts_with('/') { path.to_string() } else { format!("/workspace/{path}") }
 }
+
+/// Folders the image asks to keep (its VOLUME lines), e.g. /var/lib/postgresql/data.
+pub async fn image_volumes(d: &Docker, image: &str) -> Vec<String> {
+    let mut v: Vec<String> = d
+        .inspect_image(&with_tag(image))
+        .await
+        .ok()
+        .and_then(|i| i.config)
+        .and_then(|c| c.volumes)
+        .map(|m| m.into_keys().map(|p| p.trim_end_matches('/').to_string()).filter(|p| !p.is_empty()).collect())
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// Saves what the container has at `path` (a tar, the folder itself at its root) to
+/// `file`, before the folder becomes a kept one. Ok(false): nothing there to save.
+pub async fn save_dir(d: &Docker, p: &str, path: &str, file: &std::path::Path) -> anyhow::Result<bool> {
+    use tokio::io::AsyncWriteExt;
+    let mut s = d.download_from_container(&container_name(p), Some(DownloadFromContainerOptions { path: path.to_string() }));
+    let mut out = tokio::fs::File::create(file).await?;
+    while let Some(c) = s.next().await {
+        match c {
+            Ok(b) => out.write_all(&b).await?,
+            Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
+                drop(out);
+                let _ = tokio::fs::remove_file(file).await;
+                return Ok(false);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    out.flush().await?;
+    Ok(true)
+}
+
+/// Puts a folder saved by save_dir back, into `parent` (where its kept folder is now mounted).
+pub async fn restore_dir(d: &Docker, p: &str, parent: &str, file: &std::path::Path) -> anyhow::Result<()> {
+    use tokio::io::AsyncReadExt;
+    let f = tokio::fs::File::open(file).await?;
+    let chunks = futures_util::stream::unfold(f, |mut f| async move {
+        let mut buf = vec![0u8; 1 << 20];
+        match f.read(&mut buf).await {
+            Ok(0) | Err(_) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                Some((bytes::Bytes::from(buf), f))
+            }
+        }
+    });
+    d.upload_to_container_streaming(&container_name(p), Some(UploadToContainerOptions { path: parent.to_string(), ..Default::default() }), chunks).await?;
+    Ok(())
+}

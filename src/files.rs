@@ -1,6 +1,7 @@
 //! File manager for a project's /workspace: browse, edit text files, upload, create,
 //! rename, delete, download. Every operation runs through the Docker API in the
-//! project's own container, and paths are confined to /workspace.
+//! project's own container: /workspace, and the rest of the container for the profiles
+//! that have its terminal.
 
 use crate::{auth, db, docker, AppState};
 use axum::body::Body;
@@ -16,21 +17,47 @@ use std::time::Duration;
 pub const EDIT_MAX: usize = 2 * 1024 * 1024;
 pub const UPLOAD_MAX: usize = 200 * 1024 * 1024;
 
-/// Normalizes a path relative to /workspace; rejects anything that would escape it.
+/// Normalizes a path: relative to /workspace ("" is /workspace itself), or absolute
+/// ("/srv/cache", "/" the container's root) for a folder outside it. Rejects "..".
 pub fn clean(rel: &str) -> Result<String, Response> {
+    let rel = rel.trim();
+    let inside = rel == "/workspace" || rel.starts_with("/workspace/");
+    let absolute = rel.starts_with('/') && !inside;
+    let body = if inside { &rel["/workspace".len()..] } else { rel };
     let mut parts = Vec::new();
-    for c in rel.trim_start_matches("/workspace").split('/') {
+    for c in body.split('/') {
         match c {
             "" | "." => {}
             ".." => return Err((StatusCode::BAD_REQUEST, "chemin invalide").into_response()),
             c => parts.push(c),
         }
     }
-    Ok(parts.join("/"))
+    Ok(if absolute { format!("/{}", parts.join("/")) } else { parts.join("/") })
 }
 
 pub fn abs(rel: &str) -> String {
-    if rel.is_empty() { "/workspace".into() } else { format!("/workspace/{rel}") }
+    if rel.starts_with('/') {
+        rel.into()
+    } else if rel.is_empty() {
+        "/workspace".into()
+    } else {
+        format!("/workspace/{rel}")
+    }
+}
+
+/// Outside /workspace: reading there needs the terminal right too (it shows the whole
+/// container, /proc and its variables included).
+pub fn outside(rel: &str) -> bool {
+    rel.starts_with('/')
+}
+
+/// `name` inside the folder `dir` (same notation as clean).
+pub fn join(dir: &str, name: &str) -> String {
+    match dir {
+        "" => name.to_string(),
+        "/" => format!("/{name}"),
+        d => format!("{d}/{name}"),
+    }
 }
 
 fn sh_quote(s: &str) -> String {
@@ -38,7 +65,12 @@ fn sh_quote(s: &str) -> String {
 }
 
 pub fn parent(rel: &str) -> &str {
-    rel.rsplit_once('/').map(|x| x.0).unwrap_or("")
+    match rel.rsplit_once('/') {
+        Some(("", _)) if rel.starts_with('/') => "/",
+        Some((p, _)) => p,
+        None if rel == "/" => "/",
+        None => "",
+    }
 }
 
 pub fn files_url(project: &str, rel: &str) -> String {
@@ -112,6 +144,9 @@ pub async fn download(
 ) -> Result<Response, Response> {
     check(&st, &jar, &name, auth::Need::See)?;
     let rel = clean(q.get("path").map(String::as_str).unwrap_or(""))?;
+    if outside(&rel) {
+        check(&st, &jar, &name, auth::Need::Shell)?;
+    }
     let bytes = docker::read_file(&st.docker, &name, &abs(&rel)).await.map_err(fail)?;
     let file = rel.rsplit('/').next().unwrap_or("fichier").replace('"', "");
     Ok((
@@ -164,7 +199,7 @@ pub async fn upload(
                     continue;
                 }
                 let data = field.bytes().await.map_err(fail)?;
-                let rel = if dir.is_empty() { file } else { format!("{dir}/{file}") };
+                let rel = join(&dir, &file);
                 docker::write_file(&st.docker, &name, &abs(&rel), &data).await.map_err(fail)?;
                 count += 1;
             }
@@ -185,7 +220,7 @@ pub async fn create(
     let dir = clean(f.get("dir").map(String::as_str).unwrap_or(""))?;
     let new = f.get("name").map(|s| s.trim().to_string()).unwrap_or_default();
     let as_dir = f.get("kind").map(String::as_str) == Some("dir") || new.ends_with('/');
-    let rel = clean(&format!("{dir}/{new}"))?;
+    let rel = clean(&join(&dir, &new))?;
     if rel.is_empty() || rel == dir {
         return Err(fail("nom manquant"));
     }
@@ -211,10 +246,10 @@ pub async fn rename(
     let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let rel = clean(f.get("path").map(String::as_str).unwrap_or(""))?;
     let to_name = f.get("to").map(|s| s.trim()).unwrap_or("");
-    if rel.is_empty() || to_name.is_empty() || to_name.contains('/') || to_name == ".." || to_name == "." {
+    if rel.is_empty() || rel == "/" || to_name.is_empty() || to_name.contains('/') || to_name == ".." || to_name == "." {
         return Err(fail("nom invalide"));
     }
-    let to = clean(&format!("{}/{to_name}", parent(&rel)))?;
+    let to = clean(&join(parent(&rel), to_name))?;
     let (src, dst) = (sh_quote(&abs(&rel)), sh_quote(&abs(&to)));
     run(&st, &name, &format!("test ! -e {dst} || {{ echo 'un fichier porte déjà ce nom'; exit 1; }}; mv -- {src} {dst}")).await?;
     audit(&st, &who, "file.rename", &format!("{name}:{rel} → {to}"));
@@ -229,8 +264,8 @@ pub async fn delete(
 ) -> Result<Redirect, Response> {
     let who = check(&st, &jar, &name, auth::Need::Shell)?.actor();
     let rel = clean(f.get("path").map(String::as_str).unwrap_or(""))?;
-    if rel.is_empty() {
-        return Err(fail("impossible de supprimer /workspace lui-même"));
+    if rel.is_empty() || rel == "/" || rel.matches('/').count() == 1 && outside(&rel) {
+        return Err(fail("impossible de supprimer /workspace ou un dossier à la racine du conteneur"));
     }
     run(&st, &name, &format!("rm -rf -- {}", sh_quote(&abs(&rel)))).await?;
     audit(&st, &who, "file.delete", &format!("{name}:{rel}"));

@@ -286,6 +286,70 @@
   document.addEventListener('click', e => { $$('.spark-w').forEach(w => { if (!w.contains(e.target)) w.hideTip?.(); }); });
 
   function widgets() {
+    // "Dossiers gardés" (Paramètres): switches and new rows build the hidden volumes
+    // field; the bar shows once something changed.
+    $$('[data-kept]:not([data-ready])').forEach(f => {
+      f.dataset.ready = 1;
+      const field = $('input[name=volumes]', f), list = $('.klist', f), tpl = $('template[data-kept-new]', f);
+      const bar = $('[data-kept-bar]', f), count = $('[data-kept-count]', f), err = $('[data-kept-err]', f), input = $('[data-kept-input]', f);
+      const initial = field.value;
+      const pathOf = r => (r.dataset.path || $('input', r)?.value || '').trim().replace(/\/+$/, '');
+      const taken = () => $$('.krow', list).map(r => r.dataset.spec ? r.dataset.spec.split(':').pop() : pathOf(r)).filter(Boolean);
+      const update = () => {
+        const rows = $$('.krow[data-spec], .krow.new', list);
+        field.value = rows.filter(r => r.dataset.on !== '0').map(r => r.dataset.spec || (pathOf(r) && ((r.dataset.vol ? r.dataset.vol + ':' : '') + pathOf(r)))).filter(Boolean).join('\n');
+        const off = $$('.krow[data-on="0"]', list).length, added = $$('.krow.new', list).filter(pathOf).length, n = off + added;
+        count.textContent = n + ' changement' + (n > 1 ? 's' : '');
+        bar.hidden = field.value === initial;
+      };
+      const say = t => { err.textContent = t; err.hidden = !t; };
+      const add = (path, vol) => {
+        const r = tpl.content.firstElementChild.cloneNode(true);
+        if (vol) {
+          r.dataset.vol = vol;
+          const i = document.createElement('input');
+          i.className = 'mono-input'; i.placeholder = '/chemin/dans/le/conteneur'; i.setAttribute('aria-label', 'Dossier où monter ' + vol);
+          i.addEventListener('input', update);
+          $('[data-path]', r).replaceWith(i);
+          $('[data-sub]', r).textContent = 'Données de « ' + vol.replace(/^devhub-vol-/, '') + ' » · choisis le dossier';
+          list.append(r); i.focus();
+        } else {
+          r.dataset.path = path;
+          $('[data-path]', r).textContent = path;
+          list.append(r);
+        }
+        update();
+      };
+      f.addEventListener('click', e => {
+        const t = e.target.closest('button');
+        if (!t || !f.contains(t)) return;
+        if (t.matches('[data-kept-toggle]')) {
+          const r = t.closest('.krow'), on = r.dataset.on === '0';
+          r.dataset.on = on ? '1' : '0';
+          t.setAttribute('aria-checked', on);
+          update();
+        } else if (t.matches('[data-kept-drop]')) {
+          const r = t.closest('.krow');
+          if (r.dataset.chip) $$('[data-kept-path], [data-kept-vol]', f).forEach(c => { if ((c.dataset.keptPath || c.dataset.keptVol) === r.dataset.chip) c.hidden = false; });
+          r.remove(); update();
+        } else if (t.matches('[data-kept-path], [data-kept-vol]')) {
+          add(t.dataset.keptPath, t.dataset.keptVol);
+          list.lastElementChild.dataset.chip = t.dataset.keptPath || t.dataset.keptVol;
+          t.hidden = true;
+        } else if (t.matches('[data-kept-add]')) {
+          const p = input.value.trim().replace(/\/+$/, '');
+          if (!p.startsWith('/')) return say('Indique un chemin absolu, par ex. /data.');
+          if (taken().includes(p)) return say(p + ' est déjà gardé.');
+          say(''); input.value = ''; add(p);
+        } else if (t.matches('[data-kept-reset]')) {
+          $$('.krow.new', list).forEach(r => r.remove());
+          $$('.krow[data-on="0"]', list).forEach(r => { r.dataset.on = '1'; $('[data-kept-toggle]', r).setAttribute('aria-checked', 'true'); });
+          $$('[data-kept-path], [data-kept-vol]', f).forEach(c => { c.hidden = false; });
+          say(''); update();
+        }
+      });
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('[data-kept-add]', f).click(); } });
+    });
     // Project colour: presets and the slider preview the avatar and the page's tint;
     // a preset is saved right away, the slider with its button.
     const range = $('.hue-range');

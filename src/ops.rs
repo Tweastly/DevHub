@@ -216,7 +216,7 @@ pub fn volumes_text(p: &db::Project) -> String {
 }
 
 /// Paths DevHub mounts itself in a project's container.
-fn reserved_paths(game: bool) -> &'static [&'static str] {
+pub fn reserved_paths(game: bool) -> &'static [&'static str] {
     if game { &["/workspace", "/data"] } else { &["/workspace"] }
 }
 
@@ -447,9 +447,45 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             let mounts = parse_volumes(&text, name, reserved_paths(p.is_game()))?;
             check_volumes(st, name, &mounts).await?;
             detail = format!("{name} ({} volume(s))", mounts.len());
+            // A folder kept from now on starts with what the container has there: it is
+            // saved before the container goes, and put back into its new (empty) volume.
+            let mut saved = Vec::new();
+            if docker::state(d, name).await != "absent" {
+                for m in mounts.iter().filter(|m| !p.mounts.iter().any(|o| o.path == m.path)) {
+                    if d.inspect_volume(&m.volume).await.is_ok() {
+                        continue; // existing data (another project's, or an old one) wins
+                    }
+                    let file = std::env::temp_dir().join(format!("devhub-keep-{}.tar", random_token(8)));
+                    match docker::save_dir(d, name, &m.path, &file).await {
+                        Ok(true) => saved.push((m.path.clone(), file)),
+                        Ok(false) => {}
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&file);
+                            for (_, f) in &saved {
+                                let _ = std::fs::remove_file(f);
+                            }
+                            return Err(format!("copie de {} impossible : {e}", m.path));
+                        }
+                    }
+                }
+            }
             p.mounts = mounts;
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
-            docker::create(d, &p, &st.limits()).await.map_err(internal)?;
+            let created = docker::create(d, &p, &st.limits()).await.map_err(internal);
+            let mut failed = Vec::new();
+            for (path, file) in &saved {
+                if created.is_ok() {
+                    let parent = path.rsplit_once('/').map(|x| x.0).filter(|x| !x.is_empty()).unwrap_or("/");
+                    if let Err(e) = docker::restore_dir(d, name, parent, file).await {
+                        failed.push(format!("{path} : {e}"));
+                    }
+                }
+                let _ = std::fs::remove_file(file);
+            }
+            created?;
+            if !failed.is_empty() {
+                return Err(format!("volumes appliqués, mais contenu non recopié : {}", failed.join(" · ")));
+            }
         }
         Change::Rename(new) => {
             let new = new.trim().to_string();
