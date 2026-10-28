@@ -207,14 +207,14 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
     }
     let mut mounts = vec![Mount {
         target: Some("/workspace".into()),
-        source: Some(volume_name(&p.name)),
+        source: Some(p.main_volume()),
         typ: Some(MountTypeEnum::VOLUME),
         ..Default::default()
     }];
     let vol = |target: &str, source: String| Mount { target: Some(target.into()), source: Some(source), typ: Some(MountTypeEnum::VOLUME), ..Default::default() };
     if p.is_game() {
         // Both images keep the world in /data: same volume, so the Files tab shows it.
-        mounts.push(vol("/data", volume_name(&p.name)));
+        mounts.push(vol("/data", p.main_volume()));
     }
     for m in &p.mounts {
         mounts.push(vol(&m.path, m.volume.clone()));
@@ -260,7 +260,7 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
             init: Some(true),
             security_opt: Some(vec!["no-new-privileges".into()]),
             cap_drop: Some(vec!["NET_RAW".into(), "SYS_ADMIN".into(), "SYS_PTRACE".into()]),
-            restart_policy: Some(RestartPolicy { name: Some(RestartPolicyNameEnum::UNLESS_STOPPED), ..Default::default() }),
+            restart_policy: Some(RestartPolicy { name: Some(if p.autostart { RestartPolicyNameEnum::UNLESS_STOPPED } else { RestartPolicyNameEnum::NO }), ..Default::default() }),
             mounts: Some(mounts),
             ..Default::default()
         }),
@@ -344,7 +344,8 @@ pub async fn restart(d: &Docker, p: &str) -> anyhow::Result<()> {
     Ok(d.restart_container(&container_name(p), None).await?)
 }
 
-pub async fn destroy(d: &Docker, p: &str, keep_data: bool) -> anyhow::Result<()> {
+/// Removes the container and its network, and `volume` when given.
+pub async fn destroy(d: &Docker, p: &str, volume: Option<&str>) -> anyhow::Result<()> {
     // A container that can't be removed (Docker unreachable…) keeps the project in DevHub:
     // otherwise it would keep running, and holding its ports, with nothing to manage it.
     match d.remove_container(&container_name(p), Some(RemoveContainerOptions { force: true, ..Default::default() })).await {
@@ -352,8 +353,8 @@ pub async fn destroy(d: &Docker, p: &str, keep_data: bool) -> anyhow::Result<()>
         Err(e) => anyhow::bail!("conteneur impossible à supprimer : {e}"),
     }
     let _ = d.remove_network(&network_name(p)).await;
-    if !keep_data {
-        let _ = d.remove_volume(&volume_name(p), None).await;
+    if let Some(v) = volume {
+        let _ = d.remove_volume(v, None).await;
     }
     Ok(())
 }

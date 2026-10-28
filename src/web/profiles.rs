@@ -117,3 +117,61 @@ pub fn avatar_card(p: &db::Profile, back: &str) -> Markup {
         }
     }
 }
+
+// ---------- Project logos ----------
+
+pub async fn logo_get(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Result<Response, Response> {
+    crate::auth::require_project(&st, &jar, &name, crate::auth::Need::See)?;
+    Ok(match db::logo(&st.db.lock().unwrap(), &name) {
+        Some((bytes, typ)) => (
+            [
+                (axum::http::header::CONTENT_TYPE, typ),
+                (axum::http::header::CACHE_CONTROL, "private, max-age=31536000, immutable".to_string()),
+                (axum::http::header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    })
+}
+
+pub async fn logo_set(
+    State(st): State<AppState>,
+    jar: CookieJar,
+    Path(name): Path<String>,
+    mut mp: axum::extract::Multipart,
+) -> Result<Redirect, Response> {
+    let me = crate::auth::require_project(&st, &jar, &name, crate::auth::Need::Manage)?;
+    let back = format!("/projects/{name}/settings#general");
+    let mut data = Vec::new();
+    while let Ok(Some(field)) = mp.next_field().await {
+        if field.name() == Some("logo") {
+            match field.bytes().await {
+                Ok(b) => data = b.to_vec(),
+                Err(_) => return Ok(err_to(&back, "image trop lourde (2 Mo maximum)")),
+            }
+        }
+    }
+    if data.is_empty() {
+        return Ok(err_to(&back, "choisis une image"));
+    }
+    if data.len() > AVATAR_MAX {
+        return Ok(err_to(&back, "image trop lourde (2 Mo maximum)"));
+    }
+    let Some(typ) = image_type(&data) else {
+        return Ok(err_to(&back, "format non pris en charge : PNG, JPEG, WebP ou GIF"));
+    };
+    let c = st.db.lock().unwrap();
+    db::set_logo(&c, &name, Some((&data, typ))).map_err(|e| crate::AppError(e).into_response())?;
+    db::audit(&c, &me.actor(), "project.logo", &name);
+    Ok(Redirect::to(&crate::with_param(&back, "ok", "Logo enregistré.")))
+}
+
+pub async fn logo_remove(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>) -> Result<Redirect, Response> {
+    let me = crate::auth::require_project(&st, &jar, &name, crate::auth::Need::Manage)?;
+    let c = st.db.lock().unwrap();
+    db::set_logo(&c, &name, None).map_err(|e| crate::AppError(e).into_response())?;
+    db::audit(&c, &me.actor(), "project.logo", &format!("{name} (retiré)"));
+    Ok(Redirect::to(&crate::with_param(&format!("/projects/{name}/settings#general"), "ok", "Logo retiré.")))
+}

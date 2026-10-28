@@ -39,7 +39,7 @@ pub(crate) async fn list(st: &AppState) -> Vec<Vol> {
 fn uses<'a>(projects: &'a [Project], volume: &str) -> Vec<(&'a str, String)> {
     let mut out = Vec::new();
     for p in projects {
-        if docker::volume_name(&p.name) == volume {
+        if p.main_volume() == volume {
             out.push((p.name.as_str(), "/workspace".to_string()));
             if p.is_game() {
                 out.push((p.name.as_str(), "/data".to_string()));
@@ -60,7 +60,7 @@ const ARROW: &str = r#"<svg class="varrow" width="56" height="14" viewBox="0 0 5
 pub(crate) fn editor(value: &str, vols: &[Vol], projects: &[Project], this: Option<&Project>) -> Markup {
     let choices: Vec<serde_json::Value> = vols
         .iter()
-        .filter(|v| this.is_none_or(|p| v.name != docker::volume_name(&p.name)))
+        .filter(|v| this.is_none_or(|p| v.name != p.main_volume()))
         .map(|v| {
             let users: Vec<&str> = uses(projects, &v.name).into_iter().map(|(p, _)| p).filter(|p| this.is_none_or(|t| t.name != *p)).collect();
             let orphan = uses(projects, &v.name).is_empty();
@@ -78,7 +78,7 @@ pub(crate) fn editor(value: &str, vols: &[Vol], projects: &[Project], this: Opti
                         @match main { Some(n) => b.mono { (n) }, None => b { "Volume du projet" } }
                         span.tag { "principal" }
                         span.spacer {}
-                        @if let Some(n) = main { span.vsz.mono data-vsize=(docker::volume_name(n)) {} }
+                        @if main.is_some() { span.vsz.mono data-vsize=(this.map(|p| p.main_volume()).unwrap_or_default()) {} }
                     }
                     div.vbar { i {} }
                 }

@@ -255,6 +255,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}/files/new", post(files::create))
         .route("/projects/{name}/files/rename", post(files::rename))
         .route("/projects/{name}/files/delete", post(files::delete))
+        .route("/projects/{name}/logo", get(web::profiles::logo_get).post(web::profiles::logo_set).layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)))
+        .route("/projects/{name}/logo/remove", post(web::profiles::logo_remove))
         .route("/projects/{name}/{action}", post(project_action))
         .route("/live/stats", get(live::stats))
         .route("/_caddy/ask", get(proxy::caddy_ask))
@@ -498,6 +500,10 @@ async fn project_action(
             ops::Change::SetPublic(!p.public)
         }
         "pin" => ops::Change::Pin(true),
+        "rename" => ops::Change::Rename(field("name").trim().to_ascii_lowercase()),
+        "describe" => ops::Change::Describe(field("description").to_string()),
+        "color" => ops::Change::Color(field("hue").trim().parse().map_err(|_| fail("couleur invalide".into()).into_response())?),
+        "autostart" => ops::Change::Autostart(field("on") == "1"),
         "launch" => ops::Change::Launch { service: field("mode") == "service" },
         "unpin" => ops::Change::Pin(false),
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),
@@ -549,6 +555,7 @@ async fn project_action(
         _ => return Err(bad("action inconnue")),
     };
     let is_domain = action == "domain-add";
+    let renamed = (action == "rename").then(|| field("name").trim().to_ascii_lowercase());
     match ops::apply(&st, &name, change, &who.actor()).await {
         Ok(()) => {
             // Shown as a toast by the page (actions are sent in the background).
@@ -570,7 +577,23 @@ async fn project_action(
                 "domain-remove" => "Sous-domaine retiré.".into(),
                 "launch" => "Mode de lancement changé, conteneur recréé.".into(),
                 "rotate-token" => "Nouvelle URL MCP générée.".into(),
+                "rename" => format!("Projet renommé en {}.", renamed.as_deref().unwrap_or("")),
+                "describe" => "Description enregistrée.".into(),
+                "color" => "Couleur enregistrée.".into(),
+                "autostart" if field("on") == "1" => "Démarrage automatique activé.".into(),
+                "autostart" => "Démarrage automatique désactivé.".into(),
                 _ => String::new(),
+            };
+            // A renamed project lives at a new address: follow it.
+            let back = match &renamed {
+                Some(new) if *new != name => {
+                    let old = format!("/projects/{name}");
+                    match back.strip_prefix(&old) {
+                        Some(rest) if rest.is_empty() || rest.starts_with(['/', '?', '#']) => format!("/projects/{new}{rest}"),
+                        _ => back,
+                    }
+                }
+                _ => back,
             };
             Ok(Redirect::to(&if done.is_empty() { back } else { with_param(&back, "ok", &done) }))
         }

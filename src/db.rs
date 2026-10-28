@@ -53,6 +53,13 @@ pub struct Project {
     pub service: bool,
     /// Extra Docker volumes mounted in the container, besides its own /workspace volume.
     pub mounts: Vec<VolumeMount>,
+    /// One line about the project, shown under its name.
+    pub description: String,
+    /// Its /workspace volume when it isn't devhub-vol-<name>: a renamed project keeps its
+    /// data (Docker can't rename a volume).
+    pub volume: Option<String>,
+    /// Docker restarts the container after a crash or a server reboot.
+    pub autostart: bool,
 }
 
 /// A Docker volume mounted at `path` in a project's container.
@@ -63,6 +70,10 @@ pub struct VolumeMount {
 }
 
 impl Project {
+    /// The Docker volume mounted on /workspace (and /data for game servers).
+    pub fn main_volume(&self) -> String {
+        self.volume.clone().unwrap_or_else(|| crate::docker::volume_name(&self.name))
+    }
     /// Ports served over HTTP(S) through the subdomain proxy.
     pub fn http_ports(&self) -> impl Iterator<Item = &PortMap> {
         self.ports.iter().filter(|m| !m.is_public())
@@ -113,6 +124,10 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE projects ADD COLUMN mcp_last_used INTEGER", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN service INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN mounts TEXT NOT NULL DEFAULT '[]'", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN volume TEXT", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN autostart INTEGER NOT NULL DEFAULT 1", []);
+    c.execute_batch("CREATE TABLE IF NOT EXISTS project_logos(name TEXT PRIMARY KEY, data BLOB NOT NULL, type TEXT NOT NULL, ver INTEGER NOT NULL)")?;
     let _ = c.execute("ALTER TABLE images ADD COLUMN volumes TEXT NOT NULL DEFAULT ''", []);
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
     let _ = c.execute("ALTER TABLE sessions ADD COLUMN passkey_id INTEGER", []);
@@ -316,10 +331,13 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         mcp_last_used: r.get(12)?,
         service: r.get::<_, i64>(13)? != 0,
         mounts: serde_json::from_str(&r.get::<_, String>(14)?).unwrap_or_default(),
+        description: r.get(15)?,
+        volume: r.get(16)?,
+        autostart: r.get::<_, i64>(17)? != 0,
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts, description, volume, autostart";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -339,8 +357,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts, description, volume, autostart)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             p.name,
             p.template,
@@ -356,7 +374,10 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             p.pinned as i64,
             p.mcp_last_used,
             p.service as i64,
-            serde_json::to_string(&p.mounts)?
+            serde_json::to_string(&p.mounts)?,
+            p.description,
+            p.volume,
+            p.autostart as i64
         ],
     )?;
     Ok(())
@@ -365,6 +386,44 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
 pub fn delete_project(c: &Connection, name: &str) -> anyhow::Result<()> {
     c.execute("DELETE FROM projects WHERE name=?1", [name])?;
     c.execute("DELETE FROM domains WHERE project=?1", [name])?;
+    c.execute("DELETE FROM project_logos WHERE name=?1", [name])?;
+    Ok(())
+}
+
+/// Renames a project everywhere it is stored: its row (keeping its volume), its custom
+/// domains, colour, logo and the profiles that may see it.
+pub fn rename_project(c: &Connection, old: &str, new: &str) -> anyhow::Result<()> {
+    let tx = c.unchecked_transaction()?;
+    tx.execute("UPDATE projects SET name=?2, volume=COALESCE(volume, ?3) WHERE name=?1", params![old, new, crate::docker::volume_name(old)])?;
+    tx.execute("UPDATE domains SET project=?2 WHERE project=?1", params![old, new])?;
+    tx.execute("UPDATE project_colors SET name=?2 WHERE name=?1", params![old, new])?;
+    tx.execute("UPDATE project_logos SET name=?2 WHERE name=?1", params![old, new])?;
+    tx.execute("UPDATE metrics SET scope=?2 WHERE scope=?1", params![old, new])?;
+    tx.commit()?;
+    rename_in_profiles(c, old, Some(new));
+    Ok(())
+}
+
+pub fn set_color(c: &Connection, name: &str, hue: i64) -> anyhow::Result<()> {
+    c.execute("INSERT OR REPLACE INTO project_colors(name, hue) VALUES (?1,?2)", params![name, hue.rem_euclid(360)])?;
+    Ok(())
+}
+
+/// Version of each project's logo (bumped on change, for caching), by project.
+pub fn logo_versions(c: &Connection) -> std::collections::HashMap<String, i64> {
+    let Ok(mut s) = c.prepare("SELECT name, ver FROM project_logos") else { return Default::default() };
+    s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))).map(|rows| rows.flatten().collect()).unwrap_or_default()
+}
+
+pub fn logo(c: &Connection, name: &str) -> Option<(Vec<u8>, String)> {
+    c.query_row("SELECT data, type FROM project_logos WHERE name=?1", [name], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+}
+
+pub fn set_logo(c: &Connection, name: &str, image: Option<(&[u8], &str)>) -> anyhow::Result<()> {
+    match image {
+        Some((data, typ)) => c.execute("INSERT OR REPLACE INTO project_logos(name, data, type, ver) VALUES (?1,?2,?3,?4)", params![name, data, typ, now()])?,
+        None => c.execute("DELETE FROM project_logos WHERE name=?1", [name])?,
+    };
     Ok(())
 }
 

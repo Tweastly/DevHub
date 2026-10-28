@@ -94,6 +94,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
         div.pband {
             a.back href="/projects" { "← Tous les projets" }
             div.phead {
+                (ctx.avatar(n, "lg phead-av", None))
                 h1 { (n) }
                 (state_pill(ctx, n, &x.s.state))
                 @if x.p.first_http().is_some() {
@@ -123,6 +124,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                     }
                 }
             }
+            @if !x.p.description.is_empty() { p.phead-desc { (x.p.description) } }
             div.phead-meta { (default_subtitle(ctx, x)) }
             nav.tabs aria-label="Sections du projet" {
                 a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
@@ -138,7 +140,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
     if let Some(t) = title_crumb {
         crumbs.push((t.into(), None));
     }
-    render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { (head) div class=[ro.then_some("ro")] { (body) } })
+    render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { div.ptint style={"--pc:" (ctx.color(n))} { (head) div class=[ro.then_some("ro")] { (body) } } })
 }
 
 fn default_subtitle(ctx: &Ctx, x: &P) -> Markup {
@@ -146,6 +148,88 @@ fn default_subtitle(ctx: &Ctx, x: &P) -> Markup {
         span { (x.p.image) }
         @if let Some(u) = main_url(ctx, x) { span { "·" } a.link href=(u) target="_blank" { (u.trim_start_matches("https://")) " ↗" } }
         @if x.s.state == "running" { @if let Some(t) = x.d.started_at { span { "· démarré " (ago(t)) } } }
+    }
+}
+
+/// Hues offered in the colour picker (the slider allows any other).
+const HUES: [i64; 10] = [25, 45, 95, 145, 175, 200, 225, 260, 295, 335];
+
+/// Name, description, logo, colour, start on boot and pin: the project's identity.
+fn general_card(ctx: &Ctx, x: &P, base: &str, here: &str, apps: Option<&str>) -> Markup {
+    let n = &x.p.name;
+    let hue = ctx.hue(n);
+    let back = format!("{here}#general");
+    html! {
+        div.card #general {
+            div.card-h { h3 { "Général" } span.sub { "nom, apparence et démarrage" } }
+            div.card-b.gen {
+                div.gen-row {
+                    div.gen-l { b { "Logo" } p.help { "PNG, JPEG, WebP ou GIF, 2 Mo max. Carré de préférence." } }
+                    div.gen-r.row {
+                        span #gen-av style={"--pc:" (ctx.color(n))} { (ctx.avatar(n, "xl", None)) }
+                        form.row.tight method="post" action={(base) "/logo"} enctype="multipart/form-data" {
+                            label.btn.sm {
+                                (icon("upload")) @if ctx.logos.contains_key(n.as_str()) { "Changer" } @else { "Ajouter un logo" }
+                                input.sr type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/gif" onchange="this.form.requestSubmit()";
+                            }
+                            @if ctx.logos.contains_key(n.as_str()) {
+                                button.btn.sm.ghost formaction={(base) "/logo/remove"} formenctype="application/x-www-form-urlencoded" { "Retirer" }
+                            }
+                        }
+                    }
+                }
+                form.gen-row method="post" action={(base) "/color"} {
+                    (back_field(&back))
+                    div.gen-l { b { "Couleur" } p.help { "Pour l'avatar et les graphiques du projet." } }
+                    div.gen-r {
+                        div.hues role="radiogroup" aria-label="Couleur du projet" {
+                            @for h in HUES {
+                                label.hue style={"--h:" (h)} title={"Teinte " (h)} {
+                                    input type="radio" name="preset" value=(h) checked[h == hue] data-hue=(h);
+                                    span {}
+                                }
+                            }
+                        }
+                        div.row style="margin-top:12px" {
+                            input.hue-range type="range" name="hue" min="0" max="359" value=(hue) aria-label="Teinte libre";
+                            button.btn.sm { "Enregistrer" }
+                        }
+                    }
+                }
+                form.gen-row method="post" action={(base) "/rename"} data-confirm={"Renommer " (n) " ?"} data-confirm-body="Le conteneur est recréé sous le nouveau nom (quelques secondes d'interruption). Les fichiers, volumes et domaines personnalisés sont gardés ; l'adresse automatique change." data-tone="warn" data-confirm-ok="Renommer" {
+                    (back_field(&format!("{here}#general")))
+                    div.gen-l {
+                        b { "Nom" }
+                        p.help {
+                            @if let Some(a) = apps { "Adresse : " span.mono #gen-host { (n) } "." (a) } @else { "Minuscules, chiffres et tirets." }
+                        }
+                    }
+                    div.gen-r.row {
+                        input.mono-input name="name" value=(n) required maxlength="32" pattern="[a-z0-9\\-]+" autocomplete="off" spellcheck="false" style="flex:1;min-width:0";
+                        button.btn.sm { "Renommer" }
+                    }
+                }
+                form.gen-row method="post" action={(base) "/describe"} {
+                    (back_field(&back))
+                    div.gen-l { b { "Description" } p.help { "Une phrase, affichée sous le nom (140 caractères)." } }
+                    div.gen-r.row {
+                        input name="description" value=(x.p.description) maxlength="140" placeholder="À quoi sert ce projet ?" style="flex:1;min-width:0";
+                        button.btn.sm { "Enregistrer" }
+                    }
+                }
+                form.gen-row method="post" action={(base) "/autostart"} {
+                    (back_field(&back))
+                    input type="hidden" name="on" value=(if x.p.autostart { "0" } else { "1" });
+                    div.gen-l { b { "Démarrage automatique" } p.help { "Relance le projet quand le serveur ou Docker redémarre." } }
+                    div.gen-r { button.switch role="switch" aria-checked=(x.p.autostart) aria-label="Démarrage automatique" { span {} } }
+                }
+                form.gen-row method="post" action={(base) (if x.p.pinned { "/unpin" } else { "/pin" })} {
+                    (back_field(&back))
+                    div.gen-l { b { "Épinglé" } p.help { "Affiché en haut de la barre latérale." } }
+                    div.gen-r { button.switch role="switch" aria-checked=(x.p.pinned) aria-label="Épingler" { span {} } }
+                }
+            }
+        }
     }
 }
 
@@ -739,6 +823,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:26px;align-items:start" class="settings-grid" {
             nav.nav.hide-m style="position:sticky;top:84px" {
                 div.nav-label style="padding-top:0" { "Sur cette page" }
+                a href="#general" { "Général" }
                 a href="#resources" { "Ressources" }
                 @if !x.p.is_game() { a href="#launch" { "Lancement" } }
                 a href="#env" { "Variables d'environnement" span.count { (x.p.env.len()) } }
@@ -746,6 +831,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 @if ctx.profile.admin { a href="#danger" style="color:var(--err)" { "Zone dangereuse" } }
             }
             div.stack {
+                (general_card(&ctx, &x, &base, &here, st.cfg.apps_domain.as_deref()))
                 div.card #resources {
                     div.card-h { h3 { "Ressources" } span.sub { "appliquées à chaud, sans redémarrage" } }
                     div.card-b {

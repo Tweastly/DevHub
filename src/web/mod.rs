@@ -451,6 +451,8 @@ pub struct Ctx {
     pub profile: db::Profile,
     /// Hue of each project (its colour everywhere: avatar, allocation bar…).
     pub colors: HashMap<String, i64>,
+    /// Version of each project's logo, for the ones that have one.
+    pub logos: HashMap<String, i64>,
 }
 
 impl Ctx {
@@ -458,13 +460,20 @@ impl Ctx {
     pub fn color(&self, name: &str) -> String {
         format!("hsl({} 62% 56%)", self.colors.get(name).copied().unwrap_or(25))
     }
-    /// Project avatar tinted with its colour: initials, or `icon` (game servers).
+    /// Project avatar: its logo, else tinted with its colour, initials or `icon` (game servers).
     pub fn avatar(&self, name: &str, class: &str, icon_name: Option<&str>) -> Markup {
         html! {
-            span class={"avatar pc " (class)} style={"--pc:" (self.color(name))} {
-                @if let Some(i) = icon_name { (icon(i)) } @else { (initials(name)) }
+            @if let Some(v) = self.logos.get(name) {
+                img class={"avatar pc logo " (class)} style={"--pc:" (self.color(name))} src={"/projects/" (name) "/logo?v=" (v)} alt="";
+            } @else {
+                span class={"avatar pc " (class)} style={"--pc:" (self.color(name))} {
+                    @if let Some(i) = icon_name { (icon(i)) } @else { (initials(name)) }
+                }
             }
         }
+    }
+    pub fn hue(&self, name: &str) -> i64 {
+        self.colors.get(name).copied().unwrap_or(25)
     }
     pub fn names(&self) -> Vec<String> {
         self.projects.iter().map(|p| p.name.clone()).collect()
@@ -493,6 +502,7 @@ pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
     let c = st.db.lock().unwrap();
     let mut projects = db::list_projects(&c).unwrap_or_default();
     let colors = db::colors(&c, &projects.iter().map(|p| p.name.clone()).collect::<Vec<_>>());
+    let logos = db::logo_versions(&c);
     projects.retain(|p| profile.sees(&p.name));
     let passkey_count = db::passkey_rows(&c).iter().filter(|k| k.profile_id == profile.id).count();
     let admin = db::setting(&c, crate::mcp_admin::ENABLED).is_some();
@@ -509,6 +519,7 @@ pub fn ctx(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
         projects,
         profile,
         colors,
+        logos,
     })
 }
 

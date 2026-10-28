@@ -286,6 +286,31 @@
   document.addEventListener('click', e => { $$('.spark-w').forEach(w => { if (!w.contains(e.target)) w.hideTip?.(); }); });
 
   function widgets() {
+    // Project colour: presets and the slider preview the avatar and the page's tint;
+    // a preset is saved right away, the slider with its button.
+    const range = $('.hue-range');
+    if (range && !range.dataset.ready) {
+      range.dataset.ready = 1;
+      const paint = h => {
+        const c = 'hsl(' + h + ' 62% 56%)';
+        $$('.ptint, #gen-av, #gen-av .avatar, .phead-av').forEach(el => el.style.setProperty('--pc', c));
+      };
+      range.addEventListener('input', () => {
+        paint(range.value);
+        $$('.hues input').forEach(i => { i.checked = i.value === range.value; });
+      });
+      $$('.hues input').forEach(i => i.addEventListener('change', () => {
+        range.value = i.value;
+        paint(i.value);
+        range.form.requestSubmit();
+      }));
+    }
+    // Rename: preview the automatic address while typing.
+    const host = $('#gen-host'), nameIn = host?.closest('form')?.querySelector('input[name=name]');
+    if (nameIn && !nameIn.dataset.ready) {
+      nameIn.dataset.ready = 1;
+      nameIn.addEventListener('input', () => { host.textContent = nameIn.value.trim().toLowerCase() || '…'; });
+    }
     // Projects page: "Sélectionner" shows a box on each project; the bar acts on the checked ones.
     const selBtn = $('[data-select-toggle]'), bar = $('#bulk');
     if (selBtn && bar && !selBtn.dataset.ready) {

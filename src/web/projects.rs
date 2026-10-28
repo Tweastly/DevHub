@@ -177,7 +177,7 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
     };
     let chip = |body: Markup, class: &str| html! { span class={"chip " (class)} { (body) } };
     html! {
-        article.card.pcard.lift {
+        article.card.pcard.lift.ptint style={"--pc:" (ctx.color(n))} {
             (pick(ctx, n))
             a.ptop href=(base) aria-label={"Aperçu de " (n)} {
                 div.hd {
@@ -193,6 +193,7 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
                     @let state = crate::ops::shown_state(&ctx.st, n, &r.s.state);
                     span class={"pill bare " (state)} data-live={(n) ":state"} { (state_label(&state)) }
                 }
+                @if !p.description.is_empty() { p.pdesc { (p.description) } }
                 @if running {
                     div.gauges {
                         div.g {

@@ -80,6 +80,12 @@ pub enum Change {
     Env(BTreeMap<String, String>),
     /// Extra volumes, as typed in the form (see `parse_volumes`).
     Volumes(String),
+    /// New name: new container and subdomain, same data.
+    Rename(String),
+    Describe(String),
+    /// Hue (0–359) of the project's colour (avatar, charts).
+    Color(i64),
+    Autostart(bool),
     Delete { keep_data: bool },
     /// `port: None` = the project's first port.
     AddDomain { host: String, port: Option<u16> },
@@ -103,6 +109,10 @@ impl Change {
             Change::Ports(_) => "ports",
             Change::Env(_) => "env",
             Change::Volumes(_) => "volumes",
+            Change::Rename(_) => "rename",
+            Change::Describe(_) => "describe",
+            Change::Color(_) => "color",
+            Change::Autostart(_) => "autostart",
             Change::Delete { .. } => "delete",
             Change::AddDomain { .. } => "domain-add",
             Change::RemoveDomain(_) => "domain-remove",
@@ -266,11 +276,21 @@ pub fn load(st: &AppState, name: &str) -> R<db::Project> {
 
 /// Validates and records the project, then builds its container in the background
 /// (pulling an image can take minutes).
-pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project> {
-    let name = np.name.trim().to_string();
+/// a-z, 0-9 and dashes, 32 characters at most: the name is also the subdomain.
+fn valid_name(name: &str) -> R<()> {
     if name.is_empty() || name.len() > 32 || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
         return Err("nom invalide (a-z, 0-9, -, 32 caractères max)".into());
     }
+    // Taken by the pages /projects/new and /projects/bulk.
+    if matches!(name, "new" | "bulk") {
+        return Err(format!("« {name} » est réservé, choisis un autre nom"));
+    }
+    Ok(())
+}
+
+pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project> {
+    let name = np.name.trim().to_string();
+    valid_name(&name)?;
     if db::get_project(&st.db.lock().unwrap(), &name).map_err(internal)?.is_some() {
         return Err(format!("le projet {name} existe déjà"));
     }
@@ -332,6 +352,9 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         mcp_last_used: None,
         service,
         mounts,
+        description: String::new(),
+        volume: None,
+        autostart: true,
     };
     {
         let c = st.db.lock().unwrap();
@@ -428,6 +451,54 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
             docker::create(d, &p, &st.limits()).await.map_err(internal)?;
         }
+        Change::Rename(new) => {
+            let new = new.trim().to_string();
+            if new == *name {
+                return Ok(());
+            }
+            valid_name(&new)?;
+            if db::get_project(&st.db.lock().unwrap(), &new).map_err(internal)?.is_some() {
+                return Err(format!("le projet {new} existe déjà"));
+            }
+            if st.builds.lock().unwrap().get(name).is_some_and(|b| b.error.is_none()) {
+                return Err("construction en cours : attends qu'elle finisse".into());
+            }
+            // Same data: the volume keeps its name, only the container, its network and
+            // the subdomain change.
+            let was_running = docker::state(d, name).await == "running";
+            docker::destroy(d, name, None).await.map_err(internal)?;
+            db::rename_project(&st.db.lock().unwrap(), name, &new).map_err(internal)?;
+            st.builds.lock().unwrap().remove(name);
+            st.stats.lock().unwrap().remove(name);
+            detail = format!("{name} → {new}");
+            let p = load(st, &new)?;
+            docker::create(d, &p, &st.limits()).await.map_err(internal)?;
+            if !was_running {
+                let _ = docker::stop(d, &new).await;
+            }
+        }
+        Change::Describe(text) => {
+            p.description = text.trim().chars().take(140).collect();
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+            return Ok(());
+        }
+        Change::Color(hue) => {
+            db::set_color(&st.db.lock().unwrap(), name, hue).map_err(internal)?;
+            return Ok(());
+        }
+        Change::Autostart(on) => {
+            p.autostart = on;
+            detail = format!("{name} → {}", if on { "démarrage automatique" } else { "démarrage manuel" });
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+            // The restart policy changes in place: no recreation.
+            let policy = bollard::models::RestartPolicy {
+                name: Some(if on { bollard::models::RestartPolicyNameEnum::UNLESS_STOPPED } else { bollard::models::RestartPolicyNameEnum::NO }),
+                ..Default::default()
+            };
+            let _ = d
+                .update_container(&docker::container_name(name), bollard::container::UpdateContainerOptions::<String> { restart_policy: Some(policy), ..Default::default() })
+                .await;
+        }
         Change::AddDomain { host, port } => {
             let host = subdomain_host(st, &host)?;
             let base = crate::proxy::base_host(st);
@@ -493,14 +564,15 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             return Ok(());
         }
         Change::Delete { keep_data } => {
-            docker::destroy(d, name, keep_data).await.map_err(internal)?;
+            docker::destroy(d, name, None).await.map_err(internal)?;
             if !keep_data {
-                // Its extra volumes go too, unless another project still mounts them.
+                // Its volumes go too, unless another project still mounts them.
                 let others = db::list_projects(&st.db.lock().unwrap()).map_err(internal)?;
-                for m in &p.mounts {
-                    let used = others.iter().filter(|o| o.name != p.name).any(|o| docker::volume_name(&o.name) == m.volume || o.mounts.iter().any(|x| x.volume == m.volume));
+                let vols = std::iter::once(p.main_volume()).chain(p.mounts.iter().map(|m| m.volume.clone()));
+                for v in vols {
+                    let used = others.iter().filter(|o| o.name != p.name).any(|o| o.main_volume() == v || o.mounts.iter().any(|x| x.volume == v));
                     if !used {
-                        let _ = d.remove_volume(&m.volume, None).await;
+                        let _ = d.remove_volume(&v, None).await;
                     }
                 }
             }
