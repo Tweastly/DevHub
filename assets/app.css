@@ -1271,7 +1271,7 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ptabs { display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); align-self: flex-start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .ptabs a { padding: 7px 13px; border-radius: 7px; color: var(--text-body); font-size: 13.5px; white-space: nowrap; }
 .ptabs a:hover { color: var(--text); background: var(--hover); }
-.ptabs a.on { color: var(--text); background: var(--card-2); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+.ptabs a.on { color: var(--text); background: color-mix(in srgb, var(--text) 11%, var(--bg)); font-weight: 600; }
 @media (max-width: 900px) {
   .phero { padding: 16px; gap: 14px; }
   .phero-top { flex-wrap: wrap; align-items: flex-start; }
