@@ -6,4 +6,5 @@
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 	reverse_proxy devhub:8080
+	import restarting
 }

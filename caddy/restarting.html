@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>DevHub redémarre</title>
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+<style>
+:root{color-scheme:dark light;--bg:#121211;--card:#1a1a18;--line:#262521;--fg:#f2f1ed;--dim:#a8a49e;--accent:#e08350}
+@media (prefers-color-scheme:light){:root{--bg:#f6f5f2;--card:#fff;--line:#e4e2dc;--fg:#1d1c1a;--dim:#6b6760}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:100%;max-width:420px;padding:32px 28px;border-radius:16px;background:var(--card);border:1px solid var(--line);text-align:center}
+.spin{width:36px;height:36px;margin:0 auto 18px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+h1{margin:0 0 6px;font-size:20px;font-weight:600}
+p{margin:0;color:var(--dim)}
+small{display:block;margin-top:18px;color:var(--dim);font-size:12.5px}
+</style>
+</head>
+<body>
+<main>
+  <div class="spin" aria-hidden="true"></div>
+  <h1>DevHub redémarre…</h1>
+  <p>Une mise à jour est en cours. La page reprend toute seule dans quelques secondes.</p>
+  <small id="s">Nouvel essai automatique</small>
+</main>
+<script>
+(()=>{let n=0;const s=document.getElementById('s');
+const tick=async()=>{n++;try{const r=await fetch(location.href,{method:'HEAD',cache:'no-store'});if(r.status<502||r.status>504){location.reload();return;}}catch{}
+s.textContent='Toujours en cours… essai '+n;setTimeout(tick,Math.min(2000+n*500,6000));};
+setTimeout(tick,2000);})();
+</script>
+</body>
+</html>

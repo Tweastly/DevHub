@@ -6,6 +6,20 @@
 	}
 }
 
+# While DevHub restarts (update, crash), Caddy answers with a small page that
+# reloads itself, instead of an empty 502.
+(restarting) {
+	handle_errors 502 503 504 {
+		root * /etc/caddy
+		rewrite * /restarting.html
+		header Cache-Control no-store
+		header Retry-After 5
+		file_server {
+			status 503
+		}
+	}
+}
+
 {$DEVHUB_DOMAIN} {
 	# Compress pages, but never the live SSE streams (compression would buffer them).
 	encode {
@@ -26,6 +40,7 @@
 	reverse_proxy devhub:8080 {
 		flush_interval -1
 	}
+	import restarting
 }
 
 # Project subdomains: one wildcard certificate, or one per project (see these files).
@@ -38,4 +53,5 @@ https:// {
 		on_demand
 	}
 	reverse_proxy devhub:8080
+	import restarting
 }

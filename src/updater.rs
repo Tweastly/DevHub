@@ -454,6 +454,7 @@ command -v git >/dev/null || apk add -q --no-cache git
 git config --global --add safe.directory "$DIR"
 cd "$DIR"
 step "récupération du code"
+OLD=$(git rev-parse HEAD)
 if [ -n "$TOKEN" ]; then
   AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
   git -c http.extraHeader="Authorization: Basic $AUTH" pull --ff-only origin "$BRANCH"
@@ -470,7 +471,13 @@ else
   step "pas de binaire précompilé pour ce commit : compilation sur le serveur (dépendances en cache)"
 fi
 step "reconstruction de DevHub"
-docker compose -p "$PROJECT" up -d --build
+docker compose -p "$PROJECT" build devhub
+# Caddy is rebuilt only when its image changes: recreating it cuts every site
+# (Cloudflare then shows its 521 page). Its config is reloaded below instead.
+if [ -z "$(docker images -q devhub-caddy)" ] || ! git diff --quiet "$OLD" HEAD -- caddy/Dockerfile; then
+  docker compose -p "$PROJECT" build caddy
+fi
+docker compose -p "$PROJECT" up -d
 step "rechargement de Caddy"
 docker compose -p "$PROJECT" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "Caddy non rechargé"
 step "terminé""#;

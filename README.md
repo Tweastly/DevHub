@@ -50,7 +50,8 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Mises à jour
 - **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 5 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, binaire ou compilation, résultat).
-- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull` puis `docker compose up -d --build` depuis un conteneur temporaire, puis rechargement de Caddy).
+- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull`, reconstruction de DevHub depuis un conteneur temporaire, puis rechargement de Caddy). Caddy n'est reconstruit que si `caddy/Dockerfile` change : les sites ne sont jamais coupés.
+- **Pas de page d'erreur** pendant le redémarrage : Caddy affiche « DevHub redémarre… », qui se recharge toute seule dès que le panel répond.
 - **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
 - **Binaire précompilé** : GitHub Actions compile à chaque push (`.github/workflows/binary.yml`) ; la mise à jour télécharge le binaire et le panel redémarre en moins d'une minute. Sinon, le serveur compile avec un cache, seul le code modifié est recompilé.
 
