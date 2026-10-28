@@ -10,6 +10,7 @@ pub enum Tab {
     Overview,
     Network,
     Files,
+    Volumes,
     Terminal,
     Logs,
     Settings,
@@ -73,6 +74,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
         Tab::Network => format!("{base}/network"),
         Tab::Files => format!("{base}/files"),
         Tab::Terminal => format!("{base}/terminal"),
+        Tab::Volumes => format!("{base}/volumes"),
         Tab::Logs => format!("{base}/logs"),
         Tab::Settings => format!("{base}/settings"),
     };
@@ -84,6 +86,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
         Tab::Network => Some("Réseau"),
         Tab::Files => Some("Fichiers"),
         Tab::Terminal => Some("Terminal"),
+        Tab::Volumes => Some("Volumes"),
         Tab::Logs => Some("Journaux"),
         Tab::Settings => Some("Paramètres"),
     };
@@ -130,6 +133,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                 a class=(on(Tab::Overview)) href=(base) aria-current=[(tab == Tab::Overview).then_some("page")] { "Aperçu" }
                 a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" span.count { (n_addr) } }
                 a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
+                a class=(on(Tab::Volumes)) href={(base) "/volumes"} aria-current=[(tab == Tab::Volumes).then_some("page")] { "Volumes" span.count { (x.p.mounts.len() + 1) } }
                 a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal" }
                 a class=(on(Tab::Logs)) href={(base) "/logs"} data-reload aria-current=[(tab == Tab::Logs).then_some("page")] { "Journaux" }
                 @if manage { a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" } }
@@ -816,8 +820,6 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let all_cpu: f64 = ctx.projects.iter().map(|p| p.cpus.unwrap_or(def_cpu)).sum();
     let mem_max = mb(x.s.mem_limit);
     let cpu_lim = x.p.cpus.unwrap_or(def_cpu);
-    let vols = super::volumes::list(&st).await;
-    let image_vols = crate::docker::image_volumes(&st.docker, &x.p.image).await;
     let env_text: String = x.p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     let body = html! {
         (flash(&q))
@@ -828,7 +830,6 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 a href="#resources" { "Ressources" }
                 @if !x.p.is_game() { a href="#launch" { "Lancement" } }
                 a href="#env" { "Variables d'environnement" span.count { (x.p.env.len()) } }
-                a href="#volumes" { "Dossiers gardés" span.count { (x.p.mounts.len() + 1) } }
                 @if ctx.profile.admin { a href="#danger" style="color:var(--err)" { "Zone dangereuse" } }
             }
             div.stack {
@@ -880,7 +881,6 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         }
                     }
                 }
-                (super::volumes::kept_card(&x.p, &vols, &ctx.projects, &image_vols, &base, &format!("{here}#volumes")))
                 div.card #env {
                     div.card-h { h3 { "Variables d'environnement" } span.sub { "injectées au démarrage du conteneur" } }
                     @if !x.p.env.is_empty() {
@@ -1135,4 +1135,19 @@ pub async fn mc_command(st: &AppState, name: &str, cmd: &str) -> Result<String, 
         return Err(if out.is_empty() { "le serveur ne répond pas encore (RCON)".into() } else { out });
     }
     Ok(if out.is_empty() { "(commande exécutée, pas de réponse)".into() } else { out })
+}
+
+// ---------- Volumes ----------
+
+pub async fn volumes(State(st): State<AppState>, jar: CookieJar, Path(name): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
+    let ctx = ctx(&st, &jar)?;
+    let x = load(&ctx, &name).await?;
+    let base = format!("/projects/{}", x.p.name);
+    let vols = super::volumes::list(&st).await;
+    let image_vols = crate::docker::image_volumes(&st.docker, &x.p.image).await;
+    let body = html! {
+        (flash(&q))
+        (super::volumes::kept_card(&x.p, &vols, &ctx.projects, &image_vols, &base, &format!("{base}/volumes")))
+    };
+    Ok(frame(&ctx, &x, Tab::Volumes, body))
 }

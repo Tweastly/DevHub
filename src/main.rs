@@ -238,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}", get(web::project::overview))
         .route("/projects/{name}/network", get(web::project::network))
         .route("/projects/{name}/settings", get(web::project::settings))
+        .route("/projects/{name}/volumes", get(web::project::volumes).post(volumes_action))
         .route("/projects/{name}/workspace-size", get(web::project::workspace_size))
         .route("/projects/{name}/terminal", get(web::project::terminal))
         .route("/projects/{name}/terminal/ws", get(terminal::ws))
@@ -467,6 +468,11 @@ async fn bulk_action(State(st): State<AppState>, jar: CookieJar, Form(form): For
         url = with_param(&url, "err", &errors.join(" · "));
     }
     Ok(Redirect::to(&url))
+}
+
+/// POST on the Volumes tab's own URL: the "volumes" action.
+async fn volumes_action(st: State<AppState>, jar: CookieJar, Path(name): Path<String>, form: Form<HashMap<String, String>>) -> Result<Redirect, Response> {
+    project_action(st, jar, Path((name, "volumes".to_string())), form).await
 }
 
 async fn project_action(
