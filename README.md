@@ -24,7 +24,8 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
   - **Fichiers** : explorateur de `/workspace` (ou `/data`) avec éditeur (Ctrl+S), envoi (200 Mo max), création, renommage, suppression, téléchargement.
   - **Terminal** : la console de l'app (commandes RCON pour Minecraft Java, entrée standard pour PocketMine et les services, bash dans `/workspace` sinon) et un shell interactif xterm.js.
   - **Journaux** : logs du conteneur en direct, téléchargeables.
-  - **Paramètres** : ressources (RAM / CPU, à chaud), mode de lancement, variables d'environnement, suppression.
+  - **Paramètres** : ressources (RAM / CPU, à chaud), mode de lancement, variables d'environnement, volumes, suppression.
+- **Volumes en plus** de `/workspace`, à la création ou dans Paramètres : un nouveau volume pour un dossier de l'image (ex. `/var/lib/postgresql/data`), ou un volume existant, comme les données d'un projet supprimé. Les images du catalogue peuvent proposer leurs dossiers par défaut.
 - **Serveurs Minecraft** : Java (`itzg/minecraft-server`, Paper, port `25565/tcp`) et Bedrock (`ghcr.io/pmmp/pocketmine-mp`, port `19132/udp`). Joueurs en ligne, console, monde et plugins dans l'onglet Fichiers. La mémoire Java suit la limite RAM du projet. Ouvre le port dans le pare-feu (`ufw allow 19132/udp`).
 
 ### Réseau
@@ -36,8 +37,8 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Serveur
 - **Vue d'ensemble** : projets en ligne, CPU du serveur (colonnes 24 h / 7 j / 30 j avec l'heure et la valeur au survol), RAM réservée, activité récente.
-- **Images** : le catalogue « Mes images » (image, nom, ports et mode par défaut), proposé en tuiles à la création d'un projet, et les images Docker du serveur avec les projets qui les utilisent, leur taille, leur suppression et un nettoyage.
-- **Volumes** : les données de chaque projet (`/workspace`, `/data` pour les jeux) avec leur taille. Un volume orphelin (projet supprimé en gardant ses données) se récupère en recréant un projet du même nom, ou se supprime.
+- **Images** : le catalogue « Mes images » (image, nom, ports, volumes et mode par défaut), proposé en tuiles à la création d'un projet, et les images Docker du serveur avec les projets qui les utilisent, leur taille, leur suppression et un nettoyage.
+- **Volumes** : les données de chaque projet (`/workspace`, `/data` pour les jeux) et les volumes ajoutés, avec leur taille et où ils sont montés. Un volume orphelin (monté par aucun projet) s'attache à un projet ou se supprime.
 - **Ressources** : limites RAM / CPU du conteneur DevHub lui-même et limites par défaut des projets, appliquées à chaud.
 - **Isolation** : chaque projet a son réseau, ses limites RAM / CPU / PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker.
 - **Journal** : chaque action (y compris celles de Claude), filtres par acteur, projet et période, export CSV.

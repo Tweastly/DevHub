@@ -37,8 +37,10 @@ pub fn container_name(p: &str) -> String {
 pub fn network_name(p: &str) -> String {
     format!("devhub-net-{p}")
 }
+pub const VOLUME_PREFIX: &str = "devhub-vol-";
+
 pub fn volume_name(p: &str) -> String {
-    format!("devhub-vol-{p}")
+    format!("{VOLUME_PREFIX}{p}")
 }
 
 pub struct Limits {
@@ -210,6 +212,9 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
     if p.is_game() {
         // Both images keep the world in /data: same volume, so the Files tab shows it.
         mounts.push(vol("/data", volume_name(&p.name)));
+    }
+    for m in &p.mounts {
+        mounts.push(vol(&m.path, m.volume.clone()));
     }
 
     let labels = HashMap::from([("devhub.project".to_string(), p.name.clone())]);

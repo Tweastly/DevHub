@@ -392,6 +392,60 @@
       ['dragleave', 'drop'].forEach(ev => z.addEventListener(ev, () => z.classList.remove('over')));
       z.addEventListener('drop', e => { e.preventDefault(); input.files = e.dataTransfer.files; z.closest('form').requestSubmit(); });
     });
+    // Volumes editor: one row per volume (new, or an existing one) and its path, kept in
+    // the hidden "volumes" field as "path" / "volume:path" lines.
+    $$('[data-vols]').forEach(box => {
+      if (box.dataset.ready) return;
+      box.dataset.ready = 1;
+      const field = $('input[name=volumes]', box), list = $('.vols-list', box), opts = $('[data-vol-options]', box);
+      const sync = () => {
+        field.value = $$('.vol-row', list).map(r => {
+          const v = $('select', r).value, p = $('input', r).value.trim();
+          return p ? (v ? v + ':' + p : p) : '';
+        }).filter(Boolean).join('\n');
+      };
+      const row = (vol, path) => {
+        const r = document.createElement('div');
+        r.className = 'vol-row';
+        const sel = opts.cloneNode(true);
+        sel.hidden = false;
+        sel.removeAttribute('data-vol-options');
+        sel.setAttribute('aria-label', 'Volume');
+        if (vol && ![...sel.options].some(o => o.value === vol)) sel.add(new Option(vol, vol));
+        sel.value = vol || '';
+        const inp = document.createElement('input');
+        inp.className = 'mono-input';
+        inp.placeholder = '/data';
+        inp.setAttribute('aria-label', 'Monté sur');
+        inp.spellcheck = false;
+        inp.value = path || '';
+        const on = document.createElement('span');
+        on.className = 'dim';
+        on.textContent = 'sur';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'icon-btn sm bare';
+        del.title = 'Retirer';
+        del.setAttribute('aria-label', 'Retirer ce volume');
+        del.textContent = '×';
+        del.addEventListener('click', () => { r.remove(); sync(); });
+        r.append(sel, on, inp, del);
+        list.append(r);
+        return r;
+      };
+      const load = text => {
+        list.replaceChildren();
+        text.split(/[,\n]/).map(x => x.trim()).filter(Boolean).forEach(e => {
+          const i = e.lastIndexOf(':');
+          i > 0 ? row(e.slice(0, i), e.slice(i + 1)) : row('', e);
+        });
+      };
+      box.load = t => { load(t); sync(); };
+      load(field.value);
+      box.addEventListener('input', sync);
+      box.addEventListener('change', sync);
+      $('[data-vol-add]', box).addEventListener('click', () => { $('input', row('', '')).focus(); });
+    });
     // New project: live summary.
     const np = $('#new-project');
     if (np && !np.dataset.ready) {
@@ -420,6 +474,8 @@
         np.image.disabled = false;
         np.image.value = t.dataset.image;
         if (np.ports) np.ports.value = t.dataset.ports;
+        const vb = $('[data-vols]', np);
+        if (vb && vb.load) vb.load(t.dataset.volumes || '');
         if (np.service) np.service.checked = t.dataset.service === '1';
         upd();
       });

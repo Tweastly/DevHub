@@ -1,6 +1,7 @@
-//! Volumes: the data of each project (/workspace, or /data for game servers). A volume
-//! stays when a project is deleted with "Garder le volume": it is listed here as orphan,
-//! to bring back (a new project with the same name reuses it) or delete for good.
+//! Volumes: the data of each project (/workspace, or /data for game servers) and the extra
+//! volumes added at creation or in Paramètres. A volume no project mounts (project deleted
+//! with "Garder le volume", volume removed) is listed as orphan, to attach to a project
+//! again or delete for good.
 
 use super::*;
 use crate::docker;
@@ -8,15 +9,14 @@ use axum::extract::{Path, Query, State};
 use axum::response::Redirect;
 use bollard::volume::ListVolumesOptions;
 
-const PREFIX: &str = "devhub-vol-";
+const PREFIX: &str = docker::VOLUME_PREFIX;
 
-struct Vol {
-    name: String,
-    project: String,
+pub(crate) struct Vol {
+    pub name: String,
     created: Option<i64>,
 }
 
-async fn list(st: &AppState) -> Vec<Vol> {
+pub(crate) async fn list(st: &AppState) -> Vec<Vol> {
     let filters = HashMap::from([("name".to_string(), vec![PREFIX.to_string()])]);
     let mut v: Vec<Vol> = st
         .docker
@@ -27,12 +27,51 @@ async fn list(st: &AppState) -> Vec<Vol> {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|x| {
-            let project = x.name.strip_prefix(PREFIX)?.to_string();
-            Some(Vol { project, created: x.created_at.as_deref().and_then(timefmt::parse_rfc3339), name: x.name })
+            x.name.strip_prefix(PREFIX)?;
+            Some(Vol { created: x.created_at.as_deref().and_then(timefmt::parse_rfc3339), name: x.name })
         })
         .collect();
-    v.sort_by(|a, b| a.project.cmp(&b.project));
+    v.sort_by(|a, b| a.name.cmp(&b.name));
     v
+}
+
+/// Where each volume is mounted: (project, path) pairs.
+fn uses<'a>(projects: &'a [Project], volume: &str) -> Vec<(&'a str, String)> {
+    let mut out = Vec::new();
+    for p in projects {
+        if docker::volume_name(&p.name) == volume {
+            out.push((p.name.as_str(), "/workspace".to_string()));
+            if p.is_game() {
+                out.push((p.name.as_str(), "/data".to_string()));
+            }
+        }
+        out.extend(p.mounts.iter().filter(|m| m.volume == volume).map(|m| (p.name.as_str(), m.path.clone())));
+    }
+    out
+}
+
+/// The volumes editor of the new-project form and of Paramètres: one row per volume
+/// (a new one, or an existing DevHub volume, and where it is mounted), kept in the hidden
+/// `volumes` field as "path" / "volume:path" lines (see ops::parse_volumes).
+pub(crate) fn editor(value: &str, vols: &[Vol], projects: &[Project], this: Option<&str>) -> Markup {
+    html! {
+        div.vols data-vols {
+            input type="hidden" name="volumes" value=(value);
+            div.vols-list {}
+            button.btn.sm.ghost type="button" data-vol-add { (icon("plus")) "Ajouter un volume" }
+            select hidden data-vol-options {
+                option value="" { "Nouveau volume" }
+                @for v in vols {
+                    @let all: Vec<&str> = uses(projects, &v.name).into_iter().map(|(p, _)| p).collect();
+                    @let other = all.iter().find(|p| Some(**p) != this);
+                    option value=(v.name) {
+                        (v.name.strip_prefix(PREFIX).unwrap_or(&v.name))
+                        @if all.is_empty() { " · orphelin" } @else if let Some(o) = other { " · utilisé par " (o) }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn human(bytes: i64) -> String {
@@ -48,12 +87,12 @@ fn human(bytes: i64) -> String {
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx_admin(&st, &jar)?;
     let vols = list(&st).await;
-    let projects: HashMap<&str, &Project> = ctx.projects.iter().map(|p| (p.name.as_str(), p)).collect();
-    let orphans = vols.iter().filter(|v| !projects.contains_key(v.project.as_str())).count();
+    let used: Vec<Vec<(&str, String)>> = vols.iter().map(|v| uses(&ctx.projects, &v.name)).collect();
+    let orphans = used.iter().filter(|u| u.is_empty()).count();
     let body = html! {
         div.page-head { div {
             h1 { "Volumes" }
-            p.lead { "Les données de chaque projet : " code { "/workspace" } ", ou " code { "/data" } " pour un serveur de jeu. Elles survivent aux redémarrages et aux recréations du conteneur." }
+            p.lead { "Les données des projets : " code { "/workspace" } " (" code { "/data" } " pour un serveur de jeu), plus les volumes ajoutés à la création ou dans Paramètres. Elles survivent aux redémarrages et aux recréations du conteneur." }
         } }
         (flash(&q))
         div.card data-volume-sizes="/volumes/sizes" {
@@ -72,26 +111,29 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 (empty("folder", "Aucun volume", html! { "Chaque projet crée le sien à sa création." }, html! {}))
             } @else {
                 table.tbl {
-                    thead { tr { th { "Projet" } th.hide-m { "Monté sur" } th.num { "Taille" } th.hide-m { "Créé le" } th.num { "" } } }
+                    thead { tr { th { "Volume" } th.hide-m { "Monté sur" } th.num { "Taille" } th.hide-m { "Créé le" } th.num { "" } } }
                     tbody {
-                        @for v in &vols {
-                            @let p = projects.get(v.project.as_str());
+                        @for (v, u) in vols.iter().zip(&used) {
+                            @let short = v.name.strip_prefix(PREFIX).unwrap_or(&v.name);
                             tr {
                                 td {
-                                    @if let Some(p) = p { a.link href={"/projects/" (p.name)} { b { (p.name) } } }
-                                    @else { b.dim { (v.project) } " " span.pill.exited.plain { "orphelin" } }
+                                    @if u.is_empty() { b.dim { (short) } " " span.pill.exited.plain { "orphelin" } }
+                                    @else { b { (short) } }
                                     div.mono.dim.hide-m style="font-size:11.5px;margin-top:2px" { (v.name) }
                                 }
-                                td.mono.hide-m style="font-size:12.5px" {
-                                    @match p { Some(p) if p.is_game() => "/data", Some(_) => "/workspace", None => "—" }
+                                td.hide-m style="font-size:12.5px" {
+                                    @if u.is_empty() { span.dim { "—" } }
+                                    @for (p, path) in u {
+                                        div { a.link href={"/projects/" (p)} { (p) } " " span.mono.dim { (path) } }
+                                    }
                                 }
                                 td.num.mono { span data-vsize=(v.name) { "…" } }
                                 td.hide-m.dim { @if let Some(t) = v.created { (timefmt::date_short(t)) } }
                                 td.num {
-                                    @if let Some(p) = p {
-                                        a.btn.sm.ghost href={"/projects/" (p.name) "/files"} { "Fichiers" }
+                                    @if let Some((p, _)) = u.first() {
+                                        a.btn.sm.ghost href={"/projects/" (p) "/files"} { "Fichiers" }
                                     } @else {
-                                        form.inline method="post" action={"/volumes/" (v.project) "/delete"} data-confirm={"Supprimer le volume de " (v.project) " ?"} data-confirm-body="Ses données sont effacées pour de bon. Il ne pourra plus être récupéré en recréant le projet." data-tone="danger" data-confirm-ok="Supprimer le volume" data-confirm-type=(v.project) {
+                                        form.inline method="post" action={"/volumes/" (v.name) "/delete"} data-confirm={"Supprimer le volume " (short) " ?"} data-confirm-body="Ses données sont effacées pour de bon." data-tone="danger" data-confirm-ok="Supprimer le volume" data-confirm-type=(short) {
                                             button.btn.sm.danger-outline { "Supprimer" }
                                         }
                                     }
@@ -101,7 +143,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     }
                 }
                 @if orphans > 0 {
-                    div.card-f.help { "Un volume orphelin vient d'un projet supprimé en gardant ses données. Pour les retrouver, crée un projet avec le même nom : il réutilise ce volume." }
+                    div.card-f.help { "Un volume orphelin n'est monté par aucun projet (projet supprimé en gardant ses données, volume retiré). Pour retrouver ses données, choisis-le dans « Volumes » en créant un projet, ou dans les Paramètres d'un projet. Recréer un projet du même nom réutilise aussi son volume principal." }
                 }
             }
         }
@@ -128,13 +170,14 @@ pub async fn sizes(State(st): State<AppState>, jar: CookieJar) -> Result<axum::J
     Ok(axum::Json(out))
 }
 
-/// Deletes an orphan volume (never one whose project still exists).
-pub async fn delete(State(st): State<AppState>, jar: CookieJar, Path(project): Path<String>) -> Result<Redirect, Response> {
+/// Deletes an orphan volume (never one a project still mounts).
+pub async fn delete(State(st): State<AppState>, jar: CookieJar, Path(volume): Path<String>) -> Result<Redirect, Response> {
     let who = crate::auth::require_admin(&st, &jar)?;
-    Ok(Redirect::to(&match remove(&st, &project).await {
+    let short = volume.strip_prefix(PREFIX).unwrap_or(&volume).to_string();
+    Ok(Redirect::to(&match remove(&st, &volume).await {
         Ok(()) => {
-            db::audit(&st.db.lock().unwrap(), &who.actor(), "volume.delete", &project);
-            crate::with_param("/volumes", "ok", &format!("Volume de « {project} » supprimé."))
+            db::audit(&st.db.lock().unwrap(), &who.actor(), "volume.delete", &volume);
+            crate::with_param("/volumes", "ok", &format!("Volume « {short} » supprimé."))
         }
         Err(e) => crate::with_param("/volumes", "err", &e),
     }))
@@ -145,12 +188,9 @@ pub async fn prune(State(st): State<AppState>, jar: CookieJar) -> Result<Redirec
     let who = crate::auth::require_admin(&st, &jar)?;
     let (mut done, mut failed) = (Vec::new(), Vec::new());
     for v in list(&st).await {
-        let exists = db::get_project(&st.db.lock().unwrap(), &v.project).ok().flatten().is_some();
-        if exists {
-            continue;
-        }
-        match remove(&st, &v.project).await {
-            Ok(()) => done.push(v.project),
+        match remove(&st, &v.name).await {
+            Ok(()) => done.push(v.name),
+            Err(_) if in_use(&st, &v.name) => {}
             Err(e) => failed.push(e),
         }
     }
@@ -164,12 +204,18 @@ pub async fn prune(State(st): State<AppState>, jar: CookieJar) -> Result<Redirec
     }))
 }
 
-async fn remove(st: &AppState, project: &str) -> Result<(), String> {
-    if db::get_project(&st.db.lock().unwrap(), project).ok().flatten().is_some() {
-        return Err(format!("« {project} » existe : son volume se supprime avec le projet."));
+fn in_use(st: &AppState, volume: &str) -> bool {
+    let projects = db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
+    !uses(&projects, volume).is_empty()
+}
+
+async fn remove(st: &AppState, volume: &str) -> Result<(), String> {
+    let short = volume.strip_prefix(PREFIX).ok_or("pas un volume DevHub")?;
+    if in_use(st, volume) {
+        return Err(format!("« {short} » est monté par un projet : retire-le de ses Paramètres d'abord."));
     }
-    st.docker.remove_volume(&docker::volume_name(project), None).await.map_err(|e| match e {
-        bollard::errors::Error::DockerResponseServerError { status_code: 409, .. } => format!("le volume de « {project} » est encore utilisé par un conteneur"),
-        e => format!("volume de « {project} » : {e}"),
+    st.docker.remove_volume(volume, None).await.map_err(|e| match e {
+        bollard::errors::Error::DockerResponseServerError { status_code: 409, .. } => format!("le volume « {short} » est encore utilisé par un conteneur"),
+        e => format!("volume « {short} » : {e}"),
     })
 }

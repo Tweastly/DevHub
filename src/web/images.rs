@@ -81,6 +81,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             .append_pair("template", "custom")
             .append_pair("image", &c.reference)
             .append_pair("ports", &c.ports)
+            .append_pair("volumes", &c.volumes)
             .append_pair("service", if c.service { "1" } else { "" })
             .finish();
         format!("/projects/new?{q}")
@@ -107,6 +108,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                                 div.mono.dim style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" {
                                     (c.reference)
                                     @if !c.ports.is_empty() { " · ports " (c.ports) }
+                                    @if !c.volumes.is_empty() { " · volumes " (c.volumes) }
                                     " · " @if c.service { "service" } @else { "environnement de dev" }
                                 }
                             }
@@ -129,10 +131,11 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                         label.field style="flex:2;min-width:220px" { span.lbl { "Image" } input.mono-input name="image" required placeholder="ghcr.io/moi/app:1.2 ou nginx" value=[q.get("image")]; }
                         label.field style="flex:1;min-width:140px" { span.lbl { "Nom affiché " span.dim { "(optionnel)" } } input name="label" placeholder="Mon app"; }
                         label.field style="flex:1;min-width:140px" { span.lbl { "Ports " span.dim { "(optionnel)" } } input.mono-input name="ports" placeholder="3000, 19132/udp"; }
+                        label.field style="flex:1;min-width:140px" { span.lbl { "Volumes " span.dim { "(optionnel)" } } input.mono-input name="volumes" placeholder="/data, /config"; }
                         label.row.tight style="padding-bottom:10px;font-size:13px" { input type="checkbox" name="service" value="1" checked; "service" }
                         button.btn.primary { (icon("plus")) "Ajouter" }
                     }
-                    p.help style="margin-top:8px" { "« service » : la commande de l'image tourne (serveur, bot, app). Décoché : conteneur de dev qui lance " code { "/workspace/start.sh" } ". L'image est téléchargée tout de suite." }
+                    p.help style="margin-top:8px" { "« service » : la commande de l'image tourne (serveur, bot, app). Décoché : conteneur de dev qui lance " code { "/workspace/start.sh" } ". « Volumes » : les dossiers de l'image à garder (base de données, config…), chacun dans son volume. L'image est téléchargée tout de suite." }
                 }
             }
 
@@ -253,9 +256,16 @@ pub async fn catalog_add(State(st): State<AppState>, jar: CookieJar, Form(f): Fo
     if let Err(e) = crate::ops::parse_ports(&ports) {
         return Ok(Redirect::to(&crate::with_param(&crate::with_param("/images", "err", &e), "image", &image)));
     }
+    // Paths only: each project gets its own volumes for them.
+    let volumes = get("volumes");
+    let checked = if volumes.contains(':') { Err("volumes : seulement des chemins, ex. /data".to_string()) } else { crate::ops::parse_volumes(&volumes, "x", &["/workspace"]) };
+    if let Err(e) = checked {
+        return Ok(Redirect::to(&crate::with_param(&crate::with_param("/images", "err", &e), "image", &image)));
+    }
+    let volumes = volumes.split(',').map(|v| v.trim().trim_end_matches('/')).filter(|v| !v.is_empty()).collect::<Vec<_>>().join(", ");
     // Default name: the image without registry, owner or tag ("ghcr.io/moi/app:1" → "app").
     let label = Some(get("label")).filter(|l| !l.is_empty()).unwrap_or_else(|| image.rsplit('/').next().unwrap_or(&image).split([':', '@']).next().unwrap_or(&image).to_string());
-    let item = db::CatalogImage { reference: image.clone(), label, ports, service: f.contains_key("service") };
+    let item = db::CatalogImage { reference: image.clone(), label, ports, service: f.contains_key("service"), volumes };
     db::catalog_save(&st.db.lock().unwrap(), &item).map_err(|e| crate::AppError(e).into_response())?;
     db::audit(&st.db.lock().unwrap(), &who.actor(), "image.catalog-add", &image);
     let present = st.docker.inspect_image(&docker::with_tag(&image)).await.is_ok();

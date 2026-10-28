@@ -384,6 +384,7 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
     let chosen = q.get("template").cloned().unwrap_or_else(|| "site".into());
     let catalog = db::catalog(&st.db.lock().unwrap());
     let picked_image = |r: &str| chosen == "custom" && v("image") == r;
+    let vols = super::volumes::list(&st).await;
     let body = html! {
         div.page-head { div { h1 { "Nouveau projet" } p.lead { "Le modèle choisit l'image Docker de base (les outils déjà installés). Le dépôt Git, optionnel, est cloné dans " code { "/workspace" } " au premier démarrage." } } }
         (flash(&q))
@@ -425,7 +426,7 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                                 div.tiles role="radiogroup" aria-label="Mes images" {
                                     @for c in &catalog {
                                         label.tile {
-                                            input type="radio" name="template" value="custom" data-label=(c.label) data-image=(c.reference) data-ports=(c.ports) data-service=(if c.service { "1" } else { "" }) checked[picked_image(&c.reference)];
+                                            input type="radio" name="template" value="custom" data-label=(c.label) data-image=(c.reference) data-ports=(c.ports) data-volumes=(c.volumes) data-service=(if c.service { "1" } else { "" }) checked[picked_image(&c.reference)];
                                             span.radio {}
                                             span.ic { (icon("layers")) }
                                             b { (c.label) } span.mono style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" { (c.reference) }
@@ -458,6 +459,13 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                                 span.lbl { "Ports à exposer" }
                                 input.mono-input name="ports" placeholder="3000, 5173" value=(v("ports"));
                                 p.help { "Séparés par des virgules. " code { "3000" } " = site web via sous-domaine HTTPS, " code { "25565/tcp" } " ou " code { "19132/udp" } " = port TCP ou UDP public (jeux). « Page web » utilise 8000, « Minecraft Java » 25565/tcp, « Minecraft Bedrock » 19132/udp par défaut." }
+                            }
+                        }
+                        div.card-b style="border-top:1px solid var(--border)" {
+                            div.field {
+                                span.lbl { "Volumes" }
+                                p.help style="margin:0 0 10px" { "Le projet a déjà son volume, monté sur " code { "/workspace" } " (" code { "/data" } " pour un serveur de jeu). Ajoute ceux dont l'image a besoin (base de données, config…) : un nouveau volume, ou un volume existant comme les données d'un projet supprimé." }
+                                (super::volumes::editor(&v("volumes"), &vols, &ctx.projects, None))
                             }
                         }
                     }

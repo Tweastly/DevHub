@@ -51,6 +51,15 @@ pub struct Project {
     /// Runs the image's own command (its console is its stdin) instead of DevHub's idle
     /// dev container (/workspace/start.sh). Always the case for game servers.
     pub service: bool,
+    /// Extra Docker volumes mounted in the container, besides its own /workspace volume.
+    pub mounts: Vec<VolumeMount>,
+}
+
+/// A Docker volume mounted at `path` in a project's container.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VolumeMount {
+    pub volume: String,
+    pub path: String,
 }
 
 impl Project {
@@ -103,6 +112,8 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN mcp_last_used INTEGER", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN service INTEGER NOT NULL DEFAULT 0", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN mounts TEXT NOT NULL DEFAULT '[]'", []);
+    let _ = c.execute("ALTER TABLE images ADD COLUMN volumes TEXT NOT NULL DEFAULT ''", []);
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
     let _ = c.execute("ALTER TABLE sessions ADD COLUMN passkey_id INTEGER", []);
     c.execute_batch(
@@ -304,10 +315,11 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         pinned: r.get::<_, i64>(11)? != 0,
         mcp_last_used: r.get(12)?,
         service: r.get::<_, i64>(13)? != 0,
+        mounts: serde_json::from_str(&r.get::<_, String>(14)?).unwrap_or_default(),
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -327,8 +339,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![
             p.name,
             p.template,
@@ -343,7 +355,8 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             p.cpus,
             p.pinned as i64,
             p.mcp_last_used,
-            p.service as i64
+            p.service as i64,
+            serde_json::to_string(&p.mounts)?
         ],
     )?;
     Ok(())
@@ -775,20 +788,22 @@ pub struct CatalogImage {
     /// Default ports, as typed in the new-project form ("3000, 19132/udp").
     pub ports: String,
     pub service: bool,
+    /// Default volume paths, as typed in the new-project form ("/data, /config").
+    pub volumes: String,
 }
 
 pub fn catalog(c: &Connection) -> Vec<CatalogImage> {
-    let Ok(mut s) = c.prepare("SELECT ref, label, ports, service FROM images ORDER BY label COLLATE NOCASE") else { return vec![] };
-    s.query_map([], |r| Ok(CatalogImage { reference: r.get(0)?, label: r.get(1)?, ports: r.get(2)?, service: r.get::<_, i64>(3)? != 0 }))
+    let Ok(mut s) = c.prepare("SELECT ref, label, ports, service, volumes FROM images ORDER BY label COLLATE NOCASE") else { return vec![] };
+    s.query_map([], |r| Ok(CatalogImage { reference: r.get(0)?, label: r.get(1)?, ports: r.get(2)?, service: r.get::<_, i64>(3)? != 0, volumes: r.get(4)? }))
         .map(|rows| rows.flatten().collect())
         .unwrap_or_default()
 }
 
 pub fn catalog_save(c: &Connection, i: &CatalogImage) -> anyhow::Result<()> {
     c.execute(
-        "INSERT INTO images(ref, label, ports, service, created_at) VALUES (?1,?2,?3,?4,?5)
-         ON CONFLICT(ref) DO UPDATE SET label=?2, ports=?3, service=?4",
-        params![i.reference, i.label, i.ports, i.service as i64, now()],
+        "INSERT INTO images(ref, label, ports, service, created_at, volumes) VALUES (?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(ref) DO UPDATE SET label=?2, ports=?3, service=?4, volumes=?6",
+        params![i.reference, i.label, i.ports, i.service as i64, now(), i.volumes],
     )?;
     Ok(())
 }

@@ -65,6 +65,8 @@ pub struct NewProject {
     pub ports: Vec<PortSpec>,
     /// Run the image's own command (see db::Project::service).
     pub service: bool,
+    /// Extra volumes, as typed in the form (see `parse_volumes`).
+    pub volumes: String,
 }
 
 pub enum Change {
@@ -76,6 +78,8 @@ pub enum Change {
     SetPublic(bool),
     Ports(Vec<PortSpec>),
     Env(BTreeMap<String, String>),
+    /// Extra volumes, as typed in the form (see `parse_volumes`).
+    Volumes(String),
     Delete { keep_data: bool },
     /// `port: None` = the project's first port.
     AddDomain { host: String, port: Option<u16> },
@@ -98,6 +102,7 @@ impl Change {
             Change::SetPublic(_) => "set-public",
             Change::Ports(_) => "ports",
             Change::Env(_) => "env",
+            Change::Volumes(_) => "volumes",
             Change::Delete { .. } => "delete",
             Change::AddDomain { .. } => "domain-add",
             Change::RemoveDomain(_) => "domain-remove",
@@ -153,6 +158,67 @@ pub fn parse_ports(s: &str) -> R<Vec<PortSpec>> {
         }
     }
     Ok(v)
+}
+
+/// Extra volumes from "path" or "volume:path" entries, separated by commas or new lines.
+/// A bare path gets a volume of its own, devhub-vol-<project>.<last segment>; a named one
+/// is an existing DevHub volume ("ancien-projet" or "devhub-vol-ancien-projet"), e.g. the
+/// data of a deleted project. `reserved`: paths DevHub already mounts (/workspace…).
+pub fn parse_volumes(s: &str, project: &str, reserved: &[&str]) -> R<Vec<db::VolumeMount>> {
+    let mut out: Vec<db::VolumeMount> = Vec::new();
+    for entry in s.split([',', '\n']).map(str::trim).filter(|x| !x.is_empty()) {
+        let (vol, path) = match entry.rsplit_once(':') {
+            Some((v, p)) => (Some(v.trim()), p.trim()),
+            None => (None, entry),
+        };
+        let path = path.trim_end_matches('/');
+        let system = ["/proc", "/sys", "/dev"].iter().any(|s| path == *s || path.starts_with(&format!("{s}/")));
+        if !path.starts_with('/') || path.len() > 200 || path.contains(char::is_whitespace) || path.split('/').any(|x| x == "..") || system {
+            return Err(format!("chemin de volume invalide : « {entry} » (un chemin absolu, ex. /data)"));
+        }
+        if reserved.contains(&path) || out.iter().any(|m| m.path == path) {
+            return Err(format!("{path} est déjà monté"));
+        }
+        let volume = match vol.filter(|v| !v.is_empty()) {
+            Some(v) => {
+                let v = if v.starts_with(docker::VOLUME_PREFIX) { v.to_string() } else { docker::volume_name(v) };
+                if !v.chars().all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c)) {
+                    return Err(format!("nom de volume invalide : {v}"));
+                }
+                v
+            }
+            None => {
+                let last = path.rsplit('/').next().unwrap_or("");
+                let slug: String = last.to_ascii_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+                let slug = Some(slug.trim_matches('-').chars().take(32).collect::<String>()).filter(|s| !s.is_empty()).unwrap_or_else(|| "vol".into());
+                let base = format!("{}.{slug}", docker::volume_name(project));
+                (1..).map(|i| if i == 1 { base.clone() } else { format!("{base}-{i}") }).find(|n| !out.iter().any(|m| &m.volume == n)).unwrap()
+            }
+        };
+        out.push(db::VolumeMount { volume, path: path.to_string() });
+    }
+    Ok(out)
+}
+
+/// The form text of a project's volumes (the reverse of `parse_volumes`).
+pub fn volumes_text(p: &db::Project) -> String {
+    p.mounts.iter().map(|m| format!("{}:{}", m.volume, m.path)).collect::<Vec<_>>().join("\n")
+}
+
+/// Paths DevHub mounts itself in a project's container.
+fn reserved_paths(game: bool) -> &'static [&'static str] {
+    if game { &["/workspace", "/data"] } else { &["/workspace"] }
+}
+
+/// Volumes named in `mounts` must exist (a bare path's new volume is created by Docker).
+async fn check_volumes(st: &AppState, project: &str, mounts: &[db::VolumeMount]) -> R<()> {
+    let own = format!("{}.", docker::volume_name(project));
+    for m in mounts.iter().filter(|m| !m.volume.starts_with(&own)) {
+        if st.docker.inspect_volume(&m.volume).await.is_err() {
+            return Err(format!("volume introuvable : {}", m.volume));
+        }
+    }
+    Ok(())
 }
 
 /// POSIX-style variable name: letters, digits and _, not starting with a digit.
@@ -245,6 +311,8 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         }
         env.insert("MOTD".into(), format!("{name} · hébergé avec DevHub"));
     }
+    let mounts = parse_volumes(&np.volumes, &name, reserved_paths(matches!(np.template.as_str(), "minecraft" | "pocketmine")))?;
+    check_volumes(st, &name, &mounts).await?;
     let ports = map_ports(st, &[], &wanted).map_err(internal)?;
     // Only custom images choose; templates are dev containers, game servers always services.
     let service = np.service && np.template == "custom";
@@ -263,6 +331,7 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         pinned: false,
         mcp_last_used: None,
         service,
+        mounts,
     };
     {
         let c = st.db.lock().unwrap();
@@ -346,6 +415,14 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
             docker::create(d, &p, &st.limits()).await.map_err(internal)?;
         }
+        Change::Volumes(text) => {
+            let mounts = parse_volumes(&text, name, reserved_paths(p.is_game()))?;
+            check_volumes(st, name, &mounts).await?;
+            detail = format!("{name} ({} volume(s))", mounts.len());
+            p.mounts = mounts;
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+            docker::create(d, &p, &st.limits()).await.map_err(internal)?;
+        }
         Change::AddDomain { host, port } => {
             let host = subdomain_host(st, &host)?;
             let base = crate::proxy::base_host(st);
@@ -412,6 +489,16 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
         }
         Change::Delete { keep_data } => {
             docker::destroy(d, name, keep_data).await.map_err(internal)?;
+            if !keep_data {
+                // Its extra volumes go too, unless another project still mounts them.
+                let others = db::list_projects(&st.db.lock().unwrap()).map_err(internal)?;
+                for m in &p.mounts {
+                    let used = others.iter().filter(|o| o.name != p.name).any(|o| docker::volume_name(&o.name) == m.volume || o.mounts.iter().any(|x| x.volume == m.volume));
+                    if !used {
+                        let _ = d.remove_volume(&m.volume, None).await;
+                    }
+                }
+            }
             let c = st.db.lock().unwrap();
             db::delete_project(&c, name).map_err(internal)?;
             db::rename_in_profiles(&c, name, None);
@@ -444,4 +531,31 @@ pub fn subdomain_host(st: &AppState, input: &str) -> R<String> {
         return Err(format!("sous-domaine invalide : indique seulement le nom, par ex. « new » pour new.{apps}"));
     }
     normalize_host(&format!("{label}.{apps}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_volumes;
+
+    #[test]
+    fn bare_paths_get_their_own_volume() {
+        let v = parse_volumes("/var/lib/postgresql/data/, /config\n/srv/data", "db", &["/workspace"]).unwrap();
+        let names: Vec<&str> = v.iter().map(|m| m.volume.as_str()).collect();
+        assert_eq!(names, ["devhub-vol-db.data", "devhub-vol-db.config", "devhub-vol-db.data-2"]);
+        assert_eq!(v[0].path, "/var/lib/postgresql/data");
+    }
+
+    #[test]
+    fn named_volumes_are_devhub_ones() {
+        let v = parse_volumes("ancien:/data, devhub-vol-x.cfg:/etc/app", "db", &["/workspace"]).unwrap();
+        assert_eq!(v[0].volume, "devhub-vol-ancien");
+        assert_eq!(v[1].volume, "devhub-vol-x.cfg");
+    }
+
+    #[test]
+    fn bad_paths_are_refused() {
+        for bad in ["data", "/workspace", "/proc/x", "/a/../b", "/a, /a", "x y:/data"] {
+            assert!(parse_volumes(bad, "db", &["/workspace"]).is_err(), "{bad}");
+        }
+    }
 }

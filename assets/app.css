@@ -977,3 +977,15 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
   .upd-commits li { grid-template-columns: 14px 70px minmax(0, 1fr); }
   .upd-commits .when { display: none; }
 }
+
+/* Volumes editor (new project, Paramètres) */
+.vols-list { display: flex; flex-direction: column; gap: 8px; }
+.vols-list:not(:empty) { margin-bottom: 10px; }
+.vol-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr) auto; gap: 10px; align-items: center; }
+.vol-row select { min-width: 0; }
+.vol-fixed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+@media (max-width: 640px) {
+  .vol-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .vol-row > .dim { display: none; }
+  .vol-row select { grid-column: 1 / -1; }
+}

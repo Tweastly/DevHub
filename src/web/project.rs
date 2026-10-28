@@ -732,6 +732,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let all_cpu: f64 = ctx.projects.iter().map(|p| p.cpus.unwrap_or(def_cpu)).sum();
     let mem_max = mb(x.s.mem_limit);
     let cpu_lim = x.p.cpus.unwrap_or(def_cpu);
+    let vols = super::volumes::list(&st).await;
     let env_text: String = x.p.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     let body = html! {
         (flash(&q))
@@ -741,6 +742,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 a href="#resources" { "Ressources" }
                 @if !x.p.is_game() { a href="#launch" { "Lancement" } }
                 a href="#env" { "Variables d'environnement" span.count { (x.p.env.len()) } }
+                a href="#volumes" { "Volumes" span.count { (x.p.mounts.len() + 1) } }
                 @if ctx.profile.admin { a href="#danger" style="color:var(--err)" { "Zone dangereuse" } }
             }
             div.stack {
@@ -791,6 +793,22 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         }
                     }
                 }
+                div.card #volumes {
+                    div.card-h { h3 { "Volumes" } span.sub { "les données gardées quand le conteneur est recréé" } }
+                    div.card-b {
+                        div.vol-fixed {
+                            span.mono { (crate::docker::volume_name(n).strip_prefix(crate::docker::VOLUME_PREFIX).unwrap_or(n)) }
+                            span.dim { "monté sur " }
+                            span.mono { @if x.p.is_game() { "/workspace et /data" } @else { "/workspace" } }
+                            span.tag { "principal" }
+                        }
+                        form method="post" action={(base) "/volumes"} data-confirm="Appliquer les volumes ?" data-confirm-body="Le conteneur est recréé avec ces volumes. Un volume retiré n'est pas effacé : il reste dans la page Volumes." data-tone="warn" data-confirm-ok="Appliquer" style="margin-top:12px" {
+                            (back_field(&format!("{here}#volumes")))
+                            (super::volumes::editor(&crate::ops::volumes_text(&x.p), &vols, &ctx.projects, Some(n)))
+                            div.row style="margin-top:14px" { span.muted { "Chaque changement recrée le conteneur." } span.spacer {} button.btn.primary { "Appliquer" } }
+                        }
+                    }
+                }
                 div.card #env {
                     div.card-h { h3 { "Variables d'environnement" } span.sub { "injectées au démarrage du conteneur" } }
                     @if !x.p.env.is_empty() {
@@ -838,9 +856,9 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     div.card-h { (icon("alert")) h3 { "Zone dangereuse" } }
                     div.card-b {
                         b { "Supprimer " (n) } p.muted style="margin:4px 0 14px" { "Le conteneur, ses ports et ses sous-domaines sont supprimés. Cette action est définitive." }
-                        form method="post" action={(base) "/delete"} data-confirm={"Supprimer définitivement " (n) " ?"} data-confirm-body="Le conteneur, son réseau, ses adresses et son URL MCP disparaissent. Le volume suit la case cochée ci-dessus." data-tone="danger" data-confirm-ok="Supprimer le projet" {
+                        form method="post" action={(base) "/delete"} data-confirm={"Supprimer définitivement " (n) " ?"} data-confirm-body="Le conteneur, son réseau, ses adresses et son URL MCP disparaissent. Les volumes suivent la case cochée ci-dessus (un volume encore monté par un autre projet est toujours gardé)." data-tone="danger" data-confirm-ok="Supprimer le projet" {
                             (back_field("/projects"))
-                            label.row.tight style="margin-bottom:14px" { input type="checkbox" name="keep_data" value="1" checked; "Garder le volume de données (" code { "/workspace" } @if x.s.state == "running" { span data-fetch-text={(base) "/workspace-size"} {} } ")" }
+                            label.row.tight style="margin-bottom:14px" { input type="checkbox" name="keep_data" value="1" checked; "Garder " @if x.p.mounts.is_empty() { "le volume" } @else { "les volumes" } " de données (" code { "/workspace" } @if x.s.state == "running" { span data-fetch-text={(base) "/workspace-size"} {} } @if !x.p.mounts.is_empty() { " et " (x.p.mounts.len()) " autre" @if x.p.mounts.len() > 1 { "s" } } ")" }
                             label.field style="max-width:360px" { span.lbl { "Tape " code style="color:var(--err)" { (n) } " pour confirmer" } input.mono-input name="confirm" required pattern=(regex_escape(n)) placeholder=(n) autocomplete="off"; }
                             button.btn.danger style="margin-top:14px" { (icon("trash")) "Supprimer le projet" }
                         }

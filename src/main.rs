@@ -215,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/volumes", get(web::volumes::page))
         .route("/volumes/sizes", get(web::volumes::sizes))
         .route("/volumes/prune", post(web::volumes::prune))
-        .route("/volumes/{project}/delete", post(web::volumes::delete))
+        .route("/volumes/{volume}/delete", post(web::volumes::delete))
         .route("/resources", get(web::resources::page))
         .route("/resources/{which}", post(web::resources::save))
         .route("/update", get(web::update::page))
@@ -359,6 +359,7 @@ struct NewProject {
     git_url: Option<String>,
     ports: Option<String>,
     service: Option<String>,
+    volumes: Option<String>,
 }
 
 fn bad(msg: impl Into<String>) -> Response {
@@ -376,11 +377,12 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
             .append_pair("git_url", f.git_url.as_deref().unwrap_or(""))
             .append_pair("ports", f.ports.as_deref().unwrap_or(""))
             .append_pair("service", if f.service.is_some() { "1" } else { "" })
+            .append_pair("volumes", f.volumes.as_deref().unwrap_or(""))
             .finish();
         Redirect::to(&format!("/projects/new?{q}")).into_response()
     };
     let ports = ops::parse_ports(f.ports.as_deref().unwrap_or("")).map_err(back)?;
-    let np = ops::NewProject { name: f.name.clone(), template: f.template.clone(), image: f.image.clone(), git_url: f.git_url.clone(), ports, service: f.service.is_some() };
+    let np = ops::NewProject { name: f.name.clone(), template: f.template.clone(), image: f.image.clone(), git_url: f.git_url.clone(), ports, service: f.service.is_some(), volumes: f.volumes.clone().unwrap_or_default() };
     let p = ops::create(&st, np, &who.actor()).await.map_err(back)?;
     Ok(Redirect::to(&format!("/projects/{}", p.name)).into_response())
 }
@@ -510,6 +512,7 @@ async fn project_action(
             }
         }
         "env" => ops::Change::Env(ops::parse_env(field("env"))),
+        "volumes" => ops::Change::Volumes(field("volumes").to_string()),
         // One variable at a time (the table's add / edit / delete); the same key replaces.
         "env-set" | "env-remove" => {
             let key = field("key").trim().to_string();
@@ -554,6 +557,7 @@ async fn project_action(
                 "unpin" => format!("{name} retiré des épinglés."),
                 "resources" => "Ressources appliquées.".into(),
                 "env" | "env-set" | "env-remove" => "Variables enregistrées, conteneur recréé.".into(),
+                "volumes" => "Volumes enregistrés, conteneur recréé.".into(),
                 "ports" | "port-add" | "port-remove" => "Ports enregistrés, conteneur recréé.".into(),
                 "domain-add" => "Sous-domaine ajouté.".into(),
                 "domain-remove" => "Sous-domaine retiré.".into(),

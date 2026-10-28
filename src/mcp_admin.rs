@@ -84,6 +84,7 @@ fn tools() -> Value {
                     "image": { "type": "string", "description": "Image Docker si template = custom" },
                     "git_url": { "type": "string", "description": "Dépôt cloné dans /workspace (optionnel)" },
                     "service": { "type": "boolean", "description": "Pour template = custom : true (défaut) lance la commande de l'image, sa console est son entrée standard ; false = conteneur de dev qui lance /workspace/start.sh" },
+                    "volumes": { "type": "string", "description": "Volumes en plus de /workspace, séparés par des virgules : « /chemin » crée un volume dédié, « volume:/chemin » monte un volume DevHub existant (ex. celui d'un projet supprimé : ancien-projet:/data)" },
                     "ports": { "type": "array", "items": { "type": ["integer", "string"] }, "description": "Ports du conteneur à exposer : 3000 (web, via sous-domaine HTTPS), \"25565/tcp\" (TCP public, Minecraft Java) ou \"19132/udp\" (UDP public, Minecraft Bedrock / PocketMine)" }
                 }, "required": ["name", "template"] } }),
         json!({ "name": "project_action", "description": "start, stop, restart ou rebuild (recrée le conteneur, /workspace est conservé).",
@@ -205,6 +206,7 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
     let mut v = json!({
         "name": p.name, "state": crate::ops::shown_state(st, &p.name, &s.state), "build": crate::ops::build_text(st, &p.name), "template": p.template, "image": p.image, "git_url": p.git_url,
         "public": p.public, "ports": ports,
+        "volumes": p.mounts.iter().map(|m| json!({ "volume": m.volume, "path": m.path })).collect::<Vec<_>>(),
         "url": p.first_http().map(|_| proxy::url_for(st, &p.name, None)),
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
         "limits": {
@@ -279,6 +281,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     git_url: a["git_url"].as_str().map(String::from),
                     ports: ports("ports")?,
                     service: a["service"].as_bool().unwrap_or(true),
+                    volumes: a["volumes"].as_str().unwrap_or("").to_string(),
                 };
                 let p = ops::create(st, np, "claude-admin").await?;
                 let addr = match (p.first_http(), p.public_ports().next()) {
