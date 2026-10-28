@@ -188,7 +188,7 @@ svg.i.lg { width: 20px; height: 20px; }
 .update-pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: 999px; border: 1px solid var(--sel-border); background: var(--sel); font-size: 13px; color: var(--text); }
 .update-pill b { font: 500 12px var(--mono); }
 .update-pill button, .update-pill .go { font: 500 12.5px var(--sans); border: 0; border-radius: 999px; padding: 5px 12px; background: var(--accent); color: var(--on-accent); cursor: pointer; }
-.content { padding: 32px 32px 64px; max-width: 1320px; width: 100%; }
+.content { padding: 32px 32px 64px; width: 100%; box-sizing: border-box; }
 .back { display: inline-flex; margin-bottom: 14px; font-size: 13px; font-weight: 500; color: var(--accent); }
 .back:hover { color: var(--accent-hover); }
 .page-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }
