@@ -13,6 +13,7 @@ pub mod projects;
 pub mod resources;
 pub mod security;
 pub mod update;
+pub mod volumes;
 
 use crate::db::{self, Project};
 use crate::docker::Status;
@@ -545,6 +546,7 @@ pub enum Nav<'a> {
     Profiles,
     Audit,
     Resources,
+    Volumes,
     Update,
     Menu,
 }
@@ -633,6 +635,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
         let n = db::profiles(&ctx.st.db.lock().unwrap()).len();
         v.push((Nav::Profiles, "/profiles", "Profils", Some((n.to_string(), false))));
         v.push((Nav::Resources, "/resources", "Ressources", None));
+        v.push((Nav::Volumes, "/volumes", "Volumes", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
     }
@@ -640,7 +643,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
 }
 
 fn is_settings(nav: Nav) -> bool {
-    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Resources | Nav::Audit | Nav::Update)
+    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Profiles | Nav::Resources | Nav::Volumes | Nav::Audit | Nav::Update)
 }
 
 fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {

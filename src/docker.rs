@@ -37,7 +37,7 @@ pub fn container_name(p: &str) -> String {
 pub fn network_name(p: &str) -> String {
     format!("devhub-net-{p}")
 }
-fn volume_name(p: &str) -> String {
+pub fn volume_name(p: &str) -> String {
     format!("devhub-vol-{p}")
 }
 

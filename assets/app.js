@@ -152,6 +152,13 @@
   document.addEventListener('click', e => { $$('.spark-w').forEach(w => { if (!w.contains(e.target)) w.hideTip?.(); }); });
 
   function widgets() {
+    // Volume sizes (docker df is slow): one request fills every [data-vsize].
+    $$('[data-volume-sizes]:not([data-ready])').forEach(el => {
+      el.dataset.ready = 1;
+      fetch(el.dataset.volumeSizes).then(r => r.ok ? r.json() : {}).then(m => {
+        $$('[data-vsize]', el).forEach(s => { s.textContent = m[s.dataset.vsize] || '—'; });
+      }).catch(() => {});
+    });
     // Slow values (e.g. the size of /workspace) loaded once the page is shown.
     $$('[data-fetch-text]:not([data-ready])').forEach(el => {
       el.dataset.ready = 1;
