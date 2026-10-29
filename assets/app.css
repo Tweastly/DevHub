@@ -234,6 +234,7 @@ svg.i.lg { width: 20px; height: 20px; }
 .card-f { padding: 14px 24px; border-top: 1px solid var(--line); background: var(--card-2); border-radius: 0 0 var(--r) var(--r); font-size: 13px; }
 .card.glow { border-color: var(--border); }
 .card.danger { border-color: var(--err-border); }
+.pill.docker { background: color-mix(in srgb, var(--st-err) 14%, transparent); border-color: transparent; color: var(--st-err); }
 .lift { transition: border-color .15s; }
 .lift:hover { border-color: var(--border-2); }
 .list-row { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-top: 1px solid var(--line); }
@@ -287,8 +288,8 @@ kbd { font-size: 11px; border: 1px solid var(--border-2); border-radius: 4px; pa
 /* Exposure tags: only "public" carries colour, it is the only one that reaches the Internet. */
 .pill.public { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); }
 .pill.private { background: var(--hover); border-color: transparent; color: var(--text-body); }
-.pill.public::before, .pill.private::before { display: none; }
-.pill.private svg { width: 12px; height: 12px; }
+.pill.public::before, .pill.private::before, .pill.docker::before { display: none; }
+.pill.private svg, .pill.docker svg { width: 12px; height: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .35; } }
 .tag { display: inline-flex; align-items: center; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 999px; background: var(--hover); color: var(--text-body); white-space: nowrap; }

@@ -111,6 +111,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                             (state_pill(ctx, n, &x.s.state))
                             @if x.p.first_http().is_some() {
                                 @if x.p.public { span.pill.public { (icon_c("globe", "sm")) "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
+                                @if x.p.docker_access { span.pill.docker title="Ce projet a accès à Docker du serveur" { (icon_c("alert", "sm")) "Docker du serveur" } }
                             }
                             @if ro { span.tag { "lecture seule" } }
                         }
@@ -975,6 +976,7 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                 @if ctx.profile.admin { div.card.danger #danger {
                     div.card-h { (icon("alert")) h3 { "Zone dangereuse" } }
                     div.card-b {
+                        @if ctx.profile.is_owner() { (docker_access_row(&x, &base, &here)) }
                         b { "Supprimer " (n) } p.muted style="margin:4px 0 14px" { "Le conteneur, ses ports et ses sous-domaines sont supprimés. Cette action est définitive." }
                         form method="post" action={(base) "/delete"} data-confirm={"Supprimer définitivement " (n) " ?"} data-confirm-body="Le conteneur, son réseau, ses adresses et son URL MCP disparaissent. Les volumes suivent la case cochée ci-dessus (un volume encore monté par un autre projet est toujours gardé)." data-tone="danger" data-confirm-ok="Supprimer le projet" {
                             (back_field("/projects"))
@@ -988,6 +990,33 @@ pub async fn settings(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         }
     };
     Ok(frame(&ctx, &x, Tab::Settings, body))
+}
+
+/// The owner's switch that mounts the server's Docker socket in the project.
+fn docker_access_row(x: &P, base: &str, here: &str) -> Markup {
+    let on = x.p.docker_access;
+    let n = &x.p.name;
+    let devhub = docker::is_devhub_image(&x.p.image);
+    html! {
+        form.gen-row style="padding-top:0;margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)" method="post" action={(base) "/docker-access"}
+            data-confirm=(if on { format!("Retirer l'accès à Docker de {n} ?") } else { format!("Donner à {n} l'accès à Docker du serveur ?") })
+            data-confirm-body=(if on { "Le conteneur est recréé sans le socket Docker. Les fichiers sont gardés." } else { "Tout ce qui tourne dans ce projet, son terminal et son URL MCP pourront créer, lire et supprimer n'importe quel conteneur du serveur, DevHub compris, et lire tous les volumes. Le conteneur est recréé, les fichiers sont gardés." })
+            data-tone=(if on { "warn" } else { "danger" }) data-confirm-ok=(if on { "Retirer l'accès" } else { "Donner l'accès" }) {
+            (back_field(&format!("{here}#danger")))
+            input type="hidden" name="on" value=(if on { "0" } else { "1" });
+            div.gen-l {
+                b { "Accès à Docker du serveur" }
+                p.help { "Monte " code { "/var/run/docker.sock" } " dans le conteneur : le projet pilote alors tout le serveur. À réserver à un projet de confiance, par exemple un second DevHub. Réservé au propriétaire." }
+                @if devhub {
+                    p.help style="margin-top:8px" {
+                        "Image DevHub : elle est réglée toute seule (adresse du projet, données dans " code { "/workspace/devhub-data" } ", noms " code { (docker::prefix()) "-in-" (n) "-…" } " et ports à part, pour ne jamais toucher aux projets d'ici). Le code d'installation s'affiche dans les Journaux."
+                        @if !x.p.ports.iter().any(|m| m.container == 8080) { " Ajoute le port " code { "8080" } " dans Réseau." }
+                    }
+                }
+            }
+            div.gen-r { button.switch role="switch" aria-checked=(on) aria-label="Accès à Docker du serveur" { span {} } }
+        }
+    }
 }
 
 fn regex_escape(s: &str) -> String {

@@ -320,7 +320,7 @@ async fn updater_running(st: &AppState) -> bool {
 /// Builds `devhub-updater:git` once: docker:27-cli + git, committed from a throwaway container.
 async fn prepare_git_image(st: AppState) {
     let d = &st.docker;
-    if st.cfg.self_container.is_none() || d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
+    if st.cfg.self_container.is_none() || crate::docker::nested() || d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
         return;
     }
     let res: anyhow::Result<()> = async {

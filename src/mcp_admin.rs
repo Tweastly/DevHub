@@ -263,7 +263,7 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         "mode": if p.is_game() { "jeu" } else if p.service { "service" } else { "dev" },
         "color": db::colors(&st.db.lock().unwrap(), std::slice::from_ref(&p.name)).get(&p.name).copied(),
         "volumes": p.mounts.iter().map(|m| json!({ "volume": m.volume, "path": m.path })).collect::<Vec<_>>(),
-        "url": p.first_http().and_then(|_| proxy::auto_url(st, p, None)), "auto_domain": p.auto_domain,
+        "url": p.first_http().and_then(|_| proxy::auto_url(st, p, None)), "auto_domain": p.auto_domain, "docker_access": p.docker_access,
         "cpu_pct": (s.cpu_pct * 10.0).round() / 10.0, "mem_mb": s.mem_used / 1_048_576,
         "limits": {
             "memory_mb": p.memory_mb.unwrap_or(st.default_mb()),
@@ -435,13 +435,13 @@ async fn call(st: &AppState, who: &db::Profile, actor: &str, params: &Value) -> 
                     .iter()
                     .map(|v| {
                         let used: Vec<Value> = crate::web::volumes::uses(&projects, &v.name).into_iter().map(|(p, path)| json!({ "project": p, "path": path })).collect();
-                        json!({ "volume": v.name, "short": v.name.strip_prefix(docker::VOLUME_PREFIX), "created": v.created, "orphan": used.is_empty(), "mounted_by": used })
+                        json!({ "volume": v.name, "short": v.name.strip_prefix(docker::volume_prefix()), "created": v.created, "orphan": used.is_empty(), "mounted_by": used })
                     })
                     .collect::<Vec<_>>()))
             }
             "delete_volume" => {
                 let v = s("volume");
-                let full = if v.starts_with(docker::VOLUME_PREFIX) { v } else { format!("{}{v}", docker::VOLUME_PREFIX) };
+                let full = if v.starts_with(docker::volume_prefix()) { v } else { format!("{}{v}", docker::volume_prefix()) };
                 crate::web::volumes::remove(st, &full).await?;
                 audit(&full);
                 text(format!("Volume {full} supprimé"), false)

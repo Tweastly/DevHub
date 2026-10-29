@@ -87,6 +87,8 @@ pub enum Change {
     Color(i64),
     Autostart(bool),
     AutoDomain(bool),
+    /// Mounts the server's Docker socket in the container (owner only); recreates it.
+    DockerAccess(bool),
     Delete { keep_data: bool },
     /// `port: None` = the project's first port.
     AddDomain { host: String, port: Option<u16> },
@@ -115,6 +117,7 @@ impl Change {
             Change::Color(_) => "color",
             Change::Autostart(_) => "autostart",
             Change::AutoDomain(_) => "auto-domain",
+            Change::DockerAccess(_) => "docker-access",
             Change::Delete { .. } => "delete",
             Change::AddDomain { .. } => "domain-add",
             Change::RemoveDomain(_) => "domain-remove",
@@ -193,7 +196,7 @@ pub fn parse_volumes(s: &str, project: &str, reserved: &[&str]) -> R<Vec<db::Vol
         }
         let volume = match vol.filter(|v| !v.is_empty()) {
             Some(v) => {
-                let v = if v.starts_with(docker::VOLUME_PREFIX) { v.to_string() } else { docker::volume_name(v) };
+                let v = if v.starts_with(docker::volume_prefix()) { v.to_string() } else { docker::volume_name(v) };
                 if !v.chars().all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c)) {
                     return Err(format!("nom de volume invalide : {v}"));
                 }
@@ -359,6 +362,7 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         volume: None,
         autostart: true,
         auto_domain: true,
+        docker_access: false,
     };
     {
         let c = st.db.lock().unwrap();
@@ -540,6 +544,18 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             p.auto_domain = on;
             detail = format!("{name} → {}", if on { "adresse automatique activée" } else { "adresse automatique désactivée" });
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+        }
+        Change::DockerAccess(on) => {
+            if p.docker_access == on {
+                return Ok(());
+            }
+            p.docker_access = on;
+            detail = format!("{name} → {}", if on { "accès à Docker du serveur activé" } else { "accès à Docker du serveur retiré" });
+            db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;
+            // Absent (still building or failed): the next build mounts it, or not.
+            if docker::state(d, name).await != "absent" {
+                docker::create(d, &p, &st.limits()).await.map_err(internal)?;
+            }
         }
         Change::Autostart(on) => {
             p.autostart = on;

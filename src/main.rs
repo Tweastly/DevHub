@@ -79,6 +79,8 @@ impl AppState {
             nano_cpus: (self.default_cpus() * 1e9) as i64,
             bind_ip: self.cfg.bind_ip.clone(),
             self_container: self.cfg.self_container.clone(),
+            origin: self.cfg.origin.clone(),
+            port_range: self.cfg.port_range,
         }
     }
     fn num_setting<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
@@ -181,10 +183,11 @@ async fn main() -> anyhow::Result<()> {
     updater::spawn_periodic(st.clone());
     spawn_stats_collector(st.clone());
     web::images::spawn_refresh(st.clone());
-    tokio::spawn({
+    // Inside another DevHub's project, the server's images are that DevHub's business.
+    if !docker::nested() {
         let d = st.docker.clone();
-        async move { docker::prune_template_tags(&d).await }
-    });
+        tokio::spawn(async move { docker::prune_template_tags(&d).await });
+    }
     if needs_setup {
         let t = random_token(24);
         println!("\n=== DevHub : aucun passkey. SETUP TOKEN : {t} ===\n=== Ouvre {origin}/login pour créer ton passkey ===\n");
@@ -512,6 +515,9 @@ async fn project_action(
         "color" => ops::Change::Color(field("hue").trim().parse().map_err(|_| fail("couleur invalide".into()).into_response())?),
         "autostart" => ops::Change::Autostart(field("on") == "1"),
         "auto-domain" => ops::Change::AutoDomain(field("on") == "1"),
+        // Mounting the server's Docker gives the project the whole server: the owner only.
+        "docker-access" if !who.is_owner() => return Ok(fail("Seul le propriétaire peut donner accès à Docker du serveur.".into())),
+        "docker-access" => ops::Change::DockerAccess(field("on") == "1"),
         "launch" => ops::Change::Launch { service: field("mode") == "service" },
         "unpin" => ops::Change::Pin(false),
         "ports" => ops::Change::Ports(ops::parse_ports(field("ports")).map_err(|e| fail(e).into_response())?),

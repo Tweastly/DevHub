@@ -9,15 +9,13 @@ use axum::extract::{Path, Query, State};
 use axum::response::Redirect;
 use bollard::volume::ListVolumesOptions;
 
-const PREFIX: &str = docker::VOLUME_PREFIX;
-
 pub(crate) struct Vol {
     pub name: String,
     pub created: Option<i64>,
 }
 
 pub(crate) async fn list(st: &AppState) -> Vec<Vol> {
-    let filters = HashMap::from([("name".to_string(), vec![PREFIX.to_string()])]);
+    let filters = HashMap::from([("name".to_string(), vec![docker::volume_prefix().to_string()])]);
     let mut v: Vec<Vol> = st
         .docker
         .list_volumes(Some(ListVolumesOptions { filters }))
@@ -27,7 +25,7 @@ pub(crate) async fn list(st: &AppState) -> Vec<Vol> {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|x| {
-            x.name.strip_prefix(PREFIX)?;
+            x.name.strip_prefix(docker::volume_prefix())?;
             Some(Vol { created: x.created_at.as_deref().and_then(timefmt::parse_rfc3339), name: x.name })
         })
         .collect();
@@ -64,7 +62,7 @@ pub(crate) fn editor(value: &str, vols: &[Vol], projects: &[Project], this: Opti
         .map(|v| {
             let users: Vec<&str> = uses(projects, &v.name).into_iter().map(|(p, _)| p).filter(|p| this.is_none_or(|t| t.name != *p)).collect();
             let orphan = uses(projects, &v.name).is_empty();
-            serde_json::json!({ "v": v.name, "s": v.name.strip_prefix(PREFIX).unwrap_or(&v.name), "orphan": orphan, "with": users.first() })
+            serde_json::json!({ "v": v.name, "s": v.name.strip_prefix(docker::volume_prefix()).unwrap_or(&v.name), "orphan": orphan, "with": users.first() })
         })
         .collect();
     let main = this.map(|p| p.name.as_str());
@@ -139,7 +137,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     thead { tr { th { "Volume" } th.hide-m { "Monté sur" } th.num { "Taille" } th.hide-m { "Créé le" } th.num { "" } } }
                     tbody {
                         @for (v, u) in vols.iter().zip(&used) {
-                            @let short = v.name.strip_prefix(PREFIX).unwrap_or(&v.name);
+                            @let short = v.name.strip_prefix(docker::volume_prefix()).unwrap_or(&v.name);
                             tr {
                                 td {
                                     @if u.is_empty() { b.dim { (short) } " " span.pill.exited.plain { "orphelin" } }
@@ -184,7 +182,7 @@ pub async fn sizes(State(st): State<AppState>, jar: CookieJar) -> Result<axum::J
     let mut out = HashMap::new();
     let mut total = 0;
     for v in df.volumes.unwrap_or_default() {
-        if !v.name.starts_with(PREFIX) {
+        if !v.name.starts_with(docker::volume_prefix()) {
             continue;
         }
         let size = v.usage_data.map(|u| u.size).unwrap_or(-1);
@@ -199,7 +197,7 @@ pub async fn sizes(State(st): State<AppState>, jar: CookieJar) -> Result<axum::J
 /// Deletes an orphan volume (never one a project still mounts).
 pub async fn delete(State(st): State<AppState>, jar: CookieJar, Path(volume): Path<String>) -> Result<Redirect, Response> {
     let who = crate::auth::require_admin(&st, &jar)?;
-    let short = volume.strip_prefix(PREFIX).unwrap_or(&volume).to_string();
+    let short = volume.strip_prefix(docker::volume_prefix()).unwrap_or(&volume).to_string();
     Ok(Redirect::to(&match remove(&st, &volume).await {
         Ok(()) => {
             db::audit(&st.db.lock().unwrap(), &who.actor(), "volume.delete", &volume);
@@ -236,7 +234,7 @@ fn in_use(st: &AppState, volume: &str) -> bool {
 }
 
 pub(crate) async fn remove(st: &AppState, volume: &str) -> Result<(), String> {
-    let short = volume.strip_prefix(PREFIX).ok_or("pas un volume DevHub")?;
+    let short = volume.strip_prefix(docker::volume_prefix()).ok_or("pas un volume DevHub")?;
     if in_use(st, volume) {
         return Err(format!("« {short} » est monté par un projet : retire-le de ses Paramètres d'abord."));
     }
@@ -278,7 +276,7 @@ pub(crate) fn kept_card(p: &Project, vols: &[Vol], projects: &[Project], image_v
                 }
                 @for m in &p.mounts {
                     @let others: Vec<&str> = uses(projects, &m.volume).into_iter().map(|(n, _)| n).filter(|n| *n != p.name).collect();
-                    @let short = m.volume.strip_prefix(PREFIX).unwrap_or(&m.volume);
+                    @let short = m.volume.strip_prefix(docker::volume_prefix()).unwrap_or(&m.volume);
                     li.krow data-spec={(m.volume) ":" (m.path)} {
                         span.kic.ok { (icon("folder")) }
                         span.kt {
@@ -304,7 +302,7 @@ pub(crate) fn kept_card(p: &Project, vols: &[Vol], projects: &[Project], image_v
                 }
                 @if !orphans.is_empty() {
                     span.muted { "Reprendre les données d'un ancien projet :" }
-                    div.kchips { @for v in &orphans { button.kchip type="button" data-kept-vol=(v.name) { span.plus { "+" } (v.name.strip_prefix(PREFIX).unwrap_or(&v.name)) } } }
+                    div.kchips { @for v in &orphans { button.kchip type="button" data-kept-vol=(v.name) { span.plus { "+" } (v.name.strip_prefix(docker::volume_prefix()).unwrap_or(&v.name)) } } }
                 }
                 div.kform {
                     label.kin { span.muted { "Dossier" } input.mono-input type="text" data-kept-input placeholder="/data" autocomplete="off" spellcheck="false" aria-label="Dossier à garder"; }

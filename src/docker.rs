@@ -1,5 +1,5 @@
 //! Everything that touches the Docker daemon. Only the orchestrator holds the socket;
-//! project containers never see it.
+//! project containers never see it, unless the owner turns on "Accès à Docker du serveur".
 
 use crate::db::Project;
 use anyhow::Context;
@@ -31,16 +31,32 @@ pub fn image_for(template: &str) -> Option<&'static str> {
     TEMPLATES.iter().find(|t| t.0 == template).map(|t| t.1)
 }
 
+/// Start of every container, network and volume name: "devhub", or DEVHUB_NAME_PREFIX for a
+/// DevHub running inside a project with the server's Docker, so the two never share a name.
+pub fn prefix() -> &'static str {
+    static P: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    P.get_or_init(|| std::env::var("DEVHUB_NAME_PREFIX").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "devhub".into()))
+}
+
+/// This DevHub runs inside another one's project: it leaves the server-wide chores to it.
+pub fn nested() -> bool {
+    prefix() != "devhub"
+}
+
 pub fn container_name(p: &str) -> String {
-    format!("devhub-{p}")
+    format!("{}-{p}", prefix())
 }
 pub fn network_name(p: &str) -> String {
-    format!("devhub-net-{p}")
+    format!("{}-net-{p}", prefix())
 }
-pub const VOLUME_PREFIX: &str = "devhub-vol-";
+/// "devhub-vol-": the volumes this DevHub manages.
+pub fn volume_prefix() -> &'static str {
+    static P: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    P.get_or_init(|| format!("{}-vol-", prefix()))
+}
 
 pub fn volume_name(p: &str) -> String {
-    format!("{VOLUME_PREFIX}{p}")
+    format!("{}{p}", volume_prefix())
 }
 
 pub struct Limits {
@@ -49,6 +65,50 @@ pub struct Limits {
     pub bind_ip: String,
     /// Name of the DevHub container itself, when it runs in Docker (enables proxying by container name).
     pub self_container: Option<String>,
+    /// DevHub's address ("https://dev.example.com") and port range, to set up a DevHub run as a project.
+    pub origin: String,
+    pub port_range: (u16, u16),
+}
+
+const SOCKET: &str = "/var/run/docker.sock";
+
+/// Where the server's Docker socket is: the source of DevHub's own socket mount.
+async fn host_socket(d: &Docker, me: Option<&str>) -> String {
+    let Some(me) = me else { return SOCKET.into() };
+    let Ok(c) = d.inspect_container(me, None::<InspectContainerOptions>).await else { return SOCKET.into() };
+    c.mounts
+        .unwrap_or_default()
+        .into_iter()
+        .find(|m| m.destination.as_deref() == Some(SOCKET))
+        .and_then(|m| m.source)
+        .unwrap_or_else(|| SOCKET.into())
+}
+
+/// DevHub's own image ("ghcr.io/tweastly/devhub:latest", "devhub").
+pub fn is_devhub_image(image: &str) -> bool {
+    let repo = image.split('@').next().unwrap_or(image);
+    let repo = repo.rsplit_once(':').filter(|(_, tag)| !tag.contains('/')).map_or(repo, |x| x.0);
+    repo.rsplit('/').next() == Some("devhub")
+}
+
+/// Settings for a DevHub run as a project with the server's Docker: its own address, data
+/// in /workspace, its own names and ports, and proxying through its container's name.
+fn nested_devhub_env(p: &Project, lim: &Limits) -> Vec<(&'static str, String)> {
+    let (scheme, base) = lim.origin.split_once("://").unwrap_or(("https", &lim.origin));
+    let host = format!("{}.{base}", p.name);
+    let (lo, hi) = lim.port_range;
+    let span = hi.saturating_sub(lo).max(99);
+    let lo2 = hi.saturating_add(1);
+    // The passkey domain is a bare host name; the address keeps DevHub's port, if any.
+    let domain = host.split(':').next().unwrap_or(&host).to_string();
+    vec![
+        ("DEVHUB_DOMAIN", domain),
+        ("DEVHUB_ORIGIN", format!("{scheme}://{host}")),
+        ("DEVHUB_DATA", "/workspace/devhub-data".into()),
+        ("DEVHUB_NAME_PREFIX", format!("{}-in-{}", prefix(), p.name)),
+        ("DEVHUB_PORT_RANGE", format!("{lo2}-{}", lo2.saturating_add(span))),
+        ("DEVHUB_SELF_CONTAINER", container_name(&p.name)),
+    ]
 }
 
 pub async fn pull(docker: &Docker, image: &str) -> anyhow::Result<()> {
@@ -218,6 +278,14 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
     }
     for m in &p.mounts {
         mounts.push(vol(&m.path, m.volume.clone()));
+    }
+
+    if p.docker_access {
+        let sock = host_socket(docker, lim.self_container.as_deref()).await;
+        mounts.push(Mount { target: Some(SOCKET.into()), source: Some(sock), typ: Some(MountTypeEnum::BIND), ..Default::default() });
+        if is_devhub_image(&p.image) {
+            env.extend(nested_devhub_env(p, lim).into_iter().filter(|(k, _)| !p.env.contains_key(*k)).map(|(k, v)| format!("{k}={v}")));
+        }
     }
 
     let labels = HashMap::from([("devhub.project".to_string(), p.name.clone())]);
@@ -666,4 +734,19 @@ pub async fn restore_dir(d: &Docker, p: &str, parent: &str, file: &std::path::Pa
     });
     d.upload_to_container_streaming(&container_name(p), Some(UploadToContainerOptions { path: parent.to_string(), ..Default::default() }), chunks).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_devhub_image;
+
+    #[test]
+    fn devhub_images() {
+        assert!(is_devhub_image("ghcr.io/tweastly/devhub:latest"));
+        assert!(is_devhub_image("ghcr.io/tweastly/devhub@sha256:abc"));
+        assert!(is_devhub_image("devhub"));
+        assert!(is_devhub_image("localhost:5000/devhub"));
+        assert!(!is_devhub_image("nginx:latest"));
+        assert!(!is_devhub_image("ghcr.io/tweastly/devhub-site"));
+    }
 }

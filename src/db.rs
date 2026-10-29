@@ -62,6 +62,8 @@ pub struct Project {
     pub autostart: bool,
     /// Served on <name>.<domain> and <name>-<port>.<domain> (off: custom domains only).
     pub auto_domain: bool,
+    /// The server's Docker socket is mounted in the container (owner only): it controls the server.
+    pub docker_access: bool,
 }
 
 /// A Docker volume mounted at `path` in a project's container.
@@ -130,6 +132,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE projects ADD COLUMN volume TEXT", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN autostart INTEGER NOT NULL DEFAULT 1", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN auto_domain INTEGER NOT NULL DEFAULT 1", []);
+    let _ = c.execute("ALTER TABLE projects ADD COLUMN docker_access INTEGER NOT NULL DEFAULT 0", []);
     c.execute_batch("CREATE TABLE IF NOT EXISTS project_logos(name TEXT PRIMARY KEY, data BLOB NOT NULL, type TEXT NOT NULL, ver INTEGER NOT NULL)")?;
     let _ = c.execute("ALTER TABLE images ADD COLUMN volumes TEXT NOT NULL DEFAULT ''", []);
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
@@ -338,10 +341,11 @@ fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         volume: r.get(16)?,
         autostart: r.get::<_, i64>(17)? != 0,
         auto_domain: r.get::<_, i64>(18)? != 0,
+        docker_access: r.get::<_, i64>(19)? != 0,
     })
 }
 
-const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts, description, volume, autostart, auto_domain";
+const COLS: &str = "name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts, description, volume, autostart, auto_domain, docker_access";
 
 pub fn list_projects(c: &Connection) -> anyhow::Result<Vec<Project>> {
     let mut s = c.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
@@ -361,8 +365,8 @@ pub fn project_by_token(c: &Connection, token: &str) -> anyhow::Result<Option<Pr
 
 pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
     c.execute(
-        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts, description, volume, autostart, auto_domain)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+        "INSERT OR REPLACE INTO projects(name, template, image, git_url, ports, env, mcp_token, created_at, public, memory_mb, cpus, pinned, mcp_last_used, service, mounts, description, volume, autostart, auto_domain, docker_access)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
         params![
             p.name,
             p.template,
@@ -382,7 +386,8 @@ pub fn save_project(c: &Connection, p: &Project) -> anyhow::Result<()> {
             p.description,
             p.volume,
             p.autostart as i64,
-            p.auto_domain as i64
+            p.auto_domain as i64,
+            p.docker_access as i64
         ],
     )?;
     Ok(())
