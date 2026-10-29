@@ -21,9 +21,10 @@ const UPDATER_IMAGE: &str = "docker:27-cli";
 const UPDATER_GIT_IMAGE: &str = "devhub-updater:git";
 /// Setting: deploy every new commit of the branch as soon as it is pushed.
 pub const AUTO_SETTING: &str = "auto_deploy";
-/// How often the branch head is polled when automatic deployment is on. Conditional
-/// requests (ETag) answered 304 don't count against GitHub's rate limit.
-const WATCH_EVERY: Duration = Duration::from_secs(20);
+/// How often the branch head is polled, so a new commit shows within seconds (and is
+/// deployed, with automatic deployment). Conditional requests (ETag) answered 304 don't
+/// count against GitHub's rate limit.
+const WATCH_EVERY: Duration = Duration::from_secs(10);
 /// Without a token GitHub allows 60 API calls an hour per IP: a slower watch keeps room
 /// for the full checks.
 const WATCH_EVERY_ANON: Duration = Duration::from_secs(90);
@@ -205,8 +206,8 @@ pub fn auto_deploy(st: &AppState) -> bool {
     db::setting(&st.db.lock().unwrap(), AUTO_SETTING).is_some()
 }
 
-/// Full check every 30 min; with automatic deployment, the branch head every 20 s,
-/// and a deployment as soon as it moves.
+/// Full check every 30 min, and as soon as the branch head moves (polled every 10 s);
+/// with automatic deployment, the new commit is deployed.
 pub fn spawn_periodic(st: AppState) {
     let _ = running_head();
     tokio::spawn({
@@ -231,37 +232,39 @@ pub fn spawn_periodic(st: AppState) {
                 check(&st).await;
                 last_check = db::now();
             }
-            if auto_deploy(&st) {
-                let mut pause = if token().is_some() { WATCH_EVERY } else { WATCH_EVERY_ANON };
-                match branch_head(etag.as_deref()).await {
-                    Ok(Some((sha, tag))) => {
-                        remote = Some(sha);
-                        etag = Some(tag);
-                    }
-                    Ok(None) => {}
-                    // Rate limited: wait for GitHub's reset instead of failing silently.
-                    Err(Watch::Limited(wait)) => {
-                        tracing::warn!("GitHub limite les requêtes : surveillance en pause {} s", wait.as_secs());
-                        pause = wait;
-                    }
-                    Err(Watch::Other(e)) => tracing::warn!("surveillance de la branche : {e:#}"),
+            let mut pause = if token().is_some() { WATCH_EVERY } else { WATCH_EVERY_ANON };
+            let before = remote.clone();
+            match branch_head(etag.as_deref()).await {
+                Ok(Some((sha, tag))) => {
+                    remote = Some(sha);
+                    etag = Some(tag);
                 }
-                let local = running_head().ok().map(|h| h.0);
-                if let (Some(r), Some(l)) = (&remote, &local) {
-                    if r != l && attempted.as_ref() != Some(r) && !updater_running(&st).await {
-                        attempted = Some(r.clone());
-                        check(&st).await;
-                        last_check = db::now();
-                        match run_update(&st).await {
-                            Ok(()) => db::audit(&st.db.lock().unwrap(), "system", "devhub.autodeploy", &r[..7.min(r.len())]),
-                            Err(e) => db::audit(&st.db.lock().unwrap(), "system", "devhub.autodeploy.error", &format!("{e:#}")),
-                        }
-                    }
+                Ok(None) => {}
+                // Rate limited: wait for GitHub's reset instead of failing silently.
+                Err(Watch::Limited(wait)) => {
+                    tracing::warn!("GitHub limite les requêtes : surveillance en pause {} s", wait.as_secs());
+                    pause = wait;
                 }
-                tokio::time::sleep(pause).await;
-            } else {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                Err(Watch::Other(e)) => tracing::warn!("surveillance de la branche : {e:#}"),
             }
+            let local = running_head().ok().map(|h| h.0);
+            if let (Some(r), Some(l)) = (&remote, &local) {
+                // A new commit: the badge shows it right away (the pages follow /live/stats).
+                if before.is_some() && before.as_ref() != Some(r) && r != l {
+                    check(&st).await;
+                    last_check = db::now();
+                }
+                if auto_deploy(&st) && r != l && attempted.as_ref() != Some(r) && !updater_running(&st).await {
+                    attempted = Some(r.clone());
+                    check(&st).await;
+                    last_check = db::now();
+                    match run_update(&st).await {
+                        Ok(()) => db::audit(&st.db.lock().unwrap(), "system", "devhub.autodeploy", &r[..7.min(r.len())]),
+                        Err(e) => db::audit(&st.db.lock().unwrap(), "system", "devhub.autodeploy.error", &format!("{e:#}")),
+                    }
+                }
+            }
+            tokio::time::sleep(pause).await;
         }
     });
 }

@@ -602,7 +602,7 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
                             kbd { "/" }
                         }
                         div.acts {
-                            @if ctx.profile.admin { (update_pill(ctx)) }
+                            @if ctx.profile.admin { span.upd-slot { (update_pill(ctx)) } }
                             (sh.actions)
                             @if ctx.profile.admin { a.btn.primary href="/projects/new" { "Nouveau projet" } }
                         }
@@ -612,7 +612,7 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
                         header.mobile-head {
                             (logo(22)) span { "DevHub" }
                             div.end {
-                                @if ctx.profile.admin { (update_pill(ctx)) }
+                                @if ctx.profile.admin { span.upd-slot { (update_pill(ctx)) } }
                                 button.icon-btn type="button" data-theme-toggle title="Thème" aria-label="Changer de thème" { (icon("sun")) }
                             }
                         }
@@ -631,7 +631,7 @@ pub fn render(ctx: &Ctx, sh: Shell, body: Markup) -> Markup {
 /// The update badge of the top bar: new versions (a pill that opens their list and
 /// "Installer"), an installation in progress, a failed one, or "À jour" for two minutes
 /// after a deployment.
-fn update_pill(ctx: &Ctx) -> Markup {
+pub fn update_pill(ctx: &Ctx) -> Markup {
     let u = &ctx.update;
     let last = crate::db::deploys(&ctx.st.db.lock().unwrap(), 1).into_iter().next();
     let target = u.target.clone().unwrap_or_default();
@@ -742,7 +742,7 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 nav.rnav aria-label="Paramètres" {
                     @if ctx.profile.admin { (item("/claude", nav == Nav::Claude, "sparkles", "Claude", html! {})) }
                     (item("/menu", matches!(nav, Nav::Menu) || (is_settings(nav) && nav != Nav::Claude), "sliders", "Paramètres", html! {
-                        @if ctx.update.available() { span.rbadge title="Mise à jour disponible" {} }
+                        span.rbadge title="Mise à jour disponible" hidden[!ctx.update.available()] {}
                     }))
                 }
                 a class={"rme " (on(nav == Nav::Passkeys))} href="/security" aria-label="Mon profil" {
@@ -809,4 +809,10 @@ pub fn empty(kind: &str, title: &str, text: Markup, action: Markup) -> Markup {
 /// "il y a 4 min"
 pub fn ago(ts: i64) -> String {
     timefmt::relative(ts)
+}
+
+/// The update badge alone, fetched again by the pages when /live/stats says it changed.
+pub async fn update_pill_part(axum::extract::State(st): axum::extract::State<AppState>, jar: CookieJar) -> Result<Markup, Response> {
+    let ctx = ctx_admin(&st, &jar)?;
+    Ok(update_pill(&ctx))
 }

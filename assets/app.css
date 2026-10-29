@@ -1282,3 +1282,4 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 }
 .phero-acts .btn svg { width: 14px; height: 14px; }
 .phero-acts .btn.primary svg { width: 13px; height: 13px; }
+.upd-slot { display: contents; }

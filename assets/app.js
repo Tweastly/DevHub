@@ -286,7 +286,21 @@
     b.classList.toggle('err', v >= 92);
     b.classList.toggle('warn', v >= 80 && v < 92);
   };
+  // Update badge: fetched again when the server says it changed (new commit, install).
+  let updKey = null;
+  function updBadge(u) {
+    if (!u) return;
+    $$('.rbadge').forEach(b => { b.hidden = !u.n; });
+    if (updKey === null) { updKey = u.key; return; }
+    if (u.key === updKey) return;
+    updKey = u.key;
+    fetch('/update/pill').then(r => r.ok ? r.text() : null).then(h => {
+      if (h === null) return;
+      $$('.upd-slot').forEach(s => { if (!s.querySelector('details[open]')) s.innerHTML = h; });
+    }).catch(() => {});
+  }
   function apply(d) {
+    updBadge(d._update);
     $$('[data-live]').forEach(el => {
       const k = el.dataset.live, i = k.lastIndexOf(':');
       const s = d[k.slice(0, i)];

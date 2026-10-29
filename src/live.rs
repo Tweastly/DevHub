@@ -36,6 +36,17 @@ async fn snapshot(st: &AppState, who: &db::Profile) -> String {
         .collect();
     let mut map = map;
     if who.admin {
+        // What the update badge shows: the pages fetch it again when this changes.
+        let u = st.update.lock().unwrap().clone();
+        let last = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next();
+        let key = format!(
+            "{}|{}|{}|{}",
+            u.running,
+            u.pending.len(),
+            u.target.unwrap_or_default(),
+            last.map(|d| format!("{}:{:?}:{}", d.id, d.ok, d.finished_at.is_some_and(|f| db::now() - f < 120))).unwrap_or_default()
+        );
+        map.insert("_update".into(), json!({ "key": key, "n": u.pending.len() }));
         if let Some(s) = st.stats.lock().unwrap().get(crate::SELF_STATS) {
             let (_, cpus) = st.devhub_limits();
             map.insert(crate::SELF_STATS.into(), json!({
