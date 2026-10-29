@@ -1,6 +1,7 @@
-//! Claude page, in steps: 1. the switch for Claude's access, 2. the MCP URL to add in
-//! Claude Desktop (fixed: signing in happens with a passkey, see oauth.rs), 3. keeping
-//! control (authorized connections, journal, what Claude may do). Per-project URLs below.
+//! "Assistants IA" page, in steps: 1. the switch for the assistants' access, 2. the MCP URL
+//! to add in Claude Desktop, ChatGPT… (fixed: signing in happens with a passkey, see
+//! oauth.rs), 3. keeping control (authorized connections, journal, what they may do).
+//! Per-project URLs below.
 
 use super::*;
 use crate::mcp_admin::LAST_USED;
@@ -12,10 +13,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     let (last, today, connections) = {
         let c = st.db.lock().unwrap();
         let day = db::now() / 86400 * 86400;
-        let today: i64 = ["claude", "claude-admin"]
-            .iter()
-            .map(|a| db::audit_query(&c, &db::AuditFilter { actor: Some((*a).into()), since: Some(day), ..Default::default() }, 1, 0).1)
-            .sum();
+        let today = db::audit_query(&c, &db::AuditFilter { actor: Some("ia".into()), since: Some(day), ..Default::default() }, 1, 0).1;
         (db::setting(&c, LAST_USED).and_then(|v| v.parse::<i64>().ok()), today, db::oauth_connections(&c))
     };
     let url = crate::oauth::mcp_url(&st);
@@ -28,13 +26,13 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     };
 
     let body = html! {
-        div.page-head { div { h1 { "Claude" } p.lead { "Connecte Claude Desktop à DevHub par MCP. Tu choisis jusqu'où il peut aller, et tu coupes tout en un clic." } } }
+        div.page-head { div { h1 { "Assistants IA" } p.lead { "Connecte Claude, ChatGPT ou un autre assistant à DevHub par MCP. Tu choisis jusqu'où ils peuvent aller, et tu coupes tout en un clic." } } }
         div.csteps {
-            (step(1, "Accès de Claude", html! {
+            (step(1, "Accès des assistants", html! {
                 div.card.card-b.cswitch {
                     div.t {
                         div.row.tight {
-                            b style="font-size:17px" { "Claude peut agir dans DevHub" }
+                            b style="font-size:17px" { "Les assistants IA peuvent agir dans DevHub" }
                             @if enabled { span.pill.running { "Activé" } } @else { span.pill.exited { "Coupé" } }
                         }
                         p.muted style="font-size:13px;margin-top:4px" { "Avec les droits du profil qui l'autorise : tout le panel pour un administrateur, ses projets pour les autres." }
@@ -44,14 +42,18 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                         }
                     }
                     form.inline method="post" action={"/claude/admin/" (if enabled { "disable" } else { "enable" })}
-                        data-confirm=[enabled.then_some("Couper l'accès de Claude ?")] data-confirm-body="Claude ne pourra plus rien faire dans DevHub. Les connexions autorisées sont gardées et reprendront à la réactivation, avec la même URL." data-tone="warn" data-confirm-ok="Couper l'accès" {
-                        button.sw-btn type="submit" aria-pressed=(enabled) aria-label="Accès de Claude" { span class=(if enabled { "sw lg on" } else { "sw lg" }) {} }
+                        data-confirm=[enabled.then_some("Couper l'accès des assistants IA ?")] data-confirm-body="Aucun assistant ne pourra plus rien faire dans DevHub. Les connexions autorisées sont gardées et reprendront à la réactivation, avec la même URL." data-tone="warn" data-confirm-ok="Couper l'accès" {
+                        button.sw-btn type="submit" aria-pressed=(enabled) aria-label="Accès des assistants IA" { span class=(if enabled { "sw lg on" } else { "sw lg" }) {} }
                     }
                 }
             }))
-            (step(2, "Connecter Claude Desktop", html! {
+            (step(2, "Connecter un assistant", html! {
                 div.card.card-b {
-                    p.muted style="margin-bottom:14px" { "Réglages → Connecteurs → " b style="color:var(--text)" { "Ajouter un connecteur personnalisé" } ", colle cette URL, puis connecte-toi avec ton passkey et clique sur « Autoriser »." }
+                    ul.muted style="margin:0 0 14px;padding-left:18px;line-height:1.8;font-size:14px" {
+                        li { b style="color:var(--text)" { "Claude Desktop" } " : Réglages → Connecteurs → Ajouter un connecteur personnalisé." }
+                        li { b style="color:var(--text)" { "ChatGPT" } " : active le mode développeur, puis crée un connecteur avec cette URL (authentification OAuth)." }
+                    }
+                    p.muted style="margin-bottom:14px" { "Colle cette URL, puis connecte-toi avec ton passkey et clique sur « Autoriser ». Chaque assistant apparaît sous son nom dans le journal." }
                     div.copy { code { (url) } (copy_btn(&url)) }
                     p.help { "L'URL ne change jamais : elle ne donne rien sans connexion. Couper puis réactiver l'accès la laisse identique." }
                 }
@@ -61,10 +63,10 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                     div.card-h {
                         h3 { "Connexions autorisées" } span.sub { (connections.len()) }
                         @if connections.len() > 1 {
-                            div.end { form.inline method="post" action="/claude/connections/all/revoke" data-confirm={"Révoquer les " (connections.len()) " connexions ?"} data-confirm-body="Claude devra être réautorisé avec ton passkey sur chaque appareil." data-tone="danger" data-confirm-ok="Tout révoquer" { button.btn.sm.danger-outline { "Tout révoquer" } } }
+                            div.end { form.inline method="post" action="/claude/connections/all/revoke" data-confirm={"Révoquer les " (connections.len()) " connexions ?"} data-confirm-body="Chaque assistant devra être réautorisé avec ton passkey." data-tone="danger" data-confirm-ok="Tout révoquer" { button.btn.sm.danger-outline { "Tout révoquer" } } }
                         }
                     }
-                    @if connections.is_empty() { div.card-b.muted { "Aucune pour l'instant : elles apparaissent quand quelqu'un autorise Claude." } }
+                    @if connections.is_empty() { div.card-b.muted { "Aucune pour l'instant : elles apparaissent quand quelqu'un autorise un assistant." } }
                     @for k in &connections {
                         div.list-row {
                             div.t {
@@ -75,11 +77,11 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                         }
                     }
                     div.list-row {
-                        div.t { b { "Ce que fait Claude" } div.muted style="font-size:12.5px" { "Chaque action est notée dans le journal." } }
-                        a.link href="/audit?actor=claude-admin" { "Journal de Claude →" }
+                        div.t { b { "Ce que font les assistants" } div.muted style="font-size:12.5px" { "Chaque action est notée dans le journal." } }
+                        a.link href="/audit?actor=ia" { "Journal des assistants →" }
                     }
                     details.list-row style="display:block" {
-                        summary style="cursor:pointer;font-weight:600" { "Ce que Claude peut et ne peut pas faire" }
+                        summary style="cursor:pointer;font-weight:600" { "Ce que les assistants peuvent et ne peuvent pas faire" }
                         ul.muted style="margin:10px 0 0;padding-left:18px;line-height:1.8;font-size:14px" {
                             li { "Administrateur : créer, régler et supprimer des projets, travailler dans tous les conteneurs, mettre à jour DevHub" }
                             li { "Autres profils : seulement leurs projets, selon leurs droits (terminal et fichiers compris ou non)" }
@@ -93,7 +95,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
         details.card.mcp-tools style="margin-top:32px" {
             summary.card-h style="cursor:pointer;border-bottom:0" {
                 h3 { "Outils MCP" } span.count style="margin-left:0" { (groups.iter().map(|g| g.1.len()).sum::<usize>()) }
-                span.sub style="margin-left:auto" { "ce que Claude peut appeler, selon les droits du profil" }
+                span.sub style="margin-left:auto" { "ce qu'un assistant peut appeler, selon les droits du profil" }
             }
             @for (group, list) in &groups {
                 div.tool-group {
@@ -106,7 +108,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                     }
                 }
             }
-            div.card-f.help { "Chaque appel est vérifié avec les droits du profil qui a autorisé Claude, et noté dans le journal. Les passkeys, profils et autorisations restent hors d'atteinte." }
+            div.card-f.help { "Chaque appel est vérifié avec les droits du profil qui a autorisé l'assistant, et noté dans le journal sous son nom. Les passkeys, profils et autorisations restent hors d'atteinte." }
         }
         details.card style="margin-top:20px" {
             summary.card-h style="cursor:pointer;border-bottom:0" {
@@ -125,7 +127,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
             div.card-f.help { "Pour régénérer l'URL d'un projet, va dans son onglet Aperçu." }
         }
     };
-    Ok(render(&ctx, Shell { title: "Claude", nav: Nav::Claude, crumbs: vec![("DevHub".into(), Some("/".into())), ("Paramètres".into(), None), ("Claude".into(), None)], actions: html! {} }, body))
+    Ok(render(&ctx, Shell { title: "Assistants IA", nav: Nav::Claude, crumbs: vec![("DevHub".into(), Some("/".into())), ("Assistants IA".into(), None)], actions: html! {} }, body))
 }
 
 /// First sentence of a tool's description: the rest is for Claude.

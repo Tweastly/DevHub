@@ -655,8 +655,13 @@ fn audit_where(f: &AuditFilter) -> (String, Vec<rusqlite::types::Value>) {
     let mut w = vec!["1=1".to_string()];
     let mut p: Vec<V> = Vec::new();
     if let Some(a) = &f.actor {
-        p.push(V::Text(if a == "fail" { "?".into() } else { a.clone() }));
-        w.push(format!("actor = ?{}", p.len()));
+        if a == "ia" {
+            // Every AI assistant ("ia:…", and the older "claude" / "claude-admin").
+            w.push("(actor LIKE 'ia:%' OR actor IN ('claude', 'claude-admin'))".into());
+        } else {
+            p.push(V::Text(if a == "fail" { "?".into() } else { a.clone() }));
+            w.push(format!("actor = ?{}", p.len()));
+        }
     }
     if let Some(name) = &f.project {
         p.push(V::Text(format!("{name}:%")));
@@ -786,16 +791,33 @@ pub fn oauth_refresh(c: &Connection, refresh: &str) -> Option<(i64, String, i64)
 }
 
 /// Profile behind a valid access token; records the use.
-pub fn oauth_access(c: &Connection, access: &str) -> Option<Profile> {
-    let (id, pid): (i64, i64) = c
+/// The profile behind an access token, and the name its client registered with
+/// ("Claude", "ChatGPT"…).
+pub fn oauth_access(c: &Connection, access: &str) -> Option<(Profile, String)> {
+    let (id, pid, client): (i64, i64, Option<String>) = c
         .query_row(
-            "SELECT id, profile_id FROM oauth_tokens WHERE access_hash=?1 AND access_expires > ?2",
+            "SELECT t.id, t.profile_id, k.name FROM oauth_tokens t LEFT JOIN oauth_clients k ON k.id = t.client_id
+             WHERE t.access_hash=?1 AND t.access_expires > ?2",
             params![sha256_hex(access), now()],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .ok()?;
     let _ = c.execute("UPDATE oauth_tokens SET last_used=?1 WHERE id=?2", params![now(), id]);
-    profile(c, pid)
+    Some((profile(c, pid)?, client.unwrap_or_default()))
+}
+
+/// Audit actor of an AI assistant: "ia:<its name>" (older entries: "claude", "claude-admin").
+pub fn ai_actor(client: &str) -> String {
+    let name: String = client.trim().chars().filter(|c| !c.is_control()).take(40).collect();
+    format!("ia:{}", if name.is_empty() { "assistant" } else { &name })
+}
+
+/// The assistant's name when `actor` is one, for display.
+pub fn ai_name(actor: &str) -> Option<&str> {
+    match actor {
+        "claude" | "claude-admin" => Some("Claude"),
+        a => a.strip_prefix("ia:"),
+    }
 }
 
 pub struct OAuthConnection {

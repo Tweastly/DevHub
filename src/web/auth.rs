@@ -73,12 +73,12 @@ pub fn private_project(project: &str, login_url: &str, origin: &str, footer: &st
 }
 
 
-/// OAuth consent: Claude Desktop sent the person here to approve the MCP connection.
+/// OAuth consent: an AI assistant (Claude, ChatGPT…) sent the person here to approve the MCP connection.
 pub fn oauth_consent(client: &str, p: &db::Profile, enabled: bool, fields: &[(&str, String)], footer: &str) -> Markup {
-    shell("Autoriser Claude · DevHub", "", footer, false, html! {
+    shell(&format!("Autoriser {client} · DevHub"), "", footer, false, html! {
         @if !enabled {
-            h1 { "L'accès de Claude est coupé" }
-            p.sub { "Un administrateur doit l'activer dans DevHub, page " b style="color:var(--text)" { "Claude" } ", avant de connecter " (client) "." }
+            h1 { "L'accès des assistants IA est coupé" }
+            p.sub { "Un administrateur doit l'activer dans DevHub, page " b style="color:var(--text)" { "Assistants IA" } ", avant de connecter " (client) "." }
             form method="post" action="/oauth/authorize" {
                 @for (k, v) in fields { input type="hidden" name=(k) value=(v); }
                 button.btn name="decision" value="deny" { "Retour" }

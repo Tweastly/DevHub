@@ -349,14 +349,13 @@ pub fn spark(values: &[Option<f64>], p: &Period) -> Markup {
 }
 
 pub fn actor(a: &str) -> Markup {
-    let (cls, label) = match a {
-        "?" => ("fail", "?"),
-        "owner" => ("owner", "owner"),
-        "claude" => ("claude", "claude"),
-        "claude-admin" => ("claude-admin", "claude-admin"),
+    let (cls, label) = match (a, db::ai_name(a)) {
+        (_, Some(name)) => ("ai", name),
+        ("?", _) => ("fail", "?"),
+        ("owner", _) => ("owner", "owner"),
         _ => ("system", a),
     };
-    html! { span class={"actor " (cls)} { (label) } }
+    html! { span class={"actor " (cls)} title=[db::ai_name(a).map(|_| "Assistant IA")] { @if cls == "ai" { (icon_c("sparkles2", "sm")) } (label) } }
 }
 
 pub fn alert(kind: &str, body: Markup) -> Markup {
@@ -408,9 +407,10 @@ pub fn event(names: &[String], action: &str, detail: &str) -> Event {
 
 /// "Claude a lancé npm install dans mon-site" style sentence for the overview.
 pub fn sentence(actor: &str, ev: &Event) -> Markup {
+    let ai = db::ai_name(actor).map(|n| format!("{n} a"));
     let who = match actor {
+        _ if ai.is_some() => ai.as_deref().unwrap_or_default(),
         "owner" => "Tu as",
-        "claude" | "claude-admin" => "Claude a",
         "?" => "Quelqu'un a",
         _ => "Le système a",
     };
@@ -683,7 +683,7 @@ pub fn update_pill(ctx: &Ctx) -> Markup {
 fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, Option<(String, bool)>)> {
     let mut v = Vec::new();
     if ctx.profile.admin {
-        v.push((Nav::Claude, "/claude", "Claude", ctx.admin.then(|| ("admin".to_string(), false))));
+        v.push((Nav::Claude, "/claude", "Assistants IA", ctx.admin.then(|| ("admin".to_string(), false))));
     }
     v.push((Nav::Passkeys, "/security", "Mon profil", Some((ctx.passkey_count.to_string(), false))));
     if ctx.profile.admin {
@@ -741,11 +741,11 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 }
                 span.rspace {}
                 @if ctx.profile.admin {
-                    nav.rnav aria-label="Claude" {
-                        a class={"ritem rclaude " (on(nav == Nav::Claude))} href="/claude" aria-label="Claude" aria-current=[(nav == Nav::Claude).then_some("page")] {
+                    nav.rnav aria-label="Assistants IA" {
+                        a class={"ritem rclaude " (on(nav == Nav::Claude))} href="/claude" aria-label="Assistants IA" aria-current=[(nav == Nav::Claude).then_some("page")] {
                             span.rsheen aria-hidden="true" {}
                             span.ric { (icon("sparkles2")) }
-                            span.rlbl { "Claude" }
+                            span.rlbl { "Assistants IA" }
                             span.rend { span.rtag { "MCP" } }
                         }
                     }

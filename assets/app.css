@@ -1316,3 +1316,5 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 @media (prefers-reduced-motion: reduce) {
   .ritem.rclaude, .ritem.rclaude .ric > svg, .rsheen::after { animation: none; }
 }
+.actor.ai { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); color: var(--accent-ink); }
+.actor.ai svg { width: 11px; height: 11px; }

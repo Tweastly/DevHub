@@ -38,7 +38,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         }
         let day = db::now() / 86400 * 86400;
         let today = |a: &str| db::audit_query(&c, &db::AuditFilter { actor: Some(a.into()), since: Some(day), ..Default::default() }, 1, 0).1;
-        (series, peak, recent, today("claude") + today("claude-admin"))
+        (series, peak, recent, today("ia"))
     };
 
     let online = all.iter().filter(|r| r.s.state == "running").count();
@@ -126,7 +126,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         }
         div.split.wide {
             div.card {
-                div.card-h { h3 { "Activité récente" } span.sub { @if ctx.profile.admin { "propriétaire, Claude et système" } @else { "sur tes projets" } } @if ctx.profile.admin { div.end { a.btn.sm.ghost href="/audit" { "Tout le journal →" } } } }
+                div.card-h { h3 { "Activité récente" } span.sub { @if ctx.profile.admin { "propriétaire, assistants IA et système" } @else { "sur tes projets" } } @if ctx.profile.admin { div.end { a.btn.sm.ghost href="/audit" { "Tout le journal →" } } } }
                 @if recent.is_empty() { div.card-b.muted { "Rien pour l'instant." } }
                 @for r in &recent {
                     @let ev = event(&names, &r.action, &r.detail);
@@ -159,7 +159,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 @if ctx.admin && ctx.profile.admin {
                     a.card.glow.card-b.row href="/claude" style="flex-wrap:nowrap" {
                         span.hero-ic style="width:38px;height:38px" { (icon("sparkles")) }
-                        div { b { "Claude a l'accès complet" } div.muted style="font-size:13px" { (claude_today) " action" @if claude_today > 1 { "s" } " aujourd'hui, toutes dans le journal. Tu peux révoquer l'URL à tout moment." } }
+                        div { b { "Les assistants IA ont l'accès complet" } div.muted style="font-size:13px" { (claude_today) " action" @if claude_today > 1 { "s" } " aujourd'hui, toutes dans le journal. Tu peux révoquer l'URL à tout moment." } }
                     }
                 }
             }

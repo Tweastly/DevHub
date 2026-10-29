@@ -150,7 +150,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     }
                     div.card-f { a.link href="/audit" { "Voir le journal →" } }
                 }
-                (alert("info", html! { "Un passkey ne peut pas être hameçonné : il ne fonctionne que sur " code { (crate::proxy::base_host(&st)) } ". Claude n'a aucun accès à cette page." }))
+                (alert("info", html! { "Un passkey ne peut pas être hameçonné : il ne fonctionne que sur " code { (crate::proxy::base_host(&st)) } ". Les assistants IA n'ont aucun accès à cette page." }))
             }
         }
         script { (PreEscaped(super::auth::WEBAUTHN_JS)) }

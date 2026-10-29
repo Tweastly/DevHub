@@ -246,7 +246,8 @@ pub fn unauthorized(st: &AppState, description: &str) -> Response {
 }
 
 /// Profile behind the request's bearer token.
-pub fn bearer_profile(st: &AppState, headers: &HeaderMap) -> Option<db::Profile> {
+/// The profile and the client name behind a Bearer token.
+pub fn bearer_profile(st: &AppState, headers: &HeaderMap) -> Option<(db::Profile, String)> {
     let token = headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?.trim();
     db::oauth_access(&st.db.lock().unwrap(), token)
 }

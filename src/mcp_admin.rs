@@ -25,11 +25,11 @@ pub fn enabled(st: &AppState) -> bool {
 }
 
 pub async fn handle(State(st): State<AppState>, headers: HeaderMap, Json(req): Json<Value>) -> Response {
-    let Some(who) = crate::oauth::bearer_profile(&st, &headers) else {
+    let Some((who, client)) = crate::oauth::bearer_profile(&st, &headers) else {
         return crate::oauth::unauthorized(&st, "connexion requise");
     };
     if !enabled(&st) {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "access_denied", "error_description": "l'accès de Claude est coupé dans DevHub" }))).into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "access_denied", "error_description": "l'accès des assistants IA est coupé dans DevHub" }))).into_response();
     }
     let _ = db::set_setting(&st.db.lock().unwrap(), LAST_USED, Some(&db::now().to_string()));
     let Some(id) = req.get("id").cloned() else {
@@ -53,7 +53,7 @@ pub async fn handle(State(st): State<AppState>, headers: HeaderMap, Json(req): J
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools_for(&who) })),
-        "tools/call" => Ok(call(&st, &who, &params).await),
+        "tools/call" => Ok(call(&st, &who, &db::ai_actor(&client), &params).await),
         _ => Err(json!({ "code": -32601, "message": format!("method not found: {method}") })),
     };
     let body = match result {
@@ -288,7 +288,7 @@ fn pretty(v: &Value) -> Value {
     text(serde_json::to_string_pretty(v).unwrap_or_default(), false)
 }
 
-async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
+async fn call(st: &AppState, who: &db::Profile, actor: &str, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let a = &params["arguments"];
     let s = |k: &str| a[k].as_str().unwrap_or("").to_string();
@@ -313,7 +313,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
 
     // Admin tools are audited here; in-container tools audit themselves in project_tool.
     let r: Result<Value, String> = async {
-        let audit = |detail: &str| db::audit(&st.db.lock().unwrap(), "claude-admin", name, detail);
+        let audit = |detail: &str| db::audit(&st.db.lock().unwrap(), actor, name, detail);
         Ok(match name {
             "list_projects" => {
                 let ps = db::list_projects(&st.db.lock().unwrap()).map_err(|e| e.to_string())?;
@@ -339,7 +339,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     service: a["service"].as_bool().unwrap_or(true),
                     volumes: a["volumes"].as_str().unwrap_or("").to_string(),
                 };
-                let p = ops::create(st, np, "claude-admin").await?;
+                let p = ops::create(st, np, actor).await?;
                 let addr = match (p.first_http(), p.public_ports().next()) {
                     (Some(_), _) => format!("URL : {}", proxy::url_for(st, &p.name, None)),
                     (None, Some(m)) => format!("adresse des joueurs : {} ({})", proxy::public_address(st, m), m.proto().to_uppercase()),
@@ -355,11 +355,11 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     "rebuild" => Change::Rebuild,
                     x => return Err(format!("action inconnue : {x}")),
                 };
-                ops::apply(st, &project, c, "claude-admin").await?;
+                ops::apply(st, &project, c, actor).await?;
                 text(format!("{} : {} fait", project, s("action")), false)
             }
             "set_ports" => {
-                ops::apply(st, &project, Change::Ports(ports("ports")?), "claude-admin").await?;
+                ops::apply(st, &project, Change::Ports(ports("ports")?), actor).await?;
                 pretty(&project_json(st, &ops::load(st, &project)?, false).await)
             }
             "set_env" => {
@@ -367,17 +367,17 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                     .as_object()
                     .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().map(String::from).unwrap_or_else(|| v.to_string()))).collect())
                     .unwrap_or_default();
-                ops::apply(st, &project, Change::Env(env), "claude-admin").await?;
+                ops::apply(st, &project, Change::Env(env), actor).await?;
                 text(format!("{project} : variables mises à jour"), false)
             }
             "set_public" => {
                 let public = a["public"].as_bool().unwrap_or(false);
-                ops::apply(st, &project, Change::SetPublic(public), "claude-admin").await?;
+                ops::apply(st, &project, Change::SetPublic(public), actor).await?;
                 text(format!("{project} est maintenant {}", if public { "public" } else { "privé" }), false)
             }
             "set_resources" => {
                 let c = Change::Resources { memory_mb: a["memory_mb"].as_i64(), cpus: a["cpus"].as_f64() };
-                ops::apply(st, &project, c, "claude-admin").await?;
+                ops::apply(st, &project, c, actor).await?;
                 pretty(&project_json(st, &ops::load(st, &project)?, false).await)
             }
             "update_project" => {
@@ -385,35 +385,35 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                 // to the project under its current name.
                 let mut done = Vec::new();
                 if let Some(d) = a["description"].as_str() {
-                    ops::apply(st, &project, Change::Describe(d.to_string()), "claude-admin").await?;
+                    ops::apply(st, &project, Change::Describe(d.to_string()), actor).await?;
                     done.push("description");
                 }
                 if let Some(h) = a["color"].as_i64() {
-                    ops::apply(st, &project, Change::Color(h), "claude-admin").await?;
+                    ops::apply(st, &project, Change::Color(h), actor).await?;
                     done.push("couleur");
                 }
                 if let Some(on) = a["autostart"].as_bool() {
-                    ops::apply(st, &project, Change::Autostart(on), "claude-admin").await?;
+                    ops::apply(st, &project, Change::Autostart(on), actor).await?;
                     done.push("démarrage automatique");
                 }
                 if let Some(on) = a["pinned"].as_bool() {
-                    ops::apply(st, &project, Change::Pin(on), "claude-admin").await?;
+                    ops::apply(st, &project, Change::Pin(on), actor).await?;
                     done.push("épinglage");
                 }
                 if let Some(on) = a["auto_domain"].as_bool() {
-                    ops::apply(st, &project, Change::AutoDomain(on), "claude-admin").await?;
+                    ops::apply(st, &project, Change::AutoDomain(on), actor).await?;
                     done.push("adresse automatique");
                 }
                 if let Some(m) = a["mode"].as_str() {
                     if m != "service" && m != "dev" {
                         return Err(format!("mode inconnu : {m} (service ou dev)"));
                     }
-                    ops::apply(st, &project, Change::Launch { service: m == "service" }, "claude-admin").await?;
+                    ops::apply(st, &project, Change::Launch { service: m == "service" }, actor).await?;
                     done.push("mode de lancement");
                 }
                 let mut current = project.clone();
                 if let Some(n) = a["name"].as_str().map(|n| n.trim().to_ascii_lowercase()).filter(|n| *n != project) {
-                    ops::apply(st, &project, Change::Rename(n.clone()), "claude-admin").await?;
+                    ops::apply(st, &project, Change::Rename(n.clone()), actor).await?;
                     done.push("nom");
                     current = n;
                 }
@@ -425,7 +425,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
                 pretty(&v)
             }
             "set_volumes" => {
-                ops::apply(st, &project, Change::Volumes(s("volumes")), "claude-admin").await?;
+                ops::apply(st, &project, Change::Volumes(s("volumes")), actor).await?;
                 pretty(&project_json(st, &ops::load(st, &project)?, false).await)
             }
             "list_volumes" => {
@@ -512,16 +512,16 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
             }
             "add_domain" => {
                 let port = a["port"].as_u64().map(|n| u16::try_from(n).map_err(|_| format!("port invalide : {n}"))).transpose()?;
-                ops::apply(st, &project, Change::AddDomain { host: s("host"), port }, "claude-admin").await?;
+                ops::apply(st, &project, Change::AddDomain { host: s("host"), port }, actor).await?;
                 let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
                 text(format!("{project} est maintenant servi sur {scheme}://{}", ops::subdomain_host(st, &s("host"))?), false)
             }
             "remove_domain" => {
-                ops::apply(st, &project, Change::RemoveDomain(s("host")), "claude-admin").await?;
+                ops::apply(st, &project, Change::RemoveDomain(s("host")), actor).await?;
                 text(format!("{} retiré de {project}", s("host")), false)
             }
             "delete_project" => {
-                ops::apply(st, &project, Change::Delete { keep_data: a["keep_data"].as_bool().unwrap_or(false) }, "claude-admin").await?;
+                ops::apply(st, &project, Change::Delete { keep_data: a["keep_data"].as_bool().unwrap_or(false) }, actor).await?;
                 text(format!("{project} supprimé"), false)
             }
             "logs" => {
@@ -550,7 +550,7 @@ async fn call(st: &AppState, who: &db::Profile, params: &Value) -> Value {
             _ => {
                 // In-container tools.
                 let p = ops::load(st, &project)?;
-                return Ok(project_tool(st, &p, name, a).await);
+                return Ok(project_tool(st, &p, name, a, actor).await);
             }
         })
     }

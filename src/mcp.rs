@@ -100,11 +100,11 @@ pub fn text(s: impl Into<String>, is_error: bool) -> Value {
 }
 
 async fn call(st: &AppState, p: &db::Project, params: &Value) -> Value {
-    project_tool(st, p, params["name"].as_str().unwrap_or(""), &params["arguments"]).await
+    project_tool(st, p, params["name"].as_str().unwrap_or(""), &params["arguments"], &db::ai_actor("URL du projet")).await
 }
 
 /// Tools that act inside one project's container. Shared with the admin server.
-pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value) -> Value {
+pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value, actor: &str) -> Value {
     let s = |k: &str| a[k].as_str().unwrap_or("").to_string();
     {
         let c = st.db.lock().unwrap();
@@ -112,7 +112,7 @@ pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value)
             "run_command" => s("command"),
             _ => s("path"),
         };
-        db::audit(&c, "claude", &format!("{}:{name}", p.name), &detail.chars().take(300).collect::<String>());
+        db::audit(&c, actor, &format!("{}:{name}", p.name), &detail.chars().take(300).collect::<String>());
     }
     let d = &st.docker;
     let r: anyhow::Result<Value> = async {

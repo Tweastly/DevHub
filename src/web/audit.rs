@@ -52,14 +52,14 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     let csv = link(&q, "format", Some("csv")).replacen("/audit", "/audit.csv", 1);
     let body = html! {
         div.page-head {
-            div { h1 { "Journal d'audit" } p.lead { "Toutes les actions, les tiennes comme celles de Claude. Rien ne peut être effacé depuis le panel." } }
+            div { h1 { "Journal d'audit" } p.lead { "Toutes les actions, les tiennes comme celles des assistants IA. Rien ne peut être effacé depuis le panel." } }
             div.acts { a.btn href=(csv) download { (icon("download")) "Exporter (CSV)" } }
         }
         div.filters {
             (chip(None, html! { "Tous" }, all))
             (chip(Some("owner"), actor("owner"), count("owner")))
-            (chip(Some("claude"), actor("claude"), count("claude")))
-            (chip(Some("claude-admin"), actor("claude-admin"), count("claude-admin")))
+            (chip(Some("ia"), html! { span.actor.ai { (icon_c("sparkles2", "sm")) "Assistants IA" } }, counts.iter().filter(|(x, _)| db::ai_name(x).is_some()).map(|x| x.1).sum()))
+            @for (a, n) in counts.iter().filter(|(x, _)| x.starts_with("ia:")) { (chip(Some(a.as_str()), actor(a), *n)) }
             (chip(Some("system"), actor("system"), count("system")))
             (chip(Some("fail"), html! { (actor("?")) " échecs" }, count("?")))
             form.spacer.row.end method="get" action="/audit" {

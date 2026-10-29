@@ -361,13 +361,13 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                     }
                 }
                 @if ctx.profile.shell(n) { div.card {
-                    div.card-h { h3 { "Connecter Claude Desktop" } span.tag.mono { "MCP" } }
+                    div.card-h { h3 { "Connecter un assistant IA" } span.tag.mono { "MCP" } }
                     div.card-b {
-                        p.muted style="margin-bottom:12px" { "Dans Claude Desktop : " b { "Réglages → Connecteurs → Ajouter un connecteur personnalisé" } ", colle cette URL :" }
+                        p.muted style="margin-bottom:12px" { "Dans Claude Desktop (" b { "Réglages → Connecteurs → Ajouter un connecteur personnalisé" } ") ou ChatGPT (connecteur personnalisé, mode développeur), colle cette URL :" }
                         div.copy { code { (mcp_url) } (copy_btn(&mcp_url)) }
                         p.help.row.tight style="margin-top:12px" { (icon_c("alert", "sm")) "Cette URL est secrète et ne donne accès qu'à ce conteneur. Si elle fuite, régénère-la." }
                         div.row style="margin-top:14px" {
-                            form.inline method="post" action={(base) "/rotate-token"} data-confirm={"Régénérer l'URL MCP de " (n) " ?"} data-confirm-body="L'ancienne URL cesse de fonctionner tout de suite : il faudra coller la nouvelle dans Claude." data-tone="warn" data-confirm-ok="Régénérer" { (back_field(&base)) button.btn.sm { "Régénérer l'URL" } }
+                            form.inline method="post" action={(base) "/rotate-token"} data-confirm={"Régénérer l'URL MCP de " (n) " ?"} data-confirm-body="L'ancienne URL cesse de fonctionner tout de suite : il faudra coller la nouvelle dans l'assistant." data-tone="warn" data-confirm-ok="Régénérer" { (back_field(&base)) button.btn.sm { "Régénérer l'URL" } }
                             span.dim style="font-size:12px" { @if let Some(t) = x.p.mcp_last_used { "Utilisée " (ago(t)) } @else { "Jamais utilisée" } }
                         }
                     }
