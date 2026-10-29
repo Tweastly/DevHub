@@ -4,60 +4,91 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{PROJECT}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  :root { --bg:#f6f6f7; --fg:#18181b; --mute:#5f5f68; --card:#ffffff; --line:#e4e4e7; --chip:#f4f4f5; --dot:#d4d4d8; }
-  :root.dark { --bg:#09090b; --fg:#fafafa; --mute:#a1a1aa; --card:#141417; --line:#27272a; --chip:#1c1c20; --dot:#27272a; }
-  @media (prefers-color-scheme: dark) { :root:not(.light) { --bg:#09090b; --fg:#fafafa; --mute:#a1a1aa; --card:#141417; --line:#27272a; --chip:#1c1c20; --dot:#27272a; } }
+  /* Same tokens as DevHub (assets/app.css): warm greys, terracotta accent, 1 px borders. */
+  :root { --bg:#fcfcfb; --card:#ffffff; --card-2:#f6f5f3; --border:#e6e4e0; --dot:#e6e4e0; --text:#1a1917; --text-2:#5a564f; --faint:#8c877f;
+          --accent:#b4541f; --soft:#f3e7dc; --ink:#8c3f14; --ok:#2f7d5d; --ok-soft:#e3efe8; color-scheme:light; }
+  :root.dark { --bg:#121211; --card:#1a1a18; --card-2:#141413; --border:#2c2b28; --dot:#2a2926; --text:#f2f1ed; --text-2:#a8a49e; --faint:#8c877f;
+               --accent:#e08350; --soft:#33241a; --ink:#f0a076; --ok:#5fb08a; --ok-soft:#1d2b24; color-scheme:dark; }
+  @media (prefers-color-scheme: dark) { :root:not(.light) { --bg:#121211; --card:#1a1a18; --card-2:#141413; --border:#2c2b28; --dot:#2a2926; --text:#f2f1ed; --text-2:#a8a49e; --faint:#8c877f;
+               --accent:#e08350; --soft:#33241a; --ink:#f0a076; --ok:#5fb08a; --ok-soft:#1d2b24; color-scheme:dark; } }
   * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; background:var(--bg);
-         background-image:radial-gradient(var(--dot) 1px, transparent 1px); background-size:22px 22px;
-         color:var(--fg); font:16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; padding:0 16px; }
-  main { width:100%; max-width:800px; text-align:center; padding:130px 0 60px; flex:1; }
-  .badge { display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:#1f9d68; background:color-mix(in srgb,#3ecf8e 16%,transparent);
-           border-radius:99px; padding:4px 14px; margin-bottom:30px; }
-  .badge::before { content:""; width:7px; height:7px; border-radius:50%; background:#3ecf8e; animation:p 2s infinite; }
-  :root.dark .badge, :root:not(.light) .badge { color:#3ecf8e; }
-  @keyframes p { 50% { opacity:.35 } }
-  h1 { font-size:clamp(48px, 11vw, 118px); line-height:1; margin:0 0 26px; font-weight:900; letter-spacing:-.055em;
-       background:linear-gradient(90deg,#6ea8ff,#b78cff 70%,#d9a0ff); -webkit-background-clip:text; background-clip:text; color:transparent; overflow-wrap:anywhere; }
-  .lead { color:var(--mute); font-size:19px; max-width:540px; margin:0 auto 64px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; text-align:left; box-shadow:0 10px 40px rgba(0,0,0,.06); }
-  .card h2 { font-size:15px; margin:0; padding:20px 24px; border-bottom:1px solid var(--line); }
-  .card h2 small { font-weight:400; color:var(--mute); margin-left:8px; font-size:13px; }
-  ol { list-style:none; margin:0; padding:6px 24px; counter-reset:s; }
-  li { display:flex; gap:18px; padding:16px 0; border-top:1px solid var(--line); counter-increment:s; font-size:14.5px; }
-  li:first-child { border-top:0; }
-  li::before { content:counter(s); flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:8px; color:#fff; font-weight:700; font-size:13px;
-               background:linear-gradient(135deg,#6ea8ff,#b78cff); }
-  li b { display:block; margin-bottom:2px; }
-  li span { color:var(--mute); }
-  code { font:12.5px ui-monospace, Menlo, monospace; background:var(--chip); border:1px solid var(--line); border-radius:6px; padding:1px 7px; color:var(--fg); }
-  footer { padding:30px 0; font-size:13px; color:var(--mute); display:flex; align-items:center; gap:8px; }
-  footer i { width:18px; height:18px; border-radius:5px; background:linear-gradient(135deg,#6ea8ff,#b78cff); display:inline-block; }
-  .toggle { position:fixed; top:24px; right:24px; width:36px; height:36px; border-radius:10px; border:1px solid var(--line); background:var(--card);
-            color:var(--fg); cursor:pointer; display:grid; place-items:center; }
-  .toggle svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; }
-  @media (max-width:600px) { main { padding-top:90px; } .lead { margin-bottom:44px; } }
+  html, body { transition:background-color .3s, color .3s; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:0 16px; background:var(--bg); color:var(--text);
+         font:15px/1.55 "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
+  code { font:12.5px "JetBrains Mono", ui-monospace, Menlo, monospace; background:var(--card-2); border:1px solid var(--border); border-radius:6px; padding:1px 6px; color:var(--text); }
+
+  /* Dot grid that fades in from the centre and drifts very slowly. */
+  .grid { position:fixed; inset:0; z-index:-1; pointer-events:none; background-image:radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size:22px 22px;
+          -webkit-mask-image:radial-gradient(ellipse 60% 55% at 50% 40%, #000, transparent); mask-image:radial-gradient(ellipse 60% 55% at 50% 40%, #000, transparent);
+          animation:grid-in 1.6s ease-out both, drift 40s linear infinite; }
+  @keyframes grid-in { from { opacity:0; transform:scale(1.04); } }
+  @keyframes drift { to { background-position:22px 22px; } }
+
+  main { width:100%; max-width:720px; flex:1; display:flex; flex-direction:column; align-items:center; text-align:center; padding:120px 0 60px; }
+  .rise { animation:rise .7s cubic-bezier(.2,.7,.2,1) both; animation-delay:var(--d, 0s); }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); filter:blur(4px); } }
+
+  .pill { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:var(--ok); background:var(--ok-soft); border-radius:999px; padding:3px 12px 3px 10px; }
+  .pill i { position:relative; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .pill i::after { content:""; position:absolute; inset:0; border-radius:50%; background:currentColor; animation:ping 2s cubic-bezier(0,0,.2,1) infinite; }
+  @keyframes ping { 75%, 100% { transform:scale(2.6); opacity:0; } }
+
+  h1 { font-size:clamp(64px, 14vw, 128px); line-height:1; margin:22px 0 18px; font-weight:600; letter-spacing:-.055em; overflow-wrap:anywhere; }
+  h1 .dot { display:inline-block; color:var(--accent); transform-origin:50% 80%; animation:pop .6s cubic-bezier(.3,1.6,.5,1) .55s both, beat 3.2s ease-in-out 1.6s infinite; }
+  @keyframes pop { from { transform:scale(0); opacity:0; } }
+  @keyframes beat { 0%, 30%, 100% { transform:scale(1); } 8% { transform:scale(1.25); } 16% { transform:scale(.96); } 22% { transform:scale(1.1); } }
+  .lead { color:var(--text-2); font-size:17px; max-width:460px; margin:0 0 48px; }
+
+  .tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; width:100%; text-align:left; }
+  .tile { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; transition:border-color .2s, transform .2s, background-color .3s; }
+  .tile:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--border)); transform:translateY(-2px); }
+  .tile .ic { width:32px; height:32px; border-radius:8px; display:grid; place-items:center; background:var(--soft); color:var(--ink); margin-bottom:14px; transition:background-color .2s, color .2s; }
+  .tile:hover .ic { background:var(--accent); color:var(--card); }
+  .tile .ic svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .3s cubic-bezier(.3,1.6,.5,1); }
+  .tile:hover .ic svg { transform:scale(1.12) rotate(-6deg); }
+  .tile b { display:block; font-size:15px; font-weight:600; margin-bottom:4px; }
+  .tile span { color:var(--text-2); font-size:13.5px; }
+
+  footer { padding:28px 0; font-size:13px; color:var(--faint); display:flex; align-items:center; gap:8px; }
+  footer i { width:14px; height:14px; border-radius:4px; background:var(--accent); display:inline-block; }
+  .toggle { position:fixed; top:20px; right:20px; width:34px; height:34px; border-radius:6px; border:1px solid var(--border); background:var(--card); color:var(--text-2);
+            cursor:pointer; display:grid; place-items:center; transition:color .2s, border-color .2s; }
+  .toggle:hover { color:var(--text); border-color:var(--faint); }
+  .toggle svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; transition:transform .5s cubic-bezier(.3,1.4,.5,1); }
+  .toggle:active svg { transform:rotate(90deg); }
+  @media (max-width:640px) { main { padding-top:84px; } .lead { margin-bottom:36px; } .tiles { grid-template-columns:1fr; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
+<div class="grid"></div>
 <button class="toggle" type="button" aria-label="Changer de thème" onclick="const r=document.documentElement,d=r.classList.contains('dark')||(!r.classList.contains('light')&&matchMedia('(prefers-color-scheme: dark)').matches);r.classList.toggle('dark',!d);r.classList.toggle('light',d)">
   <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
 </button>
 <main>
-  <span class="badge">en ligne</span>
-  <h1>{{PROJECT}}</h1>
-  <p class="lead">Ton projet est prêt. Cette page est servie depuis son conteneur DevHub.</p>
-  <section class="card">
-    <h2>Pour commencer <small>trois minutes</small></h2>
-    <ol>
-      <li><div><b>Modifie cette page</b><span>Elle se trouve dans <code>/workspace/index.html</code> — ouvre-la depuis l'onglet Fichiers de DevHub.</span></div></li>
-      <li><div><b>Change la commande de démarrage</b><span><code>/workspace/start.sh</code> lance le serveur. Écoute bien sur <code>0.0.0.0:{{PORT}}</code>.</span></div></li>
-      <li><div><b>Ouvre-la au monde</b><span>Le projet est privé par défaut. Rends-le public dans Réseau, ou ajoute un sous-domaine personnalisé.</span></div></li>
-    </ol>
+  <span class="pill rise"><i></i>En ligne</span>
+  <h1 class="rise" style="--d:.08s">{{PROJECT}}<span class="dot">.</span></h1>
+  <p class="lead rise" style="--d:.18s">Ton projet est prêt. Cette page est servie depuis son conteneur DevHub.</p>
+  <section class="tiles">
+    <div class="tile rise" style="--d:.3s">
+      <span class="ic"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></span>
+      <b>Modifie cette page</b><span><code>index.html</code> dans Fichiers</span>
+    </div>
+    <div class="tile rise" style="--d:.38s">
+      <span class="ic"><svg viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M12 17h7"/></svg></span>
+      <b>Lance ton serveur</b><span><code>start.sh</code> sur le port {{PORT}}</span>
+    </div>
+    <div class="tile rise" style="--d:.46s">
+      <span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg></span>
+      <b>Ouvre au monde</b><span>Public dans Réseau</span>
+    </div>
   </section>
 </main>
-<footer><i></i> Servi par DevHub · <code id="host">{{PROJECT}}</code></footer>
+<footer class="rise" style="--d:.6s"><i></i> Servi par DevHub · <code id="host">{{PROJECT}}</code></footer>
 <script>document.getElementById('host').textContent = location.host;</script>
 </body>
 </html>
