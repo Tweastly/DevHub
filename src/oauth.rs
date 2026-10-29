@@ -252,11 +252,11 @@ pub fn bearer_profile(st: &AppState, headers: &HeaderMap) -> Option<(db::Profile
     db::oauth_access(&st.db.lock().unwrap(), token)
 }
 
-/// Revokes one authorized connection (POST /claude/connections/{id}/revoke, id "all" = every one).
+/// Revokes one authorized connection (POST /ia/connections/{id}/revoke, id "all" = every one).
 pub async fn revoke(State(st): State<AppState>, jar: CookieJar, axum::extract::Path(id): axum::extract::Path<String>) -> Result<Redirect, Response> {
     let who = auth::require_admin(&st, &jar)?;
     let c = st.db.lock().unwrap();
     db::revoke_oauth(&c, id.parse().ok());
     db::audit(&c, &who.actor(), "claude.revoke", if id == "all" { "toutes les connexions" } else { &id });
-    Ok(Redirect::to("/claude"))
+    Ok(Redirect::to("/ia"))
 }

@@ -231,8 +231,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/update/auto", post(updater::set_auto))
         .route("/update/stream", get(updater::stream))
         .route("/update/pill", get(web::update_pill_part))
-        .route("/claude", get(web::claude::page))
-        .route("/claude/admin/{action}", post(mcp_admin::admin_action))
+        .route("/ia", get(web::claude::page))
+        .route("/ia/admin/{action}", post(mcp_admin::admin_action))
+        // The page's former address.
+        .route("/claude", get(|| async { Redirect::permanent("/ia") }))
         .route("/projects", get(web::projects::list).post(create_project))
         .route("/projects/new", get(web::projects::new_form))
         .route("/projects/bulk", post(bulk_action))
@@ -270,7 +272,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/oauth/register", post(oauth::register))
         .route("/oauth/authorize", get(oauth::authorize).post(oauth::authorize_post))
         .route("/oauth/token", post(oauth::token))
-        .route("/claude/connections/{id}/revoke", post(oauth::revoke))
+        .route("/ia/connections/{id}/revoke", post(oauth::revoke))
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 

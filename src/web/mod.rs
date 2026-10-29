@@ -683,7 +683,7 @@ pub fn update_pill(ctx: &Ctx) -> Markup {
 fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, Option<(String, bool)>)> {
     let mut v = Vec::new();
     if ctx.profile.admin {
-        v.push((Nav::Claude, "/claude", "Assistants IA", ctx.admin.then(|| ("admin".to_string(), false))));
+        v.push((Nav::Claude, "/ia", "Assistants IA", ctx.admin.then(|| ("admin".to_string(), false))));
     }
     v.push((Nav::Passkeys, "/security", "Mon profil", Some((ctx.passkey_count.to_string(), false))));
     if ctx.profile.admin {
@@ -742,7 +742,7 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 span.rspace {}
                 @if ctx.profile.admin {
                     nav.rnav aria-label="Assistants IA" {
-                        a class={"ritem rclaude " (on(nav == Nav::Claude))} href="/claude" aria-label="Assistants IA" aria-current=[(nav == Nav::Claude).then_some("page")] {
+                        a class={"ritem rclaude " (on(nav == Nav::Claude))} href="/ia" aria-label="Assistants IA" aria-current=[(nav == Nav::Claude).then_some("page")] {
                             span.rsheen aria-hidden="true" {}
                             span.ric { (icon("sparkles2")) }
                             span.rlbl { "Assistants IA" }

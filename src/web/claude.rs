@@ -41,7 +41,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                             " · " (today) " action" @if today > 1 { "s" } " aujourd'hui"
                         }
                     }
-                    form.inline method="post" action={"/claude/admin/" (if enabled { "disable" } else { "enable" })}
+                    form.inline method="post" action={"/ia/admin/" (if enabled { "disable" } else { "enable" })}
                         data-confirm=[enabled.then_some("Couper l'accès des assistants IA ?")] data-confirm-body="Aucun assistant ne pourra plus rien faire dans DevHub. Les connexions autorisées sont gardées et reprendront à la réactivation, avec la même URL." data-tone="warn" data-confirm-ok="Couper l'accès" {
                         button.sw-btn type="submit" aria-pressed=(enabled) aria-label="Accès des assistants IA" { span class=(if enabled { "sw lg on" } else { "sw lg" }) {} }
                     }
@@ -63,7 +63,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                     div.card-h {
                         h3 { "Connexions autorisées" } span.sub { (connections.len()) }
                         @if connections.len() > 1 {
-                            div.end { form.inline method="post" action="/claude/connections/all/revoke" data-confirm={"Révoquer les " (connections.len()) " connexions ?"} data-confirm-body="Chaque assistant devra être réautorisé avec ton passkey." data-tone="danger" data-confirm-ok="Tout révoquer" { button.btn.sm.danger-outline { "Tout révoquer" } } }
+                            div.end { form.inline method="post" action="/ia/connections/all/revoke" data-confirm={"Révoquer les " (connections.len()) " connexions ?"} data-confirm-body="Chaque assistant devra être réautorisé avec ton passkey." data-tone="danger" data-confirm-ok="Tout révoquer" { button.btn.sm.danger-outline { "Tout révoquer" } } }
                         }
                     }
                     @if connections.is_empty() { div.card-b.muted { "Aucune pour l'instant : elles apparaissent quand quelqu'un autorise un assistant." } }
@@ -73,7 +73,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                                 b { (k.client) }
                                 div.muted style="font-size:12.5px" { "profil " (k.profile) " · autorisée " (ago(k.created_at)) " · " @if let Some(t) = k.last_used { "utilisée " (ago(t)) } @else { "pas encore utilisée" } }
                             }
-                            form.inline method="post" action={"/claude/connections/" (k.id) "/revoke"} data-confirm={"Révoquer " (k.client) " ?"} data-confirm-body="Cette connexion s'arrête tout de suite. Les autres continuent ; celle-ci pourra être réautorisée." data-tone="neutral" data-confirm-ok="Révoquer" { button.btn.sm { "Révoquer" } }
+                            form.inline method="post" action={"/ia/connections/" (k.id) "/revoke"} data-confirm={"Révoquer " (k.client) " ?"} data-confirm-body="Cette connexion s'arrête tout de suite. Les autres continuent ; celle-ci pourra être réautorisée." data-tone="neutral" data-confirm-ok="Révoquer" { button.btn.sm { "Révoquer" } }
                         }
                     }
                     div.list-row {

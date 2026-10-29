@@ -1,6 +1,6 @@
 //! The MCP server at /mcp: Claude works in DevHub with the rights of the profile that
 //! authorized it (OAuth, see oauth.rs): the whole panel for an administrator, only its
-//! projects and rights otherwise. Off by default; the switch on /claude turns it on and
+//! projects and rights otherwise. Off by default; the switch on /ia turns it on and
 //! off without changing the URL. Passkeys, profiles and authorizations stay out of reach,
 //! so Claude can never lock anyone out.
 
@@ -570,5 +570,5 @@ pub async fn admin_action(State(st): State<AppState>, jar: CookieJar, Path(actio
     };
     db::set_setting(&c, ENABLED, on.then_some("1")).map_err(|e| crate::AppError(e).into_response())?;
     db::audit(&c, &who.actor(), &format!("claude.{action}"), "");
-    Ok(Redirect::to("/claude"))
+    Ok(Redirect::to("/ia"))
 }

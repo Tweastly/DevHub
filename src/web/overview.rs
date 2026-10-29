@@ -157,7 +157,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     }
                 }
                 @if ctx.admin && ctx.profile.admin {
-                    a.card.glow.card-b.row href="/claude" style="flex-wrap:nowrap" {
+                    a.card.glow.card-b.row href="/ia" style="flex-wrap:nowrap" {
                         span.hero-ic style="width:38px;height:38px" { (icon("sparkles")) }
                         div { b { "Les assistants IA ont l'accès complet" } div.muted style="font-size:13px" { (claude_today) " action" @if claude_today > 1 { "s" } " aujourd'hui, toutes dans le journal. Tu peux révoquer l'URL à tout moment." } }
                     }
