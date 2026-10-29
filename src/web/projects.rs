@@ -74,7 +74,7 @@ fn access_cell(ctx: &Ctx, r: &Row) -> Markup {
             div.row.tight {
                 @if r.s.state == "running" && p.first_http().is_some() { @if let Some(u) = crate::proxy::auto_url(&ctx.st, p, None) { a.link.mono href=(u) target="_blank" style="font-size:12px" { "ouvrir ↗" } } }
                 @for m in &p.ports { span.chip { ":" (m.container) @if m.is_public() { " " (m.proto()) } } }
-                @if p.public && p.first_http().is_some() { span.pill.public { "Public" } }
+                @if p.public && p.first_http().is_some() { span.pill.public { (icon_c("globe", "sm")) "Public" } }
             }
         }
     }

@@ -110,7 +110,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                             h1 { (n) }
                             (state_pill(ctx, n, &x.s.state))
                             @if x.p.first_http().is_some() {
-                                @if x.p.public { span.pill.public { "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
+                                @if x.p.public { span.pill.public { (icon_c("globe", "sm")) "Public" } } @else { span.pill.private { (icon_c("lock", "sm")) "Privé" } }
                             }
                             @if ro { span.tag { "lecture seule" } }
                         }
