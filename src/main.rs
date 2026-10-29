@@ -233,8 +233,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/update/pill", get(web::update_pill_part))
         .route("/ia", get(web::claude::page))
         .route("/ia/admin/{action}", post(mcp_admin::admin_action))
-        // The page's former address.
-        .route("/claude", get(|| async { Redirect::permanent("/ia") }))
         .route("/projects", get(web::projects::list).post(create_project))
         .route("/projects/new", get(web::projects::new_form))
         .route("/projects/bulk", post(bulk_action))
