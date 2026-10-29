@@ -440,7 +440,17 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
             spawn_build(st, p.clone());
             detail = format!("{name} (nouvelle tentative)");
         }
-        Change::Rebuild => docker::create(d, &p, &st.limits()).await.map_err(internal)?,
+        Change::Rebuild => {
+            // Recréer takes the image's latest version. An image that only exists here (built
+            // locally, registry down) is reused as it is.
+            if let Err(e) = docker::pull(d, &p.image).await {
+                if d.inspect_image(&docker::with_tag(&p.image)).await.is_err() {
+                    return Err(format!("{e:#}"));
+                }
+                tracing::warn!("{} : image non retéléchargée, version locale gardée : {e:#}", p.name);
+            }
+            docker::create(d, &p, &st.limits()).await.map_err(internal)?;
+        }
         Change::RotateToken => {
             p.mcp_token = random_token(32);
             db::save_project(&st.db.lock().unwrap(), &p).map_err(internal)?;

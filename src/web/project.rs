@@ -174,9 +174,9 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
 
 fn rebuild_form(base: &str, here: &str, n: &str, class: &str, label: Markup) -> Markup {
     html! {
-        form.inline method="post" action={(base) "/rebuild"} data-confirm={"Recréer le conteneur de " (n) " ?"} data-confirm-body="Il est supprimé puis recréé depuis son image : les dossiers gardés (Volumes) restent, ce qui a été installé ailleurs est perdu. Quelques secondes d'interruption." data-tone="warn" data-confirm-ok="Recréer" {
+        form.inline method="post" action={(base) "/rebuild"} data-confirm={"Recréer le conteneur de " (n) " ?"} data-confirm-body="La dernière version de son image est téléchargée, puis il est recréé : les dossiers gardés (Volumes) restent, ce qui a été installé ailleurs est perdu. Quelques secondes d'interruption, plus le téléchargement si l'image a changé." data-tone="warn" data-confirm-ok="Recréer" {
             (back_field(here))
-            button class=(class) title="Recréer le conteneur (depuis l'image, les volumes restent)" aria-label="Recréer le conteneur" { (label) }
+            button class=(class) title="Recréer le conteneur (dernière version de l'image, les volumes restent)" aria-label="Recréer le conteneur" { (label) }
         }
     }
 }
