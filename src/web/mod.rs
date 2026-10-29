@@ -739,16 +739,19 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                     }
                 }
                 span.rspace {}
+                @if ctx.profile.admin {
+                    nav.rnav aria-label="Claude" { (item("/claude", nav == Nav::Claude, "sparkles", "Claude", html! {})) }
+                }
                 // The profile row opens the "Paramètres" category, upwards.
                 details.rme-menu {
-                    summary class={"rme " (on(is_settings(nav)))} aria-label="Paramètres" {
+                    summary class={"rme " (on(is_settings(nav) && nav != Nav::Claude))} aria-label="Paramètres" {
                         span.ric { (profile_avatar(&ctx.profile, "sm")) @if ctx.update.available() { span.rbadge title="Mise à jour disponible" {} } @else { span.rbadge hidden {} } }
                         span.rlbl { b { (ctx.profile.name) } span { (ctx.profile.role()) } }
                         span.rend { (icon_c("chevron-down", "sm")) }
                     }
                     nav.rnav.rsettings aria-label="Paramètres" {
                         div.rsep { span.rlbl { "Paramètres" } }
-                        @for (n, link, label, badge) in settings_links(ctx) {
+                        @for (n, link, label, badge) in settings_links(ctx).into_iter().filter(|l| l.0 != Nav::Claude) {
                             a class={"ritem rsub " (on(n == nav))} href=(link) aria-current=[(n == nav).then_some("page")] {
                                 span.rlbl { (label) }
                                 @if let Some((b, solid)) = badge {
