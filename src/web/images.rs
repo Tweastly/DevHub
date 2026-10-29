@@ -228,11 +228,45 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     Ok(render(&ctx, Shell { title: "Images", nav: Nav::Images, crumbs: vec![("DevHub".into(), Some("/".into())), ("Images".into(), None)], actions: html! {} }, body))
 }
 
-/// Checks an image reference typed in a form.
+/// Checks an image reference typed in a form. A pasted `docker pull …` command or registry
+/// URL is reduced to the image itself, and the repository is lowercased as Docker requires
+/// ("ghcr.io/Tweastly/DevHub:latest" → "ghcr.io/tweastly/devhub:latest").
 pub(crate) fn reference(s: &str) -> Result<String, String> {
-    let r = s.trim().to_string();
+    let words: Vec<&str> = s.split_whitespace().skip_while(|w| *w == "sudo").collect();
+    let r = match words.as_slice() {
+        ["docker" | "podman", "run" | "create", ..] => return Err("colle seulement le nom de l'image, sans la commande docker run (ex. nginx:latest)".into()),
+        ["docker" | "podman", "pull", rest @ ..] | ["docker" | "podman", "image", "pull", rest @ ..] => rest.last().copied().unwrap_or(""),
+        [one] => one,
+        [] => "",
+        _ => return Err(format!("image invalide : « {} » (un seul nom, sans espace, ex. nginx:latest)", s.trim())),
+    };
+    let r = r.trim_start_matches("https://").trim_start_matches("http://");
+    // Tag and digest keep their case; the repository part can't have any.
+    let split = r.find('@').unwrap_or_else(|| match r.rfind(':') {
+        Some(i) if !r[i..].contains('/') => i,
+        _ => r.len(),
+    });
+    let r = format!("{}{}", r[..split].to_ascii_lowercase(), &r[split..]);
     let ok = !r.is_empty() && r.len() <= 255 && r.chars().all(|c| c.is_ascii_alphanumeric() || "./:-_@".contains(c)) && !r.starts_with(['-', '.', '/', ':']);
     if ok { Ok(r) } else { Err(format!("image invalide : « {r} »")) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reference;
+
+    #[test]
+    fn pasted_commands_and_case() {
+        assert_eq!(reference("docker pull ghcr.io/tweastly/devhub:latest").unwrap(), "ghcr.io/tweastly/devhub:latest");
+        assert_eq!(reference(" sudo docker pull --platform linux/amd64 nginx ").unwrap(), "nginx");
+        assert_eq!(reference("docker image pull redis:7").unwrap(), "redis:7");
+        assert_eq!(reference("ghcr.io/Tweastly/DevHub:Latest").unwrap(), "ghcr.io/tweastly/devhub:Latest");
+        assert_eq!(reference("https://ghcr.io/tweastly/devhub").unwrap(), "ghcr.io/tweastly/devhub");
+        assert_eq!(reference("localhost:5000/app").unwrap(), "localhost:5000/app");
+        assert!(reference("docker run -p 80:80 nginx").is_err());
+        assert!(reference("nginx latest").is_err());
+        assert!(reference("").is_err());
+    }
 }
 
 /// Downloads an image in the background; the page shows the step until it's done.

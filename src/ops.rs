@@ -297,7 +297,8 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
         return Err(format!("le projet {name} existe déjà"));
     }
     let image = if np.template == "custom" {
-        np.image.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).ok_or("image requise")?
+        let typed = np.image.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).ok_or("image requise")?;
+        crate::web::images::reference(&typed)?
     } else {
         docker::image_for(&np.template).ok_or_else(|| format!("modèle inconnu : {}", np.template))?.to_string()
     };
@@ -369,6 +370,16 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
 }
 
 async fn build(st: &AppState, p: &db::Project) -> anyhow::Result<()> {
+    // Projects created before images were checked can hold a pasted "docker pull …": fix it for the retry.
+    let fixed;
+    let p = match crate::web::images::reference(&p.image) {
+        Ok(image) if image != p.image => {
+            fixed = db::Project { image, ..p.clone() };
+            db::save_project(&st.db.lock().unwrap(), &fixed)?;
+            &fixed
+        }
+        _ => p,
+    };
     if st.docker.inspect_image(&p.image).await.is_err() {
         set_step(st, &p.name, format!("Téléchargement de {}", p.image));
         let (st2, name, image) = (st.clone(), p.name.clone(), p.image.clone());
