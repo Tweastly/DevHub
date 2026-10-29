@@ -998,23 +998,32 @@ fn docker_access_row(x: &P, base: &str, here: &str) -> Markup {
     let n = &x.p.name;
     let devhub = docker::is_devhub_image(&x.p.image);
     html! {
-        form.gen-row style="padding-top:0;margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)" method="post" action={(base) "/docker-access"}
+        form class={ "dka" @if on { " on" } } method="post" action={(base) "/docker-access"}
             data-confirm=(if on { format!("Retirer l'accès à Docker de {n} ?") } else { format!("Donner à {n} l'accès à Docker du serveur ?") })
             data-confirm-body=(if on { "Le conteneur est recréé sans le socket Docker. Les fichiers sont gardés." } else { "Tout ce qui tourne dans ce projet, son terminal et son URL MCP pourront créer, lire et supprimer n'importe quel conteneur du serveur, DevHub compris, et lire tous les volumes. Le conteneur est recréé, les fichiers sont gardés." })
             data-tone=(if on { "warn" } else { "danger" }) data-confirm-ok=(if on { "Retirer l'accès" } else { "Donner l'accès" }) {
             (back_field(&format!("{here}#danger")))
             input type="hidden" name="on" value=(if on { "0" } else { "1" });
-            div.gen-l {
-                b { "Accès à Docker du serveur" }
-                p.help { "Monte " code { "/var/run/docker.sock" } " dans le conteneur : le projet pilote alors tout le serveur. À réserver à un projet de confiance, par exemple un second DevHub. Réservé au propriétaire." }
-                @if devhub {
-                    p.help style="margin-top:8px" {
-                        "Image DevHub : elle est réglée toute seule (adresse du projet, données dans " code { "/workspace/devhub-data" } ", noms " code { (docker::prefix()) "-in-" (n) "-…" } " et ports à part, pour ne jamais toucher aux projets d'ici). Le code d'installation s'affiche dans les Journaux."
-                        @if !x.p.ports.iter().any(|m| m.container == 8080) { " Ajoute le port " code { "8080" } " dans Réseau." }
-                    }
+            div.dka-top {
+                span.dka-ic { (icon("server")) }
+                div.dka-t {
+                    div.dka-h { b { "Accès à Docker du serveur" } span.tag { "propriétaire" } @if on { span.dka-live { "activé" } } }
+                    p { "Le projet reçoit " code { "/var/run/docker.sock" } " et peut piloter tout le serveur." }
+                }
+                button.switch role="switch" aria-checked=(on) aria-label="Accès à Docker du serveur" { span {} }
+            }
+            ul.dka-risks {
+                li { (icon_c("alert", "sm")) "Créer, arrêter ou supprimer n'importe quel conteneur, DevHub compris" }
+                li { (icon_c("alert", "sm")) "Lire tous les volumes, donc les données des autres projets" }
+                li { (icon_c("alert", "sm")) "Vaut aussi pour son terminal et son URL MCP" }
+            }
+            @if devhub {
+                div.dka-note {
+                    b { "Image DevHub détectée. " }
+                    "Elle est réglée toute seule : adresse du projet, données dans " code { "/workspace/devhub-data" } ", noms " code { (docker::prefix()) "-in-" (n) "-…" } " et ports à part, sans toucher aux projets d'ici. Le code d'installation s'affiche dans les Journaux."
+                    @if !x.p.ports.iter().any(|m| m.container == 8080) { " Ajoute le port " code { "8080" } " dans Réseau." }
                 }
             }
-            div.gen-r { button.switch role="switch" aria-checked=(on) aria-label="Accès à Docker du serveur" { span {} } }
         }
     }
 }

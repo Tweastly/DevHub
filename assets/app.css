@@ -234,6 +234,25 @@ svg.i.lg { width: 20px; height: 20px; }
 .card-f { padding: 14px 24px; border-top: 1px solid var(--line); background: var(--card-2); border-radius: 0 0 var(--r) var(--r); font-size: 13px; }
 .card.glow { border-color: var(--border); }
 .card.danger { border-color: var(--err-border); }
+.dka { border: 1px solid var(--border); border-radius: var(--r); background: var(--card-2); padding: 16px; margin-bottom: 22px; }
+.dka.on { border-color: color-mix(in srgb, var(--st-err) 45%, var(--border)); background: color-mix(in srgb, var(--st-err) 6%, var(--card)); }
+.dka-top { display: flex; align-items: flex-start; gap: 14px; }
+.dka-ic { flex: none; width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, var(--st-err) 14%, transparent); color: var(--st-err); }
+.dka-ic svg { width: 18px; height: 18px; }
+.dka-t { flex: 1; min-width: 0; }
+.dka-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dka-h b { font-size: 14.5px; font-weight: 600; }
+.dka-live { font-size: 11.5px; font-weight: 600; color: var(--st-err); display: inline-flex; align-items: center; gap: 6px; }
+.dka-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.dka-t p { margin: 3px 0 0; font-size: 13px; color: var(--text-2); }
+.dka .switch { margin-top: 6px; }
+.dka.on .switch[aria-checked="true"] { background: var(--st-err); border-color: var(--st-err); }
+.dka-risks { list-style: none; margin: 14px 0 0 50px; padding: 12px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.dka-risks li { display: flex; gap: 8px; align-items: flex-start; }
+.dka-risks svg { flex: none; width: 13px; height: 13px; margin-top: 2px; color: var(--st-err); }
+.dka-note { margin: 12px 0 0 50px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--card); border: 1px solid var(--border); font-size: 12.5px; color: var(--text-2); }
+.dka-note b { color: var(--text); font-weight: 600; }
+@media (max-width: 640px) { .dka-risks, .dka-note { margin-left: 0; } }
 .pill.docker { background: color-mix(in srgb, var(--st-err) 14%, transparent); border-color: transparent; color: var(--st-err); }
 .lift { transition: border-color .15s; }
 .lift:hover { border-color: var(--border-2); }
