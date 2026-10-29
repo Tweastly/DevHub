@@ -123,19 +123,19 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                     }
                     div.phero-acts {
                         @if running {
-                            @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" rel="noopener" { "Ouvrir le site ↗" } }
+                            @if let Some(u) = main_url(ctx, x) { a.btn.primary href=(u) target="_blank" rel="noopener" { (icon_c("external", "sm")) "Ouvrir" } }
                         }
                         @if manage {
                             @if running {
-                                form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.icon-btn.lg title="Redémarrer" aria-label="Redémarrer" { (icon("restart")) } }
+                                form.inline method="post" action={(base) "/restart"} { (back_field(&here)) button.btn { (icon_c("restart", "sm")) "Redémarrer" } }
                                 form.inline method="post" action={(base) "/stop"} data-confirm={"Arrêter " (n) " ?"} data-confirm-body="Le conteneur s'arrête, ses fichiers restent. Ses adresses affichent « Projet arrêté » jusqu'au redémarrage." data-tone="neutral" data-confirm-ok="Arrêter" {
-                                    (back_field(&here)) button.icon-btn.lg.danger title="Arrêter" aria-label="Arrêter" { (icon("stop")) }
+                                    (back_field(&here)) button.btn.danger-outline { (icon_c("stop", "sm")) "Arrêter" }
                                 }
                             } @else if x.s.state == "absent" {
                                 (build_button(ctx, n, &here, ""))
                             } @else {
                                 form.inline method="post" action={(base) "/start"} { (back_field(&here)) button.btn.primary { (icon_c("play", "sm")) "Démarrer" } }
-                                (rebuild_form(&base, &here, n, "icon-btn lg", html! { (icon("rebuild")) }))
+                                (rebuild_form(&base, &here, n, "btn", html! { (icon_c("rebuild", "sm")) "Recréer" }))
                             }
                             details.pmore {
                                 summary.icon-btn.lg title="Plus d'actions" aria-label="Plus d'actions" { (icon("dots")) }
