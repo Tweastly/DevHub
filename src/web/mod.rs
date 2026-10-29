@@ -531,54 +531,73 @@ pub fn ctx_admin(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
     if ctx.profile.admin {
         Ok(ctx)
     } else {
-        Err((axum::http::StatusCode::FORBIDDEN, axum::response::Html(forbidden_page())).into_response())
+        Err(Oops::forbidden().in_app(&ctx))
     }
 }
 
-/// Full-page error in DevHub's style: big code, a sentence, a way back.
-fn status_page(code: u16, label: &str, title: &str, message: &str, back: (&str, &str)) -> String {
-    html! {
-        (DOCTYPE)
-        html lang="fr" {
-            head { (head(&format!("{title} · DevHub"))) }
-            body.errpage {
-                main.err {
-                    a.err-brand href="/" { span.err-dot {} "DevHub" }
-                    p.err-code { (code) span { "." } }
-                    p.err-label { (label) }
-                    h1 { (title) }
-                    p.err-msg { (message) }
-                    div.err-acts {
-                        a.btn.primary href=(back.1) { (back.0) }
-                        button.btn type="button" onclick="history.length > 1 ? history.back() : location.assign('/')" { "Page précédente" }
-                    }
+/// What an error page says: code, label, title, sentence and the main way out.
+pub struct Oops<'a> {
+    code: u16,
+    label: &'a str,
+    title: &'a str,
+    message: String,
+    back: (&'a str, &'a str),
+}
+
+impl Oops<'_> {
+    pub fn forbidden() -> Self {
+        Oops { code: 403, label: "accès refusé", title: "Ton profil n'a pas accès à cette page", message: "Demande à l'administrateur de DevHub d'élargir les autorisations de ton profil.".into(), back: ("Tableau de bord", "/") }
+    }
+    /// A project that doesn't exist (deleted, renamed) or that this profile can't see.
+    pub fn project(name: &str) -> Self {
+        let message = if name.is_empty() { "Ce projet n'existe pas, ou ton profil ne peut pas le voir.".to_string() } else { format!("« {name} » n'existe pas, a été renommé ou supprimé, ou ton profil ne peut pas le voir.") };
+        Oops { code: 404, label: "projet introuvable", title: "Ce projet est introuvable", message, back: ("Voir les projets", "/projects") }
+    }
+    /// Any other unknown address.
+    pub fn page() -> Self {
+        Oops { code: 404, label: "page introuvable", title: "Cette page n'existe pas", message: "L'adresse est peut-être mal tapée, ou la page a été déplacée.".into(), back: ("Tableau de bord", "/") }
+    }
+
+    fn body(&self, in_app: bool) -> Markup {
+        html! {
+            div class={ "err" @if in_app { " in-app" } } {
+                @if !in_app { a.err-brand href="/" { span.err-dot {} "DevHub" } }
+                p.err-code { (self.code) span { "." } }
+                p.err-label { (self.label) }
+                h1 { (self.title) }
+                p.err-msg { (self.message) }
+                div.err-acts {
+                    a.btn.primary href=(self.back.1) { (self.back.0) }
+                    button.btn type="button" onclick="history.length > 1 ? history.back() : location.assign('/')" { "Page précédente" }
                 }
             }
         }
     }
-    .into_string()
-}
 
-/// Shown when a profile reaches a page its permissions don't cover.
-pub fn forbidden_page() -> String {
-    status_page(403, "accès refusé", "Ton profil n'a pas accès à cette page", "Demande à l'administrateur de DevHub d'élargir les autorisations de ton profil.", ("Tableau de bord", "/"))
-}
+    /// Inside the usual layout, for a page that already has its context.
+    pub fn in_app(self, ctx: &Ctx) -> Response {
+        let code = axum::http::StatusCode::from_u16(self.code).unwrap_or(axum::http::StatusCode::NOT_FOUND);
+        let title = format!("{} · {}", self.title, self.code);
+        let nav = if self.back.1 == "/projects" { Nav::Projects } else { Nav::Menu };
+        (code, render(ctx, Shell { title: &title, nav, crumbs: vec![], actions: html! {} }, self.body(true))).into_response()
+    }
 
-/// A project that doesn't exist (deleted, renamed) or that this profile can't see.
-pub fn project_not_found_page(name: &str) -> String {
-    let message = if name.is_empty() { "Ce projet n'existe pas, ou ton profil ne peut pas le voir.".to_string() } else { format!("« {name} » n'existe pas, a été renommé ou supprimé, ou ton profil ne peut pas le voir.") };
-    status_page(404, "projet introuvable", "Ce projet est introuvable", &message, ("Voir les projets", "/projects"))
-}
-
-/// Any other unknown address.
-pub fn not_found_page() -> String {
-    status_page(404, "page introuvable", "Cette page n'existe pas", "L'adresse est peut-être mal tapée, ou la page a été déplacée.", ("Tableau de bord", "/"))
-}
-
-/// The 404 response for a missing project.
-pub fn project_not_found(name: &str) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    (axum::http::StatusCode::NOT_FOUND, axum::response::Html(project_not_found_page(name))).into_response()
+    /// Inside the usual layout (menu, top bar) for a signed-in profile, on its own otherwise.
+    pub fn response(self, st: &AppState, jar: &CookieJar) -> Response {
+        let code = axum::http::StatusCode::from_u16(self.code).unwrap_or(axum::http::StatusCode::NOT_FOUND);
+        let title = format!("{} · {}", self.title, self.code);
+        let page = match ctx(st, jar) {
+            Ok(ctx) => return self.in_app(&ctx),
+            Err(_) => html! {
+                (DOCTYPE)
+                html lang="fr" {
+                    head { (head(&format!("{title} · DevHub"))) }
+                    body.errpage { main { (self.body(false)) } }
+                }
+            },
+        };
+        (code, page).into_response()
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]

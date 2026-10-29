@@ -274,7 +274,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/oauth/authorize", get(oauth::authorize).post(oauth::authorize_post))
         .route("/oauth/token", post(oauth::token))
         .route("/ia/connections/{id}/revoke", post(oauth::revoke))
-        .fallback(|| async { (StatusCode::NOT_FOUND, axum::response::Html(web::not_found_page())) })
+        .fallback(|State(st): State<AppState>, jar: CookieJar| async move { web::Oops::page().response(&st, &jar) })
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 

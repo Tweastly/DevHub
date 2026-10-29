@@ -37,8 +37,8 @@ pub fn current_profile(st: &AppState, jar: &CookieJar) -> Option<db::Profile> {
     jar.get(COOKIE).and_then(|c| db::session_profile(&st.db.lock().unwrap(), c.value()))
 }
 
-fn forbidden() -> Response {
-    (StatusCode::FORBIDDEN, axum::response::Html(crate::web::forbidden_page())).into_response()
+fn forbidden(st: &AppState, jar: &CookieJar) -> Response {
+    crate::web::Oops::forbidden().response(st, jar)
 }
 
 /// Guard for administrator pages and actions.
@@ -46,7 +46,7 @@ pub fn require_admin(st: &AppState, jar: &CookieJar) -> Result<db::Profile, Resp
     match current_profile(st, jar) {
         None => Err(Redirect::to("/login").into_response()),
         Some(p) if p.admin => Ok(p),
-        Some(_) => Err(forbidden()),
+        Some(_) => Err(forbidden(st, jar)),
     }
 }
 
@@ -62,14 +62,14 @@ pub enum Need {
 pub fn require_project(st: &AppState, jar: &CookieJar, project: &str, need: Need) -> Result<db::Profile, Response> {
     let Some(p) = current_profile(st, jar) else { return Err(Redirect::to("/login").into_response()) };
     if !p.sees(project) {
-        return Err(crate::web::project_not_found(project));
+        return Err(crate::web::Oops::project(project).response(st, jar));
     }
     let ok = match need {
         Need::See => true,
         Need::Manage => p.manages(project),
         Need::Shell => p.shell(project),
     };
-    if ok { Ok(p) } else { Err(forbidden()) }
+    if ok { Ok(p) } else { Err(forbidden(st, jar)) }
 }
 
 /// Passkey (id, name) behind the current session.
