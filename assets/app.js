@@ -157,8 +157,8 @@
   });
   addEventListener('popstate', () => go(location.href, false));
   // The update badge's list closes on a click elsewhere or Escape.
-  document.addEventListener('click', e => { $$('details.upd-pop[open], details.pmore[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') $$('details.upd-pop[open], details.pmore[open]').forEach(d => { d.open = false; }); });
+  document.addEventListener('click', e => { $$('details.upd-pop[open], details.pmore[open], details.rme-menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $$('details.upd-pop[open], details.pmore[open], details.rme-menu[open]').forEach(d => { d.open = false; }); });
 
   // ---------- Confirmations: DevHub's own dialog instead of the browser's ----------
   // A form (or its submit button) declares it: data-confirm (title), data-confirm-body,

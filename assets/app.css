@@ -1283,3 +1283,18 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .phero-acts .btn svg { width: 14px; height: 14px; }
 .phero-acts .btn.primary svg { width: 13px; height: 13px; }
 .upd-slot { display: contents; }
+/* Rail: the profile row opens the settings above it; the rail stays unfolded meanwhile. */
+.rme-menu { display: flex; flex-direction: column-reverse; }
+.rme-menu > summary { list-style: none; cursor: pointer; }
+.rme-menu > summary::-webkit-details-marker { display: none; }
+.rme-menu .rend svg { transition: transform .15s; transform: rotate(180deg); }
+.rme-menu[open] .rend svg { transform: none; }
+.rail-in:has(.rme-menu[open]) { width: 232px; box-shadow: 12px 0 32px rgba(0, 0, 0, .28); }
+.rail-in:has(.rme-menu[open]) .rlbl, .rail-in:has(.rme-menu[open]) .rend { opacity: 1; }
+.rsettings { padding-bottom: 6px; }
+.rsub { min-height: 38px; padding-left: 14px; }
+.rsub .rend { display: inline-flex; }
+.rme-acts { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 2px; margin-top: 4px; border-top: 1px solid var(--line); }
+.rme-acts form { display: block; }
+.rme-acts .btn { width: 100%; justify-content: flex-start; min-height: 38px; padding: 0 14px; border: 0; font-size: 14px; color: var(--text-body); }
+.rme-acts .btn:hover { color: var(--text); background: var(--hover); }

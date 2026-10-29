@@ -739,15 +739,29 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                     }
                 }
                 span.rspace {}
-                nav.rnav aria-label="Paramètres" {
-                    @if ctx.profile.admin { (item("/claude", nav == Nav::Claude, "sparkles", "Claude", html! {})) }
-                    (item("/menu", matches!(nav, Nav::Menu) || (is_settings(nav) && nav != Nav::Claude), "sliders", "Paramètres", html! {
-                        span.rbadge title="Mise à jour disponible" hidden[!ctx.update.available()] {}
-                    }))
-                }
-                a class={"rme " (on(nav == Nav::Passkeys))} href="/security" aria-label="Mon profil" {
-                    span.ric { (profile_avatar(&ctx.profile, "sm")) }
-                    span.rlbl { b { (ctx.profile.name) } span { (ctx.profile.role()) } }
+                // The profile row opens the "Paramètres" category, upwards.
+                details.rme-menu {
+                    summary class={"rme " (on(is_settings(nav)))} aria-label="Paramètres" {
+                        span.ric { (profile_avatar(&ctx.profile, "sm")) @if ctx.update.available() { span.rbadge title="Mise à jour disponible" {} } @else { span.rbadge hidden {} } }
+                        span.rlbl { b { (ctx.profile.name) } span { (ctx.profile.role()) } }
+                        span.rend { (icon_c("chevron-down", "sm")) }
+                    }
+                    nav.rnav.rsettings aria-label="Paramètres" {
+                        div.rsep { span.rlbl { "Paramètres" } }
+                        @for (n, link, label, badge) in settings_links(ctx) {
+                            a class={"ritem rsub " (on(n == nav))} href=(link) aria-current=[(n == nav).then_some("page")] {
+                                span.rlbl { (label) }
+                                @if let Some((b, solid)) = badge {
+                                    @if b == "admin" { span.rend { span.tag-admin { "admin" } } }
+                                    @else { span.rend { span class=(if solid { "count solid" } else { "count" }) { (b) } } }
+                                }
+                            }
+                        }
+                        div.rme-acts {
+                            button.btn.ghost.sm type="button" data-theme-toggle { (icon_c("sun", "sm")) "Thème" }
+                            form.inline method="post" action="/logout" { button.btn.ghost.sm { (icon_c("logout", "sm")) "Déconnexion" } }
+                        }
+                    }
                 }
             }
         }
