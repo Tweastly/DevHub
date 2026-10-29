@@ -109,6 +109,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "play" => r#"<path d="M7 4.5v15l12-7.5z"/>"#,
         "stop" => r#"<rect x="6" y="6" width="12" height="12" rx="2"/>"#,
         "restart" => r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>"#,
+        "sparkles2" => r#"<path fill="currentColor" stroke="none" d="M10 3.5c.4 3.2 1.4 5.2 3 6.4 1.4 1 3.1 1.4 5 1.6-1.9.2-3.6.6-5 1.6-1.6 1.2-2.6 3.2-3 6.4-.4-3.2-1.4-5.2-3-6.4-1.4-1-3.1-1.4-5-1.6 1.9-.2 3.6-.6 5-1.6 1.6-1.2 2.6-3.2 3-6.4z"/><path fill="currentColor" stroke="none" d="M18.5 2c.2 1.5.7 2.4 1.4 3 .6.4 1.4.7 2.3.8-.9.1-1.7.4-2.3.8-.7.6-1.2 1.5-1.4 3-.2-1.5-.7-2.4-1.4-3-.6-.4-1.4-.7-2.3-.8.9-.1 1.7-.4 2.3-.8.7-.6 1.2-1.5 1.4-3z"/>"#,
         "rebuild" => r#"<path d="M3.5 12a8.5 8.5 0 0 1 14.5-6L21 9"/><path d="M21 4v5h-5"/><path d="M20.5 12A8.5 8.5 0 0 1 6 18l-3-3"/><path d="M3 20v-5h5"/>"#,
         "wrench" => r#"<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>"#,
         "external" => r#"<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>"#,
@@ -740,7 +741,14 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 }
                 span.rspace {}
                 @if ctx.profile.admin {
-                    nav.rnav aria-label="Claude" { (item("/claude", nav == Nav::Claude, "sparkles", "Claude", html! {})) }
+                    nav.rnav aria-label="Claude" {
+                        a class={"ritem rclaude " (on(nav == Nav::Claude))} href="/claude" aria-label="Claude" aria-current=[(nav == Nav::Claude).then_some("page")] {
+                            span.rsheen aria-hidden="true" {}
+                            span.ric { (icon("sparkles2")) }
+                            span.rlbl { "Claude" }
+                            span.rend { span.rtag { "MCP" } }
+                        }
+                    }
                 }
                 // The profile row opens the "Paramètres" category, upwards.
                 details.rme-menu {

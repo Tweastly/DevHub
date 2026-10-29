@@ -1298,3 +1298,21 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .rme-acts form { display: block; }
 .rme-acts .btn { width: 100%; justify-content: flex-start; min-height: 38px; padding: 0 14px; border: 0; font-size: 14px; color: var(--text-body); }
 .rme-acts .btn:hover { color: var(--text); background: var(--hover); }
+
+/* Rail: the Claude button, a warm gradient that flows, a sheen, a breathing halo. */
+@keyframes cl-flow { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes cl-pulse { 0%, 100% { box-shadow: 0 0 0 1px rgba(224, 131, 80, .15), 0 4px 16px -6px rgba(224, 131, 80, .5); } 50% { box-shadow: 0 0 0 1px rgba(240, 163, 192, .3), 0 8px 26px -6px rgba(226, 122, 134, .7); } }
+@keyframes cl-sheen { 0% { transform: translateX(-150%) skewX(-20deg); } 45%, 100% { transform: translateX(520%) skewX(-20deg); } }
+@keyframes cl-spark { 0%, 100% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(90deg) scale(1.12); } }
+.ritem.rclaude { overflow: hidden; color: #fff; font-weight: 600; background: linear-gradient(110deg, #b84f2a, #e08350, #e27a86, #c98fd6, #e08350, #b84f2a); background-size: 260% 100%; animation: cl-flow 7s ease-in-out infinite, cl-pulse 4s ease-in-out infinite; }
+.ritem.rclaude:hover { color: #fff; background: linear-gradient(110deg, #b84f2a, #e08350, #e27a86, #c98fd6, #e08350, #b84f2a); background-size: 260% 100%; filter: brightness(1.06); }
+.ritem.rclaude.on { color: #fff; box-shadow: 0 0 0 2px var(--text); animation: cl-flow 7s ease-in-out infinite; }
+.ritem.rclaude .ric > svg { color: #fff; width: 20px; height: 20px; filter: drop-shadow(0 1px 1.5px rgba(80, 20, 0, .35)); animation: cl-spark 4s ease-in-out infinite; }
+.ritem.rclaude .rlbl { text-shadow: 0 1px 2px rgba(80, 20, 0, .35); }
+.rsheen { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.rsheen::after { content: ""; position: absolute; top: -20%; bottom: -20%; width: 40px; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .45), transparent); animation: cl-sheen 4.5s ease-in-out infinite; }
+.rtag { padding: 2px 7px; border-radius: 6px; background: rgba(255, 255, 255, .2); color: #fff; font: 600 10.5px var(--mono); letter-spacing: .04em; }
+.ritem.rclaude .rend { color: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  .ritem.rclaude, .ritem.rclaude .ric > svg, .rsheen::after { animation: none; }
+}
