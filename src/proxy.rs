@@ -209,7 +209,11 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
             };
         }
     };
-    match forward(req, stream, &host, st.cfg.origin.starts_with("https")).await {
+    // A DevHub run as a project names its session cookie like this one: drop only the
+    // cookies that are sessions here, so it keeps its own and the admin session stays out.
+    let nested = docker::is_devhub_image(&t.project.image);
+    let ours = |v: &str| !nested || db::session_profile(&st.db.lock().unwrap(), v).is_some();
+    match forward(req, stream, &host, st.cfg.origin.starts_with("https"), &ours).await {
         Ok(r) => r,
         Err(e) => error_page(&st, StatusCode::BAD_GATEWAY, "Erreur de connexion",
             &format!("La connexion à <b>{name}</b> a été interrompue."),
@@ -237,13 +241,13 @@ fn error_page(st: &AppState, code: StatusCode, title: &str, message: &str, detai
     (code, crate::web::auth::error_page(code.as_u16(), title, message, detail, action, &st.cfg.origin, base_host(st))).into_response()
 }
 
-async fn forward(mut req: Request, stream: tokio::net::TcpStream, host: &str, https: bool) -> anyhow::Result<Response> {
+async fn forward(mut req: Request, stream: tokio::net::TcpStream, host: &str, https: bool, ours: &(dyn Fn(&str) -> bool + Sync)) -> anyhow::Result<Response> {
     let client_upgrade = hyper::upgrade::on(&mut req);
 
     let path = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
     *req.uri_mut() = path.parse()?;
     let h = req.headers_mut();
-    strip_session_cookie(h);
+    strip_session_cookie(h, ours);
     h.insert("x-forwarded-host", HeaderValue::from_str(host)?);
     h.insert("x-forwarded-proto", HeaderValue::from_static(if https { "https" } else { "http" }));
 
@@ -264,14 +268,15 @@ async fn forward(mut req: Request, stream: tokio::net::TcpStream, host: &str, ht
     Ok(resp.map(Body::new))
 }
 
-fn strip_session_cookie(h: &mut axum::http::HeaderMap) {
+/// Removes the DevHub session cookies for which `ours(value)` holds.
+fn strip_session_cookie(h: &mut axum::http::HeaderMap, ours: &dyn Fn(&str) -> bool) {
     let kept: Vec<String> = h
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .map(str::trim)
-        .filter(|c| !c.is_empty() && !c.starts_with(&format!("{}=", auth::COOKIE)))
+        .filter(|c| !c.is_empty() && !c.strip_prefix(&format!("{}=", auth::COOKIE)).is_some_and(ours))
         .map(String::from)
         .collect();
     h.remove(header::COOKIE);
@@ -286,4 +291,20 @@ fn strip_session_cookie(h: &mut axum::http::HeaderMap) {
 pub async fn caddy_ask(State(st): State<AppState>, Query(q): Query<HashMap<String, String>>) -> StatusCode {
     let d = q.get("domain").map(String::as_str).unwrap_or("");
     if d == base_host(&st) || resolve(&st, d).is_some() || resolve_custom(&st, d).is_some() { StatusCode::OK } else { StatusCode::NOT_FOUND }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_session_cookie;
+    use axum::http::{header, HeaderMap, HeaderValue};
+
+    #[test]
+    fn keeps_a_nested_devhub_session() {
+        let mut h = HeaderMap::new();
+        h.insert(header::COOKIE, HeaderValue::from_static("devhub_session=outer; theme=dark; devhub_session=inner"));
+        strip_session_cookie(&mut h, &|v| v == "outer");
+        assert_eq!(h.get(header::COOKIE).unwrap(), "theme=dark; devhub_session=inner");
+        strip_session_cookie(&mut h, &|_| true);
+        assert_eq!(h.get(header::COOKIE).unwrap(), "theme=dark");
+    }
 }
