@@ -718,7 +718,7 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                 }
                 nav.rnav aria-label="Sections" {
                     (item("/", nav == Nav::Overview, "grid", "Vue d'ensemble", html! {}))
-                    (item("/projects", matches!(nav, Nav::Projects) || matches!(nav, Nav::Project(n) if !pinned.iter().any(|p| p.name == n)), "box", "Projets", html! { span.rend.mono { (ctx.projects.len()) } }))
+                    (item("/projects", matches!(nav, Nav::Projects | Nav::Project(_)), "box", "Projets", html! { span.rend.mono { (ctx.projects.len()) } }))
                     @if ctx.profile.admin {
                         (item("/images", nav == Nav::Images, "layers", "Images", html! {}))
                         (item("/volumes", nav == Nav::Volumes, "disk", "Volumes", html! {}))
