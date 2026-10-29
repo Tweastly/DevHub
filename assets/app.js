@@ -115,13 +115,27 @@
       runScripts(body);
       return;
     }
+    // Between pages: the menu and the top bar stay, only the content (and what the menu
+    // and the bars show as current) changes.
+    const shell = ['.content', '.rail-in', '.topbar', '.mobile-head', '.bottom-nav'];
+    const keep = shell.every(s => !!$(s) === !!$(s, doc));
     const swap = () => {
       document.title = doc.title;
-      $('.app').replaceWith(app);
+      let root = app;
+      if (keep && $('.content')) {
+        root = $('.content', doc);
+        $('.content').replaceWith(root);
+        const rail = $('.rail-in'), nrail = $('.rail-in', doc);
+        if (rail && nrail) rail.replaceChildren(...nrail.childNodes);
+        // The top bar keeps its search field (and what was typed in it).
+        ['.topbar .acts', '.topbar .srv-chip', '.mobile-head', '.bottom-nav'].forEach(s => { if ($(s) && $(s, doc)) $(s).replaceWith($(s, doc)); });
+      } else {
+        $('.app').replaceWith(app);
+      }
       history.replaceState({}, '', final.href);
       if (hash && $(hash)) $(hash).scrollIntoView(); else scrollTo(0, 0);
       document.dispatchEvent(new Event('devhub:load'));
-      runScripts(app);
+      runScripts(root);
     };
     document.startViewTransition ? document.startViewTransition(swap) : swap();
   }
