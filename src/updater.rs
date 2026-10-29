@@ -1,7 +1,8 @@
 //! Self-update: compares the deployed commit (read from the repo mounted at DEVHUB_REPO)
-//! with the GitHub branch, and on request runs `git pull && docker compose up -d --build`
+//! with the GitHub branch, and on request runs `git pull`, takes the image GitHub Actions
+//! built for that commit (or builds it) and `docker compose up -d`
 //! from a short-lived helper container, since DevHub cannot rebuild itself in place.
-//! The build compiles on the server; cached dependencies keep it around a minute.
+//! Without that image (still building on GitHub, no access) it compiles on the server.
 
 use crate::{auth, db, AppError, AppState};
 use anyhow::Context;
@@ -421,7 +422,31 @@ else
   git pull --ff-only origin "$BRANCH"
 fi
 step "reconstruction de DevHub"
-docker compose -p "$PROJECT" build devhub
+# The image GitHub Actions built for this commit (.github/workflows/image.yml), else a
+# build here. It is waited for a few minutes when the push is recent.
+IMG=$(docker compose -p "$PROJECT" config --images devhub 2>/dev/null | head -n 1)
+[ -n "$IMG" ] || IMG="$PROJECT-devhub"
+SHA=$(git rev-parse HEAD)
+GOT=""
+if [ -n "$REMOTE" ]; then
+  [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | docker login ghcr.io -u x-access-token --password-stdin >/dev/null 2>&1 || true
+  i=0
+  while [ $i -lt 32 ]; do
+    if OUT=$(docker pull -q "$REMOTE:$SHA" 2>&1); then
+      docker tag "$REMOTE:$SHA" "$IMG"
+      GOT=1
+      echo "image GitHub récupérée : $REMOTE:$SHA"
+      break
+    fi
+    case "$OUT" in
+      *denied*|*unauthorized*|*forbidden*) echo "image GitHub inaccessible (droit read:packages ?) : compilation ici"; break ;;
+    esac
+    [ $i -eq 0 ] && echo "image GitHub pas encore prête, attente (8 min max)…"
+    i=$((i + 1))
+    sleep 15
+  done
+fi
+[ -n "$GOT" ] || docker compose -p "$PROJECT" build devhub
 # Caddy is rebuilt only when its image changes: recreating it cuts every site
 # (Cloudflare then shows its 521 page). Its config is reloaded below instead.
 if [ -z "$(docker images -q devhub-caddy)" ] || ! git diff --quiet "$OLD" HEAD -- caddy/Dockerfile; then
@@ -432,6 +457,9 @@ step "rechargement de Caddy"
 docker compose -p "$PROJECT" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "Caddy non rechargé"
 step "terminé""#;
     let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}")];
+    if let Some(slug) = github_slug(&repo_dir()) {
+        env.push(format!("REMOTE=ghcr.io/{}", slug.to_ascii_lowercase()));
+    }
     let binds = vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")];
     if let Some(t) = token() {
         env.push(format!("TOKEN={t}"));
@@ -524,7 +552,7 @@ pub fn steps(log: &str, failed: bool) -> Vec<Step> {
     let t_caddy = mark("== rechargement de Caddy");
     let t_end = mark("== terminé");
     let secs = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(a), Some(b)) if b >= a => format!("{} s", b - a), _ => String::new() };
-    let method = if reached[1] { "compilation" } else { "" };
+    let method = if log.contains("image GitHub récupérée") { "image GitHub" } else if log.contains("image GitHub pas encore prête") && !log.contains("Recreate") { "attente de l'image GitHub" } else if reached[1] { "compilation" } else { "" };
     let details = [
         format!("git pull{}", t_build.map(|t| format!(" · {t} s")).unwrap_or_default()),
         [method.to_string(), secs(t_build, t_caddy)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),

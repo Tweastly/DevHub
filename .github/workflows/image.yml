@@ -1,0 +1,44 @@
+# Builds DevHub's Docker image on every push to main and publishes it on GitHub's registry
+# as ghcr.io/<owner>/<repo>:<commit> (and :latest). DevHub's update pulls it instead of
+# compiling on the server; when it isn't there (still building, no access), the server
+# builds as before.
+#
+# Shell steps only (no `uses:`), so it runs whatever the repository's allowed-actions policy is.
+name: image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        run: |
+          git init -q .
+          git fetch -q --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+      - name: Build and push
+        run: |
+          IMG="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --use --name devhub >/dev/null
+          # The registry cache keeps the compiled dependencies between runs.
+          docker buildx build --push \
+            --cache-from "type=registry,ref=${IMG}:cache" \
+            --cache-to "type=registry,ref=${IMG}:cache,mode=max" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "${IMG}:${GITHUB_SHA}" -t "${IMG}:latest" .
