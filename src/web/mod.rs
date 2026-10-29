@@ -535,25 +535,50 @@ pub fn ctx_admin(st: &AppState, jar: &CookieJar) -> Result<Ctx, Response> {
     }
 }
 
-/// Shown when a profile reaches a page its permissions don't cover.
-pub fn forbidden_page() -> String {
+/// Full-page error in DevHub's style: big code, a sentence, a way back.
+fn status_page(code: u16, label: &str, title: &str, message: &str, back: (&str, &str)) -> String {
     html! {
         (DOCTYPE)
         html lang="fr" {
-            head { (head("Accès refusé · DevHub")) }
-            body {
-                main.content style="max-width:560px;margin:12vh auto" {
-                    div.card.card-b {
-                        p.label { "403 · accès refusé" }
-                        h1 style="font-size:24px;margin:8px 0" { "Ton profil n'a pas accès à cette page" }
-                        p.muted style="margin-bottom:20px" { "Demande à l'administrateur de DevHub d'élargir les autorisations de ton profil." }
-                        a.btn href="/" { "← Retour au tableau de bord" }
+            head { (head(&format!("{title} · DevHub"))) }
+            body.errpage {
+                main.err {
+                    a.err-brand href="/" { span.err-dot {} "DevHub" }
+                    p.err-code { (code) span { "." } }
+                    p.err-label { (label) }
+                    h1 { (title) }
+                    p.err-msg { (message) }
+                    div.err-acts {
+                        a.btn.primary href=(back.1) { (back.0) }
+                        button.btn type="button" onclick="history.length > 1 ? history.back() : location.assign('/')" { "Page précédente" }
                     }
                 }
             }
         }
     }
     .into_string()
+}
+
+/// Shown when a profile reaches a page its permissions don't cover.
+pub fn forbidden_page() -> String {
+    status_page(403, "accès refusé", "Ton profil n'a pas accès à cette page", "Demande à l'administrateur de DevHub d'élargir les autorisations de ton profil.", ("Tableau de bord", "/"))
+}
+
+/// A project that doesn't exist (deleted, renamed) or that this profile can't see.
+pub fn project_not_found_page(name: &str) -> String {
+    let message = if name.is_empty() { "Ce projet n'existe pas, ou ton profil ne peut pas le voir.".to_string() } else { format!("« {name} » n'existe pas, a été renommé ou supprimé, ou ton profil ne peut pas le voir.") };
+    status_page(404, "projet introuvable", "Ce projet est introuvable", &message, ("Voir les projets", "/projects"))
+}
+
+/// Any other unknown address.
+pub fn not_found_page() -> String {
+    status_page(404, "page introuvable", "Cette page n'existe pas", "L'adresse est peut-être mal tapée, ou la page a été déplacée.", ("Tableau de bord", "/"))
+}
+
+/// The 404 response for a missing project.
+pub fn project_not_found(name: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (axum::http::StatusCode::NOT_FOUND, axum::response::Html(project_not_found_page(name))).into_response()
 }
 
 #[derive(PartialEq, Clone, Copy)]

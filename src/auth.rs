@@ -62,7 +62,7 @@ pub enum Need {
 pub fn require_project(st: &AppState, jar: &CookieJar, project: &str, need: Need) -> Result<db::Profile, Response> {
     let Some(p) = current_profile(st, jar) else { return Err(Redirect::to("/login").into_response()) };
     if !p.sees(project) {
-        return Err((StatusCode::NOT_FOUND, "projet introuvable").into_response());
+        return Err(crate::web::project_not_found(project));
     }
     let ok = match need {
         Need::See => true,

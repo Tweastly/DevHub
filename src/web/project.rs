@@ -29,7 +29,7 @@ pub async fn load(ctx: &Ctx, name: &str) -> Result<P, Response> {
         .iter()
         .find(|p| p.name == name)
         .cloned()
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "projet introuvable").into_response())?;
+        .ok_or_else(|| crate::web::project_not_found(name))?;
     let d = docker::detail(&ctx.st.docker, name).await;
     let mut s = if d.state == "running" { ctx.status(name) } else { Status::default() };
     s.state = d.state.clone();

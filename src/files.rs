@@ -83,7 +83,7 @@ pub fn check(st: &AppState, jar: &CookieJar, name: &str, need: auth::Need) -> Re
     let who = auth::require_project(st, jar, name, need)?;
     match db::get_project(&st.db.lock().unwrap(), name) {
         Ok(Some(_)) => Ok(who),
-        _ => Err((StatusCode::NOT_FOUND, "projet introuvable").into_response()),
+        _ => Err(crate::web::project_not_found(name)),
     }
 }
 
