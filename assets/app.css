@@ -1320,3 +1320,22 @@ button.upd-set:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .actor.ai svg { width: 11px; height: 11px; }
 /* Cards of a row share its height: the top part grows, the actions stay at the bottom. */
 .pcard .ptop { flex: 1; }
+
+/* ---------- Status colours: offline red, error orange, building yellow, starting blue ---------- */
+:root { --st-off: #c2412f; --st-err: #c2600f; --st-build: #9a7400; --st-start: #2d6fca; }
+html[data-theme="dark"] { --st-off: #ec7461; --st-err: #f0943f; --st-build: #e8c44f; --st-start: #6aa6f0; }
+@media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { --st-off: #ec7461; --st-err: #f0943f; --st-build: #e8c44f; --st-start: #6aa6f0; } }
+.pill.exited { --st: var(--st-off); }
+.pill.dead, .pill.failed, .pill.missing { --st: var(--st-err); }
+.pill.absent { --st: var(--st-build); }
+.pill.restarting, .pill.created { --st: var(--st-start); }
+.pill.exited, .pill.dead, .pill.failed, .pill.missing, .pill.absent, .pill.restarting, .pill.created { color: var(--st); }
+.pill:not(.bare).exited, .pill:not(.bare).dead, .pill:not(.bare).failed, .pill:not(.bare).missing, .pill:not(.bare).absent, .pill:not(.bare).restarting, .pill:not(.bare).created {
+  background: color-mix(in srgb, var(--st) 12%, var(--card)); border-color: color-mix(in srgb, var(--st) 32%, transparent); }
+.pill.exited::before, .pill.dead::before, .pill.failed::before, .pill.missing::before, .pill.restarting::before, .pill.created::before { background: var(--st); border: 0; }
+.pill.absent::before { border-color: var(--st); border-right-color: transparent; }
+.pill.absent.plain::before { border-right-color: var(--st); }
+.dot.exited { background: var(--st-off); border: 0; }
+.dot.dead, .dot.failed, .dot.missing { background: var(--st-err); border: 0; }
+.dot.absent { background: var(--st-build); border: 0; }
+.dot.restarting, .dot.created { background: var(--st-start); border: 0; }
