@@ -56,17 +56,38 @@
     const u = new URL(a.href, location.href);
     return u.origin !== location.origin || a.target || a.hasAttribute('download') ||
       a.getAttribute('href').startsWith('#') || 'reload' in a.dataset ||
-      /\/terminal$|\/download$|\.csv$|^\/login|^\/assets\//.test(u.pathname);
+      /\/download$|\.csv$|^\/login|^\/assets\//.test(u.pathname);
   };
   let ctrl;
+  // Inline scripts inserted via the DOM don't run: recreate them in order (an external
+  // one is waited for, the next may use it), block-scoped so top-level consts don't
+  // clash when a page is visited twice.
+  async function runScripts(root) {
+    for (const o of $$('script', root)) {
+      const s = document.createElement('script');
+      [...o.attributes].forEach(a => s.setAttribute(a.name, a.value));
+      if (o.src) {
+        const done = new Promise(r => { s.onload = s.onerror = r; });
+        o.replaceWith(s);
+        await done;
+      } else {
+        s.textContent = '{' + o.textContent + '\n}';
+        o.replaceWith(s);
+      }
+    }
+  }
+  // Within a project, going from one tab to another only swaps what is under its header.
+  const projectOf = path => (path.match(/^\/projects\/([^/?#]+)/) || [])[1];
   async function go(url, push) {
     ctrl?.abort();
     ctrl = new AbortController();
     // The address changes right away: a reload while the page loads opens the new one.
     if (push) history.pushState({}, '', url);
     const mine = ctrl;
-    const content = $('.content');
-    const t = setTimeout(() => { if (content) { content.innerHTML = SK; scrollTo(0, 0); } }, 120);
+    const here = $('.ptint[data-project]'), dest = new URL(url, location.href);
+    const partial = here && $('#pbody') && projectOf(dest.pathname) === here.dataset.project && !['new', 'bulk'].includes(here.dataset.project);
+    const area = partial ? $('#pbody') : $('.content');
+    const t = setTimeout(() => { if (area) { area.innerHTML = SK; if (!partial) scrollTo(0, 0); } }, 120);
     let res;
     try { res = await fetch(url, { signal: ctrl.signal }); }
     catch (e) { if (e.name !== 'AbortError') location.href = url; return; }
@@ -76,23 +97,31 @@
     const app = $('.app', doc);
     if (!app || $('meta[http-equiv=refresh]', doc)) { location.href = res.url; return; }
     if (ctrl !== mine) return;
+    // Where the server redirected to, keeping the #fragment of the link.
+    const final = new URL(res.url), hash = dest.hash;
+    final.hash = hash;
+    const next = $('.ptint[data-project]', doc);
+    if (partial && next && next.dataset.project === here.dataset.project && $('#pbody', doc)) {
+      document.title = doc.title;
+      $('.ptabs').replaceWith($('.ptabs', doc));
+      $('.phero-top').replaceWith($('.phero-top', doc));
+      const body = $('#pbody', doc);
+      $('#pbody').replaceWith(body);
+      history.replaceState({}, '', final.href);
+      // Keep the header in view: back to it only when the page was scrolled past it.
+      const top = $('.phero-wrap').getBoundingClientRect().top + scrollY;
+      if (hash && $(hash)) $(hash).scrollIntoView(); else if (scrollY > top) scrollTo(0, top - 80);
+      document.dispatchEvent(new Event('devhub:load'));
+      runScripts(body);
+      return;
+    }
     const swap = () => {
       document.title = doc.title;
       $('.app').replaceWith(app);
-      // Where the server redirected to, keeping the #fragment of the link.
-      const final = new URL(res.url), hash = new URL(url, location.href).hash;
-      final.hash = hash;
       history.replaceState({}, '', final.href);
       if (hash && $(hash)) $(hash).scrollIntoView(); else scrollTo(0, 0);
       document.dispatchEvent(new Event('devhub:load'));
-      // Inline scripts inserted via the DOM don't run: recreate them, block-scoped so
-      // top-level consts don't clash when a page is visited twice.
-      $$('script', app).forEach(o => {
-        const s = document.createElement('script');
-        [...o.attributes].forEach(a => s.setAttribute(a.name, a.value));
-        s.textContent = o.src ? '' : '{' + o.textContent + '\n}';
-        o.replaceWith(s);
-      });
+      runScripts(app);
     };
     document.startViewTransition ? document.startViewTransition(swap) : swap();
   }
@@ -227,12 +256,7 @@
     if (samePage) { history.replaceState({}, '', target.href); scrollTo(0, y); $$('.flash', app).forEach(x => x.remove()); }
     else { history.pushState({}, '', target.href); scrollTo(0, 0); }
     document.dispatchEvent(new Event('devhub:load'));
-    $$('script', app).forEach(o => {
-      const s = document.createElement('script');
-      [...o.attributes].forEach(a => s.setAttribute(a.name, a.value));
-      s.textContent = o.src ? '' : '{' + o.textContent + '\n}';
-      o.replaceWith(s);
-    });
+    runScripts(app);
     if (err) toast('err', err); else if (ok) toast('ok', ok);
   });
 

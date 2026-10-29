@@ -146,7 +146,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                                         button.pmi role="menuitem" { (icon_c("pin", "sm")) @if x.p.pinned { "Retirer de la barre" } @else { "Épingler dans la barre" } }
                                     }
                                     button.pmi type="button" role="menuitem" data-copy=(mcp_url) { (icon_c("copy", "sm")) "Copier l'URL MCP" }
-                                    @if shell { a.pmi role="menuitem" href={(base) "/terminal"} data-reload { (icon_c("terminal", "sm")) "Ouvrir le terminal" } }
+                                    @if shell { a.pmi role="menuitem" href={(base) "/terminal"} { (icon_c("terminal", "sm")) "Ouvrir le terminal" } }
                                 }
                             }
                         }
@@ -157,8 +157,8 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
                     a class=(on(Tab::Network)) href={(base) "/network"} aria-current=[(tab == Tab::Network).then_some("page")] { "Réseau" }
                     a class=(on(Tab::Files)) href={(base) "/files"} aria-current=[(tab == Tab::Files).then_some("page")] { "Fichiers" }
                     a class=(on(Tab::Volumes)) href={(base) "/volumes"} aria-current=[(tab == Tab::Volumes).then_some("page")] { "Volumes" }
-                    a class=(on(Tab::Terminal)) href={(base) "/terminal"} data-reload aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal" }
-                    a class=(on(Tab::Logs)) href={(base) "/logs"} data-reload aria-current=[(tab == Tab::Logs).then_some("page")] { "Journaux" }
+                    a class=(on(Tab::Terminal)) href={(base) "/terminal"} aria-current=[(tab == Tab::Terminal).then_some("page")] { "Terminal" }
+                    a class=(on(Tab::Logs)) href={(base) "/logs"} aria-current=[(tab == Tab::Logs).then_some("page")] { "Journaux" }
                     @if manage { a class=(on(Tab::Settings)) href={(base) "/settings"} aria-current=[(tab == Tab::Settings).then_some("page")] { "Paramètres" } }
                 }
             }
@@ -168,7 +168,7 @@ pub fn frame(ctx: &Ctx, x: &P, tab: Tab, body: Markup) -> Markup {
     if let Some(t) = title_crumb {
         crumbs.push((t.into(), None));
     }
-    render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { div.ptint style={"--pc:" (ctx.color(n))} { (head) div class=[ro.then_some("ro")] { (body) } } })
+    render(ctx, Shell { title: n, nav: Nav::Project(n), crumbs, actions: html! {} }, html! { div.ptint style={"--pc:" (ctx.color(n))} data-project=(n) { (head) div #pbody class=[ro.then_some("ro")] { (body) } } })
 }
 
 fn rebuild_form(base: &str, here: &str, n: &str, class: &str, label: Markup) -> Markup {
@@ -657,7 +657,7 @@ pub fn console(ctx: &Ctx, x: &P, tall: bool, logs: &str) -> Markup {
                 span { "Console · " @if game { "serveur" } @else if stdin { "app · entrée standard" } @else { "bash · /workspace" } }
                 span.end {
                     span.live-tag id={(id) "-tag"} { "flux actif" }
-                    @if !tall { a.btn.sm href={(base) "/terminal"} data-reload { "Agrandir" } }
+                    @if !tall { a.btn.sm href={(base) "/terminal"} { "Agrandir" } }
                 }
             }
             @if x.s.state == "absent" { div.logs class=[(!tall).then_some("short")] { "Le conteneur n'existe pas encore." } }
