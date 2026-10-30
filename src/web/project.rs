@@ -274,13 +274,14 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
     let mem_max = mb(x.s.mem_limit);
     let mem_used = mb(x.s.mem_used);
     let names = ctx.names();
+    let per = Period::of("24h");
     let (series, peak, activity) = {
         let c = st.db.lock().unwrap();
-        let per = Period::of("24h");
         let (series, peak) = db::metrics_series(&c, n, per.since, per.span, per.buckets);
         let (activity, _) = db::audit_query(&c, &db::AuditFilter { project: Some(n.clone()), ..Default::default() }, 30, 0);
         (series, peak, activity)
     };
+    let up_hours = series.iter().filter(|v| v.is_some()).count();
     let last_restart = activity.iter().find(|r| {
         let l = event(&names, &r.action, &r.detail).label;
         matches!(l.as_str(), "project.restart" | "project.start" | "project.rebuild" | "project.create" | "project_action")
@@ -296,35 +297,47 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         @if minecraft.is_none() { (flash(&q)) }
         @if x.s.state == "absent" { div.card.card-b style="margin-bottom:24px" { (build_note(&ctx, n)) } }
         @if let Some(m) = minecraft { (m) }
-        div.grid3 style="margin-bottom:20px" {
-            div.card.kpi {
+        // CPU, memory and availability in one band, each part centred in the band's height.
+        div.card.vitals {
+            div.vseg {
                 div.kpi-h { "CPU" span.end { "limite " (cpu_lim) " cœur" @if cpu_lim > 1.0 { "s" } } }
                 div.kpi-v { span data-live={(n) ":cpu"} { @if running { (format!("{:.1} %", x.s.cpu_pct)) } @else { "—" } } }
-                (spark(&series, &Period::of("24h")))
-                div.foot { @if let Some((v, ts)) = peak { "Pic à " (format!("{v:.0}")) " % vers " (crate::timefmt::hm(ts)) " (24 h)" } @else { "L'historique se remplit (un point par minute)." } }
+                div.vsub { @if let Some((v, ts)) = peak { "Pic à " (format!("{v:.0}")) " % vers " (crate::timefmt::hm(ts)) " (24 h)" } @else { "L'historique se remplit (un point par minute)." } }
+                (spark(&series, &per))
             }
-            div.card.kpi {
+            div.vseg {
                 div.kpi-h { "Mémoire" span.end { "limite " (mem_max) " Mo" } }
                 div.kpi-v { span data-live={(n) ":mem"} { @if running { (mem_used) } @else { "—" } } small { " Mo" } }
+                div.vsub { (format!("{:.0}", pct(mem_used as f64, mem_max as f64))) " % de la limite · " a.link href={(base) "/settings#resources"} { "réglable à chaud" } }
                 (bar(pct(mem_used as f64, mem_max as f64), Some(format!("{n}:membar")), "thick"))
-                div.foot { (format!("{:.0}", pct(mem_used as f64, mem_max as f64))) " % de la limite · " a.link href={(base) "/settings#resources"} { "réglable à chaud" } }
             }
-            div.card.kpi {
-                div.kpi-h { "Disponibilité" }
+            div.vseg {
+                div.kpi-h {
+                    "Disponibilité"
+                    span.end.vports {
+                        @for (m, ok) in x.p.ports.iter().zip(&checks) {
+                            // UDP can't be probed with a connection: no ✓/✗ for it.
+                            @if m.udp { span.chip title="UDP : pas de test de connexion" { (m.container) " udp" } }
+                            @else { span class={"chip " (if *ok { "ok" } else { "bad" })} title=(if *ok { "répond" } else { "ne répond pas" }) { (m.container) " " (if *ok { "✓" } else { "✗" }) } }
+                        }
+                    }
+                }
                 div.kpi-v {
                     @if running { @if let Some(t) = x.d.started_at { (crate::timefmt::duration(db::now() - t)) } @else { "—" } }
                     @else { small { (state_label(&crate::ops::shown_state(&ctx.st, n, &x.s.state))) } }
                 }
-                div.row.tight style="margin-top:10px" {
-                    @for (m, ok) in x.p.ports.iter().zip(&checks) {
-                        // UDP can't be probed with a connection: no ✓/✗ for it.
-                        @if m.udp { span.chip title="UDP : pas de test de connexion" { (m.container) " udp" } }
-                        @else { span class={"chip " (if *ok { "ok" } else { "bad" })} title=(if *ok { "répond" } else { "ne répond pas" }) { (m.container) " " (if *ok { "✓" } else { "✗" }) } }
-                    }
-                }
-                div.foot {
+                div.vsub {
                     @if let Some(r) = last_restart { "Dernier (re)démarrage par " (actor(&r.actor)) " " (ago(r.ts)) }
                     @else if x.p.ports.is_empty() { "Aucun port exposé." }
+                    @else { "En marche sur les 24 dernières heures :" }
+                }
+                // One block per hour: on when the stats collector saw the container running.
+                div.upbar role="img" aria-label={"En marche " (up_hours) " h sur les 24 dernières heures"} {
+                    @for (i, v) in series.iter().enumerate() {
+                        @let from = per.since + i as i64 * per.span;
+                        i class=(if v.is_some() { "on" } else if from + per.span <= x.p.created_at { "pre" } else { "off" })
+                          title={(crate::timefmt::hm(from)) " · " (if v.is_some() { "en marche" } else if from + per.span <= x.p.created_at { "avant la création" } else { "arrêté" })} {}
+                    }
                 }
             }
         }
