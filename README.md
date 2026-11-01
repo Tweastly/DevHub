@@ -59,15 +59,26 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 ## Déploiement sur le VPS
 
 1. **DNS** : des enregistrements `A` vers l'IP du VPS pour `dev.example.com` et `*.dev.example.com`. Pour les sous-domaines personnalisés, ajoute `*.example.com`.
-2. **Sur le VPS**, avec Docker installé :
+2. **Sur le VPS**, une seule commande (root ou sudo) :
    ```bash
-   git clone https://github.com/Tweastly/DevHub devhub && cd devhub
-   cp .env.example .env    # puis mets ton domaine dans DEVHUB_DOMAIN
-   docker compose up -d --build
-   docker compose logs devhub | grep CODE
+   curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh
    ```
-3. Ouvre `https://dev.example.com/setup` : l'**assistant d'installation** demande le code à 8 caractères affiché dans les journaux, crée ton passkey, vérifie le DNS et le HTTPS, puis règle les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet. Le code ne sert qu'une fois (après 20 essais faux, un nouveau s'affiche dans les journaux). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
-4. **Pare-feu** : ouvre 80 et 443, plus les ports des jeux (TCP / UDP) si tu en héberges.
+   Le script installe Docker s'il manque, demande le domaine, vérifie le DNS et les ports 80/443 (et ouvre ufw s'il est actif), clone DevHub dans `/opt/devhub`, écrit le `.env` (avec le jeton Cloudflare du certificat joker si tu en donnes un), télécharge les images construites par GitHub (ou les compile), démarre tout et affiche l'adresse et le **code d'installation**. Relancé sur un serveur déjà installé, il met DevHub à jour en gardant le `.env`.
+   Sans question : `… | sh -s -- --domain dev.example.com --yes` (options : `--dir`, `--branch`, `--cloudflare-token`, voir `install.sh --help`).
+3. Ouvre `https://dev.example.com/setup` : l'**assistant d'installation** demande le code à 8 caractères, crée ton passkey, vérifie le DNS et le HTTPS, puis règle les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet. Le code ne sert qu'une fois (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
+4. **Pare-feu** : 80 et 443 doivent être ouverts, plus les ports des jeux (TCP / UDP) si tu en héberges.
+
+<details><summary>Installation à la main</summary>
+
+```bash
+git clone https://github.com/Tweastly/DevHub devhub && cd devhub
+cp .env.example .env    # puis mets ton domaine dans DEVHUB_DOMAIN
+docker compose up -d --build
+docker logs devhub | grep CODE
+```
+</details>
+
+Les images `ghcr.io/tweastly/devhub` et `ghcr.io/tweastly/devhub-caddy` sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends-les publiques (GitHub › Packages › le paquet › Package settings › Change visibility). Sinon le script les compile sur le serveur.
 
 ### Dépôt privé
 Les mises à jour ont besoin d'un jeton GitHub *fine-grained* limité au dépôt, avec la seule permission **Contents : Read-only**. Mets-le dans `.env` (`DEVHUB_GITHUB_TOKEN=…`) puis `docker compose up -d`. Il n'est jamais écrit ailleurs sur le disque.

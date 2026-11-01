@@ -137,8 +137,8 @@ fn first_steps() -> Markup {
                     }
                 }
                 div.wz-hint {
-                    b { "Code perdu ?" } " Sur le serveur, dans le dossier de DevHub :"
-                    div.wz-cmd { code { "docker compose logs devhub | grep CODE" } button.btn.sm type="button" data-copy="docker compose logs devhub | grep CODE" { "Copier" } }
+                    b { "Code perdu ?" } " Sur le serveur :"
+                    div.wz-cmd { code { "docker logs devhub | grep CODE" } button.btn.sm type="button" data-copy="docker logs devhub | grep CODE" { "Copier" } }
                     span.muted { "Le code ne sert qu'une fois. Après 20 essais faux, un nouveau code s'affiche dans les journaux." }
                 }
             }
