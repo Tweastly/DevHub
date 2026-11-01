@@ -112,17 +112,31 @@ async fn whoami(token: &str) -> Result<Cred, String> {
 }
 
 fn back(kind: &str, msg: &str) -> Response {
-    Redirect::to(&crate::with_param("/security#github", kind, msg)).into_response()
+    back_to("/security#github", kind, msg)
+}
+
+fn back_to(dest: &str, kind: &str, msg: &str) -> Response {
+    Redirect::to(&crate::with_param(dest, kind, msg)).into_response()
+}
+
+/// Where to come back after connecting: Mon profil, or a step of the installation guide.
+fn return_path(next: Option<&String>) -> String {
+    next.filter(|n| n.starts_with("/setup")).cloned().unwrap_or_else(|| "/security#github".into())
 }
 
 /// Starts the OAuth flow: GitHub asks to authorize DevHub, then calls back.
-pub async fn connect(State(st): State<AppState>, jar: CookieJar) -> Result<Response, Response> {
+pub async fn connect(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Response, Response> {
     auth::require_admin(&st, &jar)?;
+    let dest = return_path(q.get("next"));
     let Some(id) = client_id().filter(|_| oauth_ready()) else {
-        return Ok(back("err", "Connexion GitHub non configurée : ajoute DEVHUB_GITHUB_CLIENT_ID et DEVHUB_GITHUB_CLIENT_SECRET dans le .env."));
+        return Ok(back_to(&dest, "err", "Connexion GitHub non configurée : ajoute DEVHUB_GITHUB_CLIENT_ID et DEVHUB_GITHUB_CLIENT_SECRET dans le .env."));
     };
     let state = crate::random_token(16);
-    db::set_setting(&st.db.lock().unwrap(), "github_oauth_state", Some(&format!("{state}:{}", db::now() + 600))).map_err(|e| crate::AppError(e).into_response())?;
+    {
+        let c = st.db.lock().unwrap();
+        db::set_setting(&c, "github_oauth_state", Some(&format!("{state}:{}", db::now() + 600))).map_err(|e| crate::AppError(e).into_response())?;
+        db::set_setting(&c, "github_oauth_next", Some(&dest)).map_err(|e| crate::AppError(e).into_response())?;
+    }
     let q: String = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("client_id", &id)
         .append_pair("redirect_uri", &callback_url(&st))
@@ -134,12 +148,15 @@ pub async fn connect(State(st): State<AppState>, jar: CookieJar) -> Result<Respo
 
 pub async fn callback(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Response, Response> {
     let who = auth::require_admin(&st, &jar)?;
-    let expected = {
+    let (expected, dest) = {
         let c = st.db.lock().unwrap();
         let v = db::setting(&c, "github_oauth_state");
+        let next = db::setting(&c, "github_oauth_next");
         let _ = db::set_setting(&c, "github_oauth_state", None);
-        v
+        let _ = db::set_setting(&c, "github_oauth_next", None);
+        (v, return_path(next.as_ref()))
     };
+    let back = |kind: &str, msg: &str| back_to(&dest, kind, msg);
     let valid = expected
         .as_deref()
         .and_then(|v| v.split_once(':'))
@@ -180,28 +197,29 @@ pub async fn callback(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
         Ok(TokenResp { error_description, .. }) => return Ok(back("err", &format!("GitHub a refusé : {}", error_description.unwrap_or_default()))),
         Err(e) => return Ok(back("err", &format!("GitHub injoignable : {e}"))),
     };
-    finish(&st, &who, &token).await
+    finish(&st, &who, &token, &dest).await
 }
 
 /// A personal access token pasted in the page, for a server without the OAuth app.
 pub async fn set_token(State(st): State<AppState>, jar: CookieJar, Form(f): Form<HashMap<String, String>>) -> Result<Response, Response> {
     let who = auth::require_admin(&st, &jar)?;
+    let dest = return_path(f.get("next"));
     let token = f.get("token").map(|t| t.trim().to_string()).unwrap_or_default();
     if token.is_empty() {
-        return Ok(back("err", "Colle un jeton GitHub."));
+        return Ok(back_to(&dest, "err", "Colle un jeton GitHub."));
     }
-    finish(&st, &who, &token).await
+    finish(&st, &who, &token, &dest).await
 }
 
-async fn finish(st: &AppState, who: &db::Profile, token: &str) -> Result<Response, Response> {
+async fn finish(st: &AppState, who: &db::Profile, token: &str, dest: &str) -> Result<Response, Response> {
     match whoami(token).await {
         Ok(c) => {
             let db = st.db.lock().unwrap();
             save(&db, Some(&c)).map_err(|e| crate::AppError(e).into_response())?;
             db::audit(&db, &who.actor(), "github.connect", &c.login);
-            Ok(back("ok", &format!("GitHub connecté : @{}.", c.login)))
+            Ok(back_to(dest, "ok", &format!("GitHub connecté : @{}.", c.login)))
         }
-        Err(e) => Ok(back("err", &e)),
+        Err(e) => Ok(back_to(dest, "err", &e)),
     }
 }
 

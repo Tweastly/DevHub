@@ -8,7 +8,7 @@ use axum::response::Redirect;
 use axum::Form;
 
 /// Below this, DevHub (web UI, proxy, terminals, collector) risks being killed.
-const DEVHUB_MIN_MB: i64 = 256;
+pub(crate) const DEVHUB_MIN_MB: i64 = 256;
 
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx_admin(&st, &jar)?;
@@ -147,7 +147,7 @@ fn show<T: ToString>(v: Option<T>, none: &str) -> String {
     v.map(|x| x.to_string()).unwrap_or_else(|| none.into())
 }
 
-async fn save_devhub(st: &AppState, f: &HashMap<String, String>) -> Result<String, String> {
+pub(crate) async fn save_devhub(st: &AppState, f: &HashMap<String, String>) -> Result<String, String> {
     let me = st.cfg.self_container.clone().ok_or("DevHub ne tourne pas dans Docker")?;
     let (mem, cpus) = read(st, f, DEVHUB_MIN_MB).await?;
     if let Some(m) = mem {
@@ -163,7 +163,7 @@ async fn save_devhub(st: &AppState, f: &HashMap<String, String>) -> Result<Strin
 }
 
 /// New defaults, applied right away to the running projects that use them.
-async fn save_defaults(st: &AppState, f: &HashMap<String, String>) -> Result<String, String> {
+pub(crate) async fn save_defaults(st: &AppState, f: &HashMap<String, String>) -> Result<String, String> {
     let (mem, cpus) = read(st, f, 64).await?;
     store(st, DEFAULT_MB, mem.map(|m| m.to_string()))?;
     store(st, DEFAULT_CPUS, cpus.map(|c| c.to_string()))?;

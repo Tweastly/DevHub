@@ -189,9 +189,9 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move { docker::prune_template_tags(&d).await });
     }
     if needs_setup {
-        let t = random_token(24);
-        println!("\n=== DevHub : aucun passkey. SETUP TOKEN : {t} ===\n=== Ouvre {origin}/login pour créer ton passkey ===\n");
-        *st.setup_token.lock().unwrap() = Some(t);
+        let code = auth::new_setup_code();
+        println!("\n=== DevHub : CODE D'INSTALLATION : {code} ===\n=== Ouvre {origin}/setup pour configurer DevHub ===\n");
+        *st.setup_token.lock().unwrap() = Some(code);
     }
 
     let app = Router::new()
@@ -199,6 +199,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/assets/{file}", get(web::asset))
         .route("/menu", get(web::menu))
         .route("/login", get(login_page))
+        .route("/setup", get(web::setup::page))
+        .route("/setup/{step}", post(web::setup::save))
         .route("/logout", post(auth::logout))
         .route("/auth/register/start", post(auth::register_start))
         .route("/auth/register/finish", post(auth::register_finish))
@@ -346,6 +348,10 @@ async fn login_page(
         return Redirect::to(next.as_deref().unwrap_or("/")).into_response();
     }
     let needs_setup = st.setup_token.lock().unwrap().is_some();
+    // No owner yet: the installation guide creates it.
+    if needs_setup {
+        return Redirect::to("/setup").into_response();
+    }
     web::auth::login(needs_setup, next.as_deref(), proxy::base_host(&st)).into_response()
 }
 

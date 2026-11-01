@@ -12,6 +12,7 @@ pub mod project;
 pub mod projects;
 pub mod resources;
 pub mod security;
+pub mod setup;
 pub mod update;
 pub mod volumes;
 pub mod images;
@@ -99,6 +100,7 @@ pub fn icon_c(name: &str, class: &str) -> Markup {
         "grid" => r#"<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>"#,
         "box" => r#"<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>"#,
         "sparkles" => r#"<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>"#,
+        "github" => r#"<path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.6.3-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.2-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c2-1.3 2.8-1 2.8-1 .5 1.4.2 2.5.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.8V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/>"#,
         "key" => r#"<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14.5 8.5l2 2"/>"#,
         "list" => r#"<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>"#,
         "refresh" => r#"<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>"#,
@@ -613,6 +615,8 @@ pub enum Nav<'a> {
     Images,
     Update,
     Menu,
+    /// The installation guide (its own page, listed with the settings).
+    Setup,
 }
 
 pub struct Shell<'a> {
@@ -734,6 +738,7 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
         v.push((Nav::Resources, "/resources", "Ressources", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
+        v.push((Nav::Setup, "/setup", "Assistant d'installation", None));
     }
     v
 }

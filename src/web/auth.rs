@@ -46,8 +46,8 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
     shell("Connexion · DevHub", "", footer, false, html! {
         @if needs_setup {
             h1 { "Bienvenue sur DevHub" }
-            p.sub { "Colle le setup token affiché dans les logs du serveur, puis crée ton passkey." }
-            label.field { span.lbl { "Setup token" } input #setup.mono-input autocomplete="off" placeholder="xxxxxxxxxxxxxxxx"; }
+            p.sub { "Colle le code d'installation affiché dans les journaux du serveur, puis crée ton passkey." }
+            label.field { span.lbl { "Code d'installation" } input #setup.mono-input autocomplete="off" placeholder="XXXX-XXXX"; }
             label.field { span.lbl { "Nom de l'appareil" } input #pkname value="Mon appareil"; }
             button.btn.primary onclick="register(pkname.value, setup.value).then(()=>location.href=NEXT)" { (icon("key")) "Créer mon passkey" }
         } @else {

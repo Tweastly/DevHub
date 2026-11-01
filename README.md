@@ -64,9 +64,9 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
    git clone https://github.com/Tweastly/DevHub devhub && cd devhub
    cp .env.example .env    # puis mets ton domaine dans DEVHUB_DOMAIN
    docker compose up -d --build
-   docker compose logs devhub | grep "SETUP TOKEN"
+   docker compose logs devhub | grep CODE
    ```
-3. Ouvre `https://dev.example.com/login`, colle le setup token et crée ton passkey. Le token ne sert qu'une fois.
+3. Ouvre `https://dev.example.com/setup` : l'**assistant d'installation** demande le code à 8 caractères affiché dans les journaux, crée ton passkey, vérifie le DNS et le HTTPS, puis règle les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet. Le code ne sert qu'une fois (après 20 essais faux, un nouveau s'affiche dans les journaux). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
 4. **Pare-feu** : ouvre 80 et 443, plus les ports des jeux (TCP / UDP) si tu en héberges.
 
 ### Dépôt privé

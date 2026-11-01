@@ -1,6 +1,6 @@
 //! Passkey-only authentication (WebAuthn), one or more profiles.
-//! The very first passkey (the owner's) requires the setup token printed in the logs at startup;
-//! other profiles get theirs through an invitation link.
+//! The very first passkey (the owner's) requires the installation code printed in the logs at
+//! startup; other profiles get theirs through an invitation link.
 
 use crate::{db, random_token, AppError, AppState};
 use axum::extract::State;
@@ -17,6 +17,41 @@ const SESSION_TTL: i64 = 7 * 24 * 3600;
 /// WebAuthn user handle of profile `id` (the owner's, id 1, is the one used before profiles existed).
 fn user_id(profile: i64) -> Uuid {
     Uuid::from_u128(0x6465_7668_7562_0000_0000_0000_0000_0000 + profile as u128)
+}
+
+/// Letters and digits that can't be confused with each other (no I, L, O, 0, 1).
+const CODE_CHARS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+/// Wrong installation codes before a new one replaces it (printed in the logs again).
+const CODE_TRIES: u32 = 20;
+static CODE_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// "7KQ2-XF9M": the installation code, short enough to type from a terminal.
+pub fn new_setup_code() -> String {
+    use rand::Rng;
+    let mut r = rand::thread_rng();
+    let c: String = (0..8).map(|_| CODE_CHARS[r.gen_range(0..CODE_CHARS.len())] as char).collect();
+    format!("{}-{}", &c[..4], &c[4..])
+}
+
+fn code_key(s: &str) -> String {
+    s.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect()
+}
+
+/// Checks the installation code, ignoring case, spaces and dashes. Too many wrong tries
+/// replace it with a new one, printed in the logs.
+pub fn setup_code_ok(st: &AppState, typed: &str) -> bool {
+    let mut code = st.setup_token.lock().unwrap();
+    let Some(c) = code.as_deref() else { return false };
+    if !typed.is_empty() && code_key(c) == code_key(typed) {
+        return true;
+    }
+    if CODE_FAILS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1 >= CODE_TRIES {
+        CODE_FAILS.store(0, std::sync::atomic::Ordering::Relaxed);
+        let new = new_setup_code();
+        println!("\n=== DevHub : trop d'essais, nouveau CODE D'INSTALLATION : {new} ===\n");
+        *code = Some(new);
+    }
+    false
 }
 
 pub struct PendingRegistration {
@@ -95,7 +130,7 @@ pub fn masked_ip(h: &HeaderMap) -> String {
     }
 }
 
-/// Until the owner has a passkey, DevHub is in first-setup mode (setup token in the logs).
+/// Until the owner has a passkey, DevHub is in first-setup mode (installation code in the logs).
 pub fn owner_has_passkey(st: &AppState) -> bool {
     db::passkey_rows(&st.db.lock().unwrap()).iter().any(|k| k.profile_id == db::OWNER)
 }
@@ -124,9 +159,8 @@ pub async fn register_start(State(st): State<AppState>, jar: CookieJar, Json(b):
             None => return Ok((StatusCode::FORBIDDEN, "invitation expirée ou déjà utilisée").into_response()),
         }
     } else if !owner_has_passkey(&st) {
-        let ok = st.setup_token.lock().unwrap().as_deref() == b.setup_token.as_deref() && b.setup_token.is_some();
-        if !ok {
-            return Ok((StatusCode::FORBIDDEN, "setup token invalide").into_response());
+        if !setup_code_ok(&st, b.setup_token.as_deref().unwrap_or("")) {
+            return Ok((StatusCode::FORBIDDEN, "code d'installation invalide").into_response());
         }
         (db::OWNER, None)
     } else if let Some(p) = current_profile(&st, &jar) {
@@ -266,4 +300,19 @@ pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> impl IntoResp
         c.set_domain(st.cfg.domain.clone());
     }
     (jar.remove(c), Redirect::to("/login"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{code_key, new_setup_code, CODE_CHARS};
+
+    #[test]
+    fn installation_code() {
+        let c = new_setup_code();
+        assert_eq!(c.len(), 9);
+        assert_eq!(&c[4..5], "-");
+        assert!(c.chars().filter(|&x| x != '-').all(|x| CODE_CHARS.contains(&(x as u8))));
+        assert_eq!(code_key("7kq2 xf9m"), code_key("7KQ2-XF9M"));
+        assert_ne!(code_key("7KQ2-XF9N"), code_key("7KQ2-XF9M"));
+    }
 }
