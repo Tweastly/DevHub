@@ -18,7 +18,7 @@ set -eu
 
 REPO_URL="${DEVHUB_REPO_URL:-https://github.com/Tweastly/DevHub}"
 IMAGE="${DEVHUB_IMAGE:-ghcr.io/tweastly/devhub:latest}"
-CADDY_IMAGE="${DEVHUB_CADDY_IMAGE:-ghcr.io/tweastly/devhub-caddy:latest}"
+CADDY_IMAGE="${DEVHUB_CADDY_IMAGE:-ghcr.io/tweastly/devhub:caddy}"
 DIR="${DEVHUB_DIR:-/opt/devhub}"
 BRANCH="${DEVHUB_BRANCH:-main}"
 DOMAIN="${DEVHUB_DOMAIN:-}"

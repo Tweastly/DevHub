@@ -1,5 +1,6 @@
 # Builds DevHub's Docker image on every push to main and publishes it on GitHub's registry
-# as ghcr.io/<owner>/<repo>:<commit> (and :latest), plus its Caddy as ghcr.io/<owner>/<repo>-caddy. DevHub's update pulls it instead of
+# as ghcr.io/<owner>/<repo>:<commit> (and :latest), plus its Caddy as the :caddy tag of the
+# same package, so a single visibility setting covers both. DevHub's update pulls it instead of
 # compiling on the server; when it isn't there (still building, no access), the server
 # builds as before.
 #
@@ -44,7 +45,7 @@ jobs:
             -t "${IMG}:${GITHUB_SHA}" -t "${IMG}:latest" .
           # Caddy with the Cloudflare DNS module, so install.sh doesn't compile it on the server.
           docker buildx build --push \
-            --cache-from "type=registry,ref=${IMG}-caddy:cache" \
-            --cache-to "type=registry,ref=${IMG}-caddy:cache,mode=max" \
+            --cache-from "type=registry,ref=${IMG}:caddy-cache" \
+            --cache-to "type=registry,ref=${IMG}:caddy-cache,mode=max" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-            -t "${IMG}-caddy:latest" caddy
+            -t "${IMG}:caddy" caddy

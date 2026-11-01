@@ -78,7 +78,7 @@ docker logs devhub | grep CODE
 ```
 </details>
 
-Les images `ghcr.io/tweastly/devhub` et `ghcr.io/tweastly/devhub-caddy` sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends-les publiques (GitHub › Packages › le paquet › Package settings › Change visibility). Sinon le script les compile sur le serveur.
+Les images de DevHub (`ghcr.io/tweastly/devhub:latest`) et de son Caddy (`:caddy`, même paquet) sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends le paquet public (GitHub › Packages › devhub › Package settings › Change visibility). Sinon le script les compile sur le serveur.
 
 ### Dépôt privé
 Les mises à jour ont besoin d'un jeton GitHub *fine-grained* limité au dépôt, avec la seule permission **Contents : Read-only**. Mets-le dans `.env` (`DEVHUB_GITHUB_TOKEN=…`) puis `docker compose up -d`. Il n'est jamais écrit ailleurs sur le disque.
