@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use std::time::Duration;
 
-const UPDATER: &str = "devhub-updater";
+pub(crate) const UPDATER: &str = "devhub-updater";
 const UPDATER_IMAGE: &str = "docker:27-cli";
 /// docker:27-cli with git already installed, made once in the background (saves the
 /// `apk add git` of every update).
@@ -494,7 +494,7 @@ async fn helper_image(st: &AppState) -> anyhow::Result<&'static str> {
     Ok(UPDATER_IMAGE)
 }
 
-const RECONFIGURE: &str = "devhub-reconfigure";
+pub(crate) const RECONFIGURE: &str = "devhub-reconfigure";
 
 /// From the server's IP to a domain name, during the installation guide: a short-lived
 /// container rewrites the mode lines of the server's .env (as `install.sh --domain` would)

@@ -20,6 +20,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 - **Confirmations** : un dialogue DevHub (neutre, attention, danger) remplace ceux du navigateur ; les suppressions de données irréversibles demandent de taper le nom.
 - **Actions sans rechargement** : chaque bouton s'exécute en arrière-plan, la page se met à jour sur place et le résultat s'affiche en notification.
 - **Liste des projets** en cartes ou en liste : état, CPU et RAM en direct, badges (accès, ports, domaines, durée), filtres et tri. **Sélection multiple** pour démarrer, arrêter, redémarrer, recréer ou supprimer plusieurs projets d'un coup.
+- **Tous les conteneurs du serveur** dans cette liste (administrateurs) : ceux créés hors de DevHub (compose, `docker run`, autres outils) apparaissent sous les projets, avec leur état, CPU et RAM en direct, leur origine et leurs ports, une page avec leurs informations et leurs journaux, et Démarrer / Arrêter / Redémarrer. Le conteneur de DevHub lui-même y figure, sans ces boutons.
 - **Page projet** : même en-tête sur tous les onglets (état, accès, « Ouvrir le site », Redémarrer / Recréer / Arrêter) et six onglets :
   - **Aperçu** : CPU (historique 24 h), mémoire, adresses, console de l'app, activité récente.
   - **Réseau** : l'adresse d'abord (URL du site avec Privé / Public, ou adresse + port à taper dans le jeu), le tableau des ports avec leur état (« Répond » / « Rien n'écoute »), l'ajout d'un port (Site web / TCP / UDP), les sous-domaines personnalisés et l'état de leur certificat HTTPS.

@@ -306,6 +306,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/projects/{name}/logs", get(web::project::logs))
         .route("/projects/{name}/console", post(web::project::console_run))
         .route("/projects/{name}/logs/stream", get(live::logs))
+        .route("/containers/{name}", get(web::containers::page))
+        .route("/containers/{name}/logs/stream", get(live::container_logs))
+        .route("/containers/{name}/{action}", post(web::containers::action))
         .route("/projects/{name}/logs/download", get(web::project::logs_download))
         .route("/projects/{name}/files", get(web::files::browse))
         .route("/projects/{name}/files/download", get(files::download))
@@ -365,11 +368,21 @@ fn spawn_stats_collector(st: AppState) {
                 .into_iter()
                 .map(|p| p.name)
                 .collect();
-            let all = futures_util::future::join_all(names.iter().map(|n| docker::status(&st.docker, n))).await;
-            let me = match &st.cfg.self_container {
-                Some(c) => Some(docker::container_status(&st.docker, c).await),
-                None => None,
-            };
+            // The server's other containers too (shown to administrators in the projects list).
+            let others = docker::others(&st.docker, &names, st.cfg.self_container.as_deref()).await;
+            let others: Vec<docker::Other> = others.into_iter().filter(|o| o.kind != docker::OtherKind::DevHub).collect();
+            let (all, me, other_stats) = tokio::join!(
+                futures_util::future::join_all(names.iter().map(|n| docker::status(&st.docker, n))),
+                async {
+                    match &st.cfg.self_container {
+                        Some(c) => Some(docker::container_status(&st.docker, c).await),
+                        None => None,
+                    }
+                },
+                futures_util::future::join_all(others.iter().map(|o| async {
+                    if o.state == "running" { docker::container_status(&st.docker, &o.id).await } else { docker::Status { state: o.state.clone(), ..Default::default() } }
+                })),
+            );
             let mut h = st.host.lock().unwrap().clone();
             sampler.sample(&st.docker, &st.data_dir, &mut h).await;
             *st.host.lock().unwrap() = h.clone();
@@ -386,7 +399,13 @@ fn spawn_stats_collector(st: AppState) {
                 db::metrics_insert(&st.db.lock().unwrap(), minute, &rows);
             }
             let mut stats: HashMap<String, docker::Status> = names.into_iter().zip(all).collect();
+            for (o, s) in others.iter().zip(other_stats) {
+                stats.insert(docker::other_key(&o.name), s);
+            }
             if let Some(me) = me {
+                if let Some(c) = &st.cfg.self_container {
+                    stats.insert(docker::other_key(c), me.clone());
+                }
                 stats.insert(SELF_STATS.into(), me);
             }
             *st.stats.lock().unwrap() = stats;

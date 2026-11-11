@@ -497,7 +497,12 @@ pub struct Detail {
 }
 
 pub async fn detail(d: &Docker, p: &str) -> Detail {
-    let Ok(info) = d.inspect_container(&container_name(p), None::<InspectContainerOptions>).await else {
+    container_detail(d, &container_name(p)).await
+}
+
+/// Same, for any container by name or id.
+pub async fn container_detail(d: &Docker, name: &str) -> Detail {
+    let Ok(info) = d.inspect_container(name, None::<InspectContainerOptions>).await else {
         return Detail { state: "absent".into(), ..Default::default() };
     };
     let s = info.state.unwrap_or_default();
@@ -615,8 +620,13 @@ pub async fn container_status(d: &Docker, name: &str) -> Status {
 }
 
 pub async fn logs(d: &Docker, p: &str, tail: usize) -> String {
+    container_logs(d, &container_name(p), tail).await
+}
+
+/// Same, for any container by name or id.
+pub async fn container_logs(d: &Docker, name: &str, tail: usize) -> String {
     let mut s = d.logs::<String>(
-        &container_name(p),
+        name,
         Some(LogsOptions { stdout: true, stderr: true, tail: tail.to_string(), timestamps: true, ..Default::default() }),
     );
     let mut out = String::new();
@@ -795,4 +805,103 @@ mod tests {
         assert!(!is_devhub_image("nginx:latest"));
         assert!(!is_devhub_image("ghcr.io/tweastly/devhub-site"));
     }
+}
+
+// ---------- The server's other containers ----------
+
+/// A container of the server that is not one of this DevHub's projects: shown in the
+/// projects list (administrators only), with start / stop / restart and its logs.
+#[derive(Clone)]
+pub struct Other {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    pub state: String,
+    pub created: i64,
+    /// Ports published on the server: (server port, container port, protocol).
+    pub ports: Vec<(u16, u16, String)>,
+    pub kind: OtherKind,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum OtherKind {
+    /// DevHub's own container: never stopped from here.
+    DevHub,
+    /// One of DevHub's short-lived helpers (update, move to a domain).
+    Helper(&'static str),
+    /// A project of another DevHub (one run as a project here, with the server's Docker).
+    Nested(String),
+    /// Part of a docker compose project.
+    Compose(String),
+    /// Started some other way (docker run, another tool).
+    Plain,
+}
+
+impl Other {
+    /// May DevHub start, stop or restart it? Not itself, nor its helpers mid-task.
+    pub fn controllable(&self) -> bool {
+        matches!(self.kind, OtherKind::Nested(_) | OtherKind::Compose(_) | OtherKind::Plain)
+    }
+}
+
+/// Every container of the server except this DevHub's projects (`projects`: their names),
+/// DevHub first, then by creation, newest first. `me`: DevHub's own container.
+pub async fn others(d: &Docker, projects: &[String], me: Option<&str>) -> Vec<Other> {
+    let ours: std::collections::HashSet<String> = projects.iter().map(|p| container_name(p)).collect();
+    let Ok(list) = d.list_containers(Some(bollard::container::ListContainersOptions::<String> { all: true, ..Default::default() })).await else {
+        return Vec::new();
+    };
+    let mut out: Vec<Other> = list
+        .into_iter()
+        .filter_map(|c| {
+            let name = c.names?.first()?.trim_start_matches('/').to_string();
+            if ours.contains(&name) {
+                return None;
+            }
+            let labels = c.labels.unwrap_or_default();
+            let kind = if Some(name.as_str()) == me {
+                OtherKind::DevHub
+            } else if name == crate::updater::UPDATER {
+                OtherKind::Helper("mise à jour")
+            } else if name == crate::updater::RECONFIGURE {
+                OtherKind::Helper("passage sur un domaine")
+            } else if let Some(p) = labels.get("devhub.project") {
+                OtherKind::Nested(p.clone())
+            } else if let Some(p) = labels.get("com.docker.compose.project") {
+                OtherKind::Compose(p.clone())
+            } else {
+                OtherKind::Plain
+            };
+            let mut ports: Vec<(u16, u16, String)> = c
+                .ports
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|p| Some((p.public_port?, p.private_port, p.typ.map(|t| t.to_string()).unwrap_or_else(|| "tcp".into()))))
+                .collect();
+            // Docker lists a port once per address family.
+            ports.sort();
+            ports.dedup();
+            Some(Other {
+                id: c.id.unwrap_or_default(),
+                name,
+                image: c.image.unwrap_or_default(),
+                state: c.state.unwrap_or_else(|| "unknown".into()),
+                created: c.created.unwrap_or(0),
+                ports,
+                kind,
+            })
+        })
+        .collect();
+    out.sort_by_key(|o| (o.kind != OtherKind::DevHub, std::cmp::Reverse(o.created)));
+    out
+}
+
+/// One of the server's other containers by name, if it isn't a project of this DevHub.
+pub async fn other(d: &Docker, projects: &[String], me: Option<&str>, name: &str) -> Option<Other> {
+    others(d, projects, me).await.into_iter().find(|o| o.name == name)
+}
+
+/// Key of another container in the live stats ("@name": project names can't hold "@").
+pub fn other_key(name: &str) -> String {
+    format!("@{name}")
 }

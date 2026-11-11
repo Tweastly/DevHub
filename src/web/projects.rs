@@ -258,27 +258,32 @@ fn card(ctx: &Ctx, r: &Row) -> Markup {
 
 pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx(&st, &jar)?;
-    let mut all = rows(&ctx).await;
+    let (mut all, mut others) = tokio::join!(rows(&ctx), super::containers::list(&ctx));
     let query = q.get("q").map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
     if let Some(term) = &query {
         all.retain(|r| r.p.name.contains(term.as_str()) || r.p.image.to_lowercase().contains(term.as_str()));
+        others.retain(|(o, _)| o.name.to_lowercase().contains(term.as_str()) || o.image.to_lowercase().contains(term.as_str()));
     }
+    let stopped = |s: &str| matches!(s, "exited" | "dead" | "created" | "paused");
     let f = q.get("f").map(String::as_str).unwrap_or("all");
     let view = q.get("view").map(String::as_str).unwrap_or("cards");
     let sort = q.get("sort").map(String::as_str).unwrap_or("activity");
     let count = |pred: &dyn Fn(&Row) -> bool| all.iter().filter(|r| pred(r)).count();
-    let n_on = count(&|r| r.s.state == "running");
-    let n_off = count(&|r| matches!(r.s.state.as_str(), "exited" | "dead" | "created" | "paused"));
+    let n_others = others.len();
+    let n_on = count(&|r| r.s.state == "running") + others.iter().filter(|(o, _)| o.state == "running").count();
+    let n_off = count(&|r| stopped(&r.s.state)) + others.iter().filter(|(o, _)| stopped(&o.state)).count();
     let n_build = count(&|r| r.s.state == "absent");
     let n_pub = count(&|r| r.p.public);
-    let total = all.len();
+    let n_projects = all.len();
+    let total = n_projects + n_others;
     let mut shown: Vec<Row> = all
         .into_iter()
         .filter(|r| match f {
             "online" => r.s.state == "running",
-            "stopped" => matches!(r.s.state.as_str(), "exited" | "dead" | "created" | "paused"),
+            "stopped" => stopped(&r.s.state),
             "building" => r.s.state == "absent",
             "public" => r.p.public,
+            "others" => false,
             _ => true,
         })
         .collect();
@@ -287,6 +292,23 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         "cpu" => shown.sort_by(|a, b| b.s.cpu_pct.total_cmp(&a.s.cpu_pct)),
         "ram" => shown.sort_by_key(|r| std::cmp::Reverse(r.s.mem_used)),
         _ => sort_by_activity(&ctx, &mut shown),
+    }
+    // The server's other containers (administrators): same filters, in their own section.
+    let mut shown_others: Vec<(docker::Other, Detail)> = others
+        .into_iter()
+        .filter(|(o, _)| match f {
+            "online" => o.state == "running",
+            "stopped" => stopped(&o.state),
+            "building" | "public" => false,
+            _ => true,
+        })
+        .collect();
+    let ostat = |o: &docker::Other| super::containers::status(&ctx, o);
+    match sort {
+        "name" => shown_others.sort_by(|a, b| a.0.name.cmp(&b.0.name)),
+        "cpu" => shown_others.sort_by(|a, b| ostat(&b.0).cpu_pct.total_cmp(&ostat(&a.0).cpu_pct)),
+        "ram" => shown_others.sort_by_key(|(o, _)| std::cmp::Reverse(ostat(o).mem_used)),
+        _ => {}
     }
     let link = |k: &str, v: &str| {
         let mut m: Vec<(String, String)> = q.iter().filter(|(a, _)| a.as_str() != k).map(|(a, b)| (a.clone(), b.clone())).collect();
@@ -307,6 +329,9 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 h1 { "Projets" }
                 p.lead {
                     @if let Some(t) = &query { (shown.len()) " résultat(s) pour « " (t) " ». " a.link href="/projects" { "Tout afficher" } }
+                    @else if n_others > 0 {
+                        (total) " conteneurs sur " (ctx.host_name()) " : " (n_projects) " projet" @if n_projects > 1 { "s" } " DevHub et " (n_others) " autre" @if n_others > 1 { "s" } ", créé" @if n_others > 1 { "s" } " hors de DevHub."
+                    }
                     @else { (total) " conteneur" @if total > 1 { "s" } " sur " (ctx.host_name()) ". Chacun a son réseau, ses limites et son propre " code { "/workspace" } "." }
                 }
             }
@@ -325,6 +350,7 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             (chip("stopped", "Arrêtés", n_off, Some("exited")))
             (chip("building", "En construction", n_build, Some("absent")))
             (chip("public", "Publics", n_pub, Some("globe")))
+            @if n_others > 0 { (chip("others", "Hors DevHub", n_others, None)) }
             form.spacer.row.end method="get" action="/projects" {
                 @for (k, v) in q.iter().filter(|(k, _)| k.as_str() != "sort") { input type="hidden" name=(k) value=(v); }
                 select.sel name="sort" data-autosubmit aria-label="Trier" style="width:auto" {
@@ -335,11 +361,12 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 noscript { button.btn.sm { "Trier" } }
             }
         }
-        @if ctx.projects.is_empty() {
+        @if ctx.projects.is_empty() && f != "others" {
             div.card { (empty("projects", "Aucun projet", html! { "Crée le premier : une page web prête en dix secondes, ou ton propre conteneur." },
                 html! { a.btn.primary href="/projects/new" { (icon("plus")) "Créer le premier projet" } })) }
-        } @else if shown.is_empty() {
+        } @else if shown.is_empty() && shown_others.is_empty() {
             div.card { (empty("search", "Aucun projet ici", html! { "Rien ne correspond à ce filtre." }, html! { a.btn href="/projects" { "Retirer le filtre" } })) }
+        } @else if shown.is_empty() {
         } @else if view == "list" {
             div.card.selectable { (table(&ctx, &shown, "/projects?view=list", true)) }
         } @else {
@@ -347,6 +374,22 @@ pub async fn list(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         }
         (bulk_bar(&ctx))
         @if ctx.profile.admin { a.newcard href="/projects/new" { (icon("plus")) b { "Nouveau projet" } span.accent.hide-m { " — Node, Rust, Python, Go, Debian, une page web prête à l'emploi ou ton image Docker" } } }
+        @if !shown_others.is_empty() {
+            div.osec-h {
+                h2 { "Autres conteneurs du serveur" }
+                p.muted { "Créés hors de DevHub (compose, docker run, autres outils) : leur état, leur CPU et leur RAM, leurs journaux, et les démarrer ou les arrêter." }
+            }
+            @if view == "list" {
+                div.card {
+                    table.tbl.cards.ptbl {
+                        thead { tr { th { "Conteneur" } th { "État" } th.num { "CPU" } th { "Mémoire" } th { "Origine et ports" } th.num { "Actions" } } }
+                        tbody { @for (o, _) in &shown_others { (super::containers::row(&ctx, o, false)) } }
+                    }
+                }
+            } @else {
+                div.pgrid { @for (o, det) in &shown_others { (super::containers::card(&ctx, o, det)) } }
+            }
+        }
     };
     Ok(render(&ctx, Shell { title: "Projets", nav: Nav::Projects, crumbs: vec![("DevHub".into(), Some("/".into())), ("Projets".into(), None)], actions: html! {} }, body))
 }

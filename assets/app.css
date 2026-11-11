@@ -540,6 +540,13 @@ textarea { font-family: var(--mono); font-size: 13px; line-height: 1.7; min-heig
 .pcard .ft .end { margin-left: auto; }
 .pcard .ft .icon-btn { width: 34px; height: 34px; background: transparent; border-color: var(--border); }
 .pcard .ft .btn.sm { min-height: 32px; }
+/* The server's other containers, below the projects (administrators). */
+.osec-h { margin: 40px 0 16px; }
+.osec-h h2 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+.osec-h p { margin: 0; font-size: 13px; max-width: 720px; }
+.avatar.oc { background: var(--hover); color: var(--text-2); }
+.avatar.oc svg { width: 16px; height: 16px; }
+.ocard .nm { font: 600 14.5px var(--mono); }
 .newcard { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 26px; margin-top: 24px; border: 1.5px dashed var(--drop); border-radius: var(--r); color: var(--text-2); }
 .newcard:hover { border-color: var(--accent); color: var(--text); }
 .newcard b { color: var(--text); font-weight: 500; }

@@ -5,6 +5,7 @@
 pub mod audit;
 pub mod auth;
 pub mod claude;
+pub mod containers;
 pub mod files;
 pub mod overview;
 pub mod profiles;
@@ -425,6 +426,9 @@ pub fn sentence(actor: &str, ev: &Event) -> Markup {
         "project.restart" => "redémarré",
         "project.rebuild" => "reconstruit",
         "project.resources" => "changé les ressources de",
+        "container.start" => "démarré le conteneur",
+        "container.stop" => "arrêté le conteneur",
+        "container.restart" => "redémarré le conteneur",
         "login.ok" => "ouvert une session",
         _ => "fait",
     };
@@ -433,6 +437,7 @@ pub fn sentence(actor: &str, ev: &Event) -> Markup {
         (who) " " (verb) " "
         @if detail_first && !ev.detail.is_empty() { code { (ev.detail) } " dans " }
         @if verb == "fait" { code { (ev.label) } " " }
+        @if ev.label.starts_with("container.") { code { (ev.detail) } }
         @if let Some(p) = &ev.project { b { (p) } }
     }
 }
