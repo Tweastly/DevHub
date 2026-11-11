@@ -212,7 +212,10 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move { docker::prune_template_tags(&d).await });
     }
     if needs_setup {
-        let code = auth::new_setup_code();
+        // Kept until used: moving to a domain restarts DevHub in the middle of the guide.
+        let saved = db::setting(&st.db.lock().unwrap(), auth::SETUP_CODE);
+        let code = saved.unwrap_or_else(auth::new_setup_code);
+        let _ = db::set_setting(&st.db.lock().unwrap(), auth::SETUP_CODE, Some(&code));
         println!("{}", auth::setup_banner(&code, &origin, "Bienvenue ! DevHub est installé, il ne manque plus que toi."));
         *st.setup_token.lock().unwrap() = Some(code);
     }

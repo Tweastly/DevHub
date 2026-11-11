@@ -25,6 +25,15 @@ const CODE_CHARS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_TRIES: u32 = 20;
 static CODE_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// Setting that keeps the installation code across restarts until the owner exists.
+pub const SETUP_CODE: &str = "setup_code";
+
+/// The owner exists: the installation code is spent.
+fn clear_setup(st: &AppState) {
+    *st.setup_token.lock().unwrap() = None;
+    let _ = db::set_setting(&st.db.lock().unwrap(), SETUP_CODE, None);
+}
+
 /// "7KQ2-XF9M": the installation code, short enough to type from a terminal.
 pub fn new_setup_code() -> String {
     use rand::Rng;
@@ -80,6 +89,7 @@ pub fn setup_code_ok(st: &AppState, typed: &str) -> bool {
         CODE_FAILS.store(0, std::sync::atomic::Ordering::Relaxed);
         let new = new_setup_code();
         println!("{}", setup_banner(&new, &st.cfg.origin, "Trop d'essais faux : l'ancien code ne marche plus, voici le nouveau."));
+        let _ = db::set_setting(&st.db.lock().unwrap(), SETUP_CODE, Some(&new));
         *code = Some(new);
     }
     false
@@ -276,7 +286,7 @@ pub async fn password_setup(State(st): State<AppState>, jar: CookieJar, Json(b):
         db::set_password(&c, db::OWNER, &hash)?;
         db::audit(&c, "owner", "password.set", "installation");
     }
-    *st.setup_token.lock().unwrap() = None;
+    clear_setup(&st);
     Ok((new_session(&st, jar, None, Some(db::OWNER))?, Json(json!({"ok": true}))).into_response())
 }
 
@@ -387,7 +397,7 @@ pub async fn register_finish(State(st): State<AppState>, jar: CookieJar, Json(b)
         id
     };
     if first {
-        *st.setup_token.lock().unwrap() = None;
+        clear_setup(&st);
     }
     // First registration and invitations log you straight in.
     if first || invite.is_some() {

@@ -58,21 +58,21 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ## Déploiement sur le VPS
 
-1. **DNS** : des enregistrements `A` vers l'IP du VPS pour `dev.example.com` et `*.dev.example.com`. Pour les sous-domaines personnalisés, ajoute `*.example.com`.
-2. **Sur le VPS**, une seule commande (root ou sudo) :
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh
-   ```
-   Le script installe Docker s'il manque, demande le domaine, vérifie le DNS et les ports 80/443 (et ouvre ufw s'il est actif), clone DevHub dans `/opt/devhub`, écrit le `.env` (avec le jeton Cloudflare du certificat joker si tu en donnes un), télécharge les images construites par GitHub (ou les compile), démarre tout et affiche l'adresse et le **code d'installation**. Relancé sur un serveur déjà installé, il met DevHub à jour en gardant le `.env`.
-   Sans question : `… | sh -s -- --domain dev.example.com --yes` (options : `--dir`, `--branch`, `--cloudflare-token`, voir `install.sh --help`).
-
-   **Ou avec Docker**, si le serveur l'a déjà : la même installation depuis l'image `ghcr.io/tweastly/devhub:install`, qui passe par le Docker du serveur et écrit DevHub dans `/opt/devhub` (monté au même chemin) :
+1. **Sur le VPS**, une seule commande (root ou sudo), qui ne pose aucune question :
    ```bash
    docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install
    ```
-   Les mêmes options s'ajoutent à la fin (`--domain dev.example.com --yes`). Le pare-feu reste à ouvrir à la main (80 et 443).
-3. Ouvre `https://dev.example.com/setup` : l'**assistant d'installation** demande le code à 8 caractères, crée ton passkey, vérifie le DNS et le HTTPS, puis règle les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet. Le code ne sert qu'une fois (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
-4. **Pare-feu** : 80 et 443 doivent être ouverts, plus les ports des jeux (TCP / UDP) si tu en héberges.
+   L'image `ghcr.io/tweastly/devhub:install` passe par le Docker du serveur : elle clone DevHub dans `/opt/devhub` (monté au même chemin), écrit le `.env`, télécharge les images construites par GitHub (ou les compile), démarre DevHub sur l'**adresse IP du serveur** et affiche l'adresse du guide et le **code d'installation**. Relancée sur un serveur déjà installé, elle met DevHub à jour en gardant le `.env`.
+   Sans Docker sur le serveur, le même script l'installe d'abord : `curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh`.
+2. **Dans ton navigateur**, ouvre `https://<IP du serveur>/setup` (le navigateur peut avertir du certificat la première fois : continue) et tape le code. L'**assistant d'installation** fait tout le reste :
+   - **Nom de domaine** : si tu en as un, il affiche les deux enregistrements DNS à créer (`dev.example.com` et `*.dev.example.com` vers l'IP du serveur), les vérifie, puis fait redémarrer DevHub sur le domaine et t'y emmène avec ton code. Sinon, DevHub reste sur l'adresse IP (voir plus bas).
+   - **Ton compte** : un passkey avec un domaine, un mot de passe sans.
+   - Puis le HTTPS, les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet.
+
+   Le code ne sert qu'une fois, et il survit au redémarrage sur le domaine (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
+3. **Pare-feu** : 80 et 443 doivent être ouverts (plus 20000-20099 sans domaine, et les ports des jeux si tu en héberges). DevHub ne touche pas au pare-feu du serveur.
+
+Pour une installation sans navigateur, les options s'ajoutent à la fin de la commande : `--domain dev.example.com` démarre directement sur le domaine, `--cloudflare-token` active le certificat joker, `--yes` installe Docker sans demander (voir `install.sh --help`).
 
 <details><summary>Installation à la main</summary>
 
@@ -88,9 +88,9 @@ Les images de DevHub (`ghcr.io/tweastly/devhub:latest`), de son Caddy (`:caddy`)
 
 ### Sans nom de domaine
 
-Le script demande « As-tu un nom de domaine ? » :
+C'est le choix « Non » de la première étape du guide, et le mode de départ de toute installation :
 
-| | Avec un domaine | Sans domaine (`--ip`) |
+| | Avec un domaine | Sans domaine |
 |---|---|---|
 | Adresse du panel | `https://dev.example.com` | `https://203.0.113.7` |
 | Connexion | passkey | mot de passe (12 caractères min.) |
@@ -99,7 +99,7 @@ Le script demande « As-tu un nom de domaine ? » :
 | Ports à ouvrir | 80, 443 | 80, 443 et 20000-20099 |
 
 - Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. Caddy tourne sur le réseau du serveur (`docker-compose.ip.yml`, activé par `COMPOSE_FILE` dans le `.env`).
-- **Passer plus tard à un domaine** : relance l'installation avec `--domain dev.example.com`. Le `.env` est mis à jour, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey.
+- **Passer plus tard à un domaine** (une fois le compte créé) : relance l'installation avec `--domain dev.example.com`. Le `.env` est mis à jour, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey. `--ip` fait le chemin inverse.
 
 ### Dépôt privé
 Les mises à jour ont besoin d'un jeton GitHub *fine-grained* limité au dépôt, avec la seule permission **Contents : Read-only**. Mets-le dans `.env` (`DEVHUB_GITHUB_TOKEN=…`) puis `docker compose up -d`. Il n'est jamais écrit ailleurs sur le disque.

@@ -5,6 +5,7 @@
 - Rien d'autre ne s'installe ni ne tourne sur le VPS que Docker lui-même : pas de binaire, de service systemd, de paquet ou de règle système ajoutés par DevHub. Une nouvelle fonction qui a besoin de l'hôte passe par un montage ou par le socket Docker, jamais par un programme installé sur le VPS.
 - Sur le VPS, seulement des fichiers : `/opt/devhub` (code, `.env`, `data/`), montés dans les conteneurs.
 - Installation recommandée : `docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install` (voir `installer/Dockerfile` et `install.sh`).
+- L'installation se fait dans le navigateur, pas dans la console : `install.sh` ne pose aucune question (seulement installer Docker s'il manque), démarre DevHub sur l'IP du serveur et affiche l'adresse de `/setup` et le code. Le guide web (`src/web/setup.rs`) demande ensuite le nom de domaine, vérifie le DNS et fait passer DevHub sur le domaine (`updater::switch_domain`, conteneur temporaire qui réécrit le `.env` puis `docker compose up -d`). Le code d'installation est gardé dans les réglages (`setup_code`) jusqu'à la création du propriétaire.
 
 ## Avec ou sans nom de domaine
 - Avec un domaine : passkeys, un sous-domaine par projet (Caddy en bridge, `Caddyfile`).

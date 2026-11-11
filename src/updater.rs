@@ -386,24 +386,13 @@ pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Respons
 pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
     finalize(st).await;
     let d = &st.docker;
-    let me = st.cfg.self_container.as_deref().context("mise à jour possible seulement quand DevHub tourne via docker compose")?;
-    let me_info = d.inspect_container(me, None::<InspectContainerOptions>).await?;
-    let labels = me_info.config.clone().and_then(|c| c.labels).unwrap_or_default();
-    let host_dir = labels.get("com.docker.compose.project.working_dir").context("label compose manquant")?.clone();
-    let project = labels.get("com.docker.compose.project").context("label compose manquant")?.clone();
+    let (host_dir, project) = compose_location(st).await?;
     let branch = st.update.lock().unwrap().branch.clone();
     let branch = if branch.is_empty() { "main".to_string() } else { branch };
 
     // Never cut an update in progress (it would stop halfway through `docker compose up`).
     anyhow::ensure!(!updater_running(st).await, "une mise à jour est déjà en cours");
-    let image = if d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
-        UPDATER_GIT_IMAGE
-    } else {
-        if d.inspect_image(UPDATER_IMAGE).await.is_err() {
-            crate::docker::pull(d, UPDATER_IMAGE).await?;
-        }
-        UPDATER_IMAGE
-    };
+    let image = helper_image(st).await?;
     let _ = d.remove_container(UPDATER, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
 
     // The token is passed as an env var and turned into an auth header, never written to disk.
@@ -454,9 +443,11 @@ if [ -z "$(docker images -q devhub-caddy)" ] || ! git diff --quiet "$OLD" HEAD -
 fi
 docker compose -p "$PROJECT" up -d
 step "rechargement de Caddy"
-docker compose -p "$PROJECT" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "Caddy non rechargé"
+docker compose -p "$PROJECT" exec -T caddy caddy reload --config "$CADDYFILE" || echo "Caddy non rechargé"
 step "terminé""#;
-    let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}")];
+    // Without a domain, Caddy runs Caddyfile.ip (docker-compose.ip.yml).
+    let caddyfile = if st.cfg.ip_mode { "/etc/caddy/Caddyfile.ip" } else { "/etc/caddy/Caddyfile" };
+    let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}"), format!("CADDYFILE={caddyfile}")];
     if let Some(slug) = github_slug(&repo_dir()) {
         env.push(format!("REMOTE=ghcr.io/{}", slug.to_ascii_lowercase()));
     }
@@ -484,6 +475,71 @@ step "terminé""#;
     };
     let _ = db::deploy_start(&st.db.lock().unwrap(), &sha, &message);
     Ok(())
+}
+
+/// The server folder DevHub was started from by docker compose, and its compose project.
+async fn compose_location(st: &AppState) -> anyhow::Result<(String, String)> {
+    let me = st.cfg.self_container.as_deref().context("possible seulement quand DevHub tourne via docker compose")?;
+    let me_info = st.docker.inspect_container(me, None::<InspectContainerOptions>).await?;
+    let labels = me_info.config.and_then(|c| c.labels).unwrap_or_default();
+    let host_dir = labels.get("com.docker.compose.project.working_dir").context("label compose manquant")?.clone();
+    let project = labels.get("com.docker.compose.project").context("label compose manquant")?.clone();
+    Ok((host_dir, project))
+}
+
+/// docker CLI image for the helper containers (the one with git when it was built).
+async fn helper_image(st: &AppState) -> anyhow::Result<&'static str> {
+    let d = &st.docker;
+    if d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
+        return Ok(UPDATER_GIT_IMAGE);
+    }
+    if d.inspect_image(UPDATER_IMAGE).await.is_err() {
+        crate::docker::pull(d, UPDATER_IMAGE).await?;
+    }
+    Ok(UPDATER_IMAGE)
+}
+
+const RECONFIGURE: &str = "devhub-reconfigure";
+
+/// From the server's IP to a domain name, during the installation guide: a short-lived
+/// container rewrites the mode lines of the server's .env (as `install.sh --domain` would)
+/// and restarts DevHub and Caddy with docker compose. Nothing else is touched.
+/// Returns the installation folder on the server.
+pub async fn switch_domain(st: &AppState, domain: &str) -> anyhow::Result<String> {
+    let d = &st.docker;
+    let (host_dir, project) = compose_location(st).await?;
+    if let Ok(c) = d.inspect_container(RECONFIGURE, None::<InspectContainerOptions>).await {
+        if c.state.and_then(|s| s.running).unwrap_or(false) {
+            return Ok(host_dir);
+        }
+    }
+    anyhow::ensure!(!updater_running(st).await, "une mise à jour est en cours : réessaie dans une minute");
+    let image = helper_image(st).await?;
+    let _ = d.remove_container(RECONFIGURE, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+    // The pause lets DevHub answer the browser before compose replaces it.
+    let script = r#"set -e
+cd "$DIR"
+sleep 2
+[ -f .env ] || : > .env
+grep -vE '^(DEVHUB_DOMAIN|COMPOSE_FILE|DEVHUB_PORT_RANGE|DEVHUB_IP_SITES)=' .env > /tmp/env || true
+echo "DEVHUB_DOMAIN=$DOMAIN" >> /tmp/env
+cat /tmp/env > .env
+echo "== .env : DEVHUB_DOMAIN=$DOMAIN"
+docker compose -p "$PROJECT" up -d
+echo "== terminé""#;
+    let cfg = Config {
+        image: Some(image.to_string()),
+        cmd: Some(vec!["sh".into(), "-c".into(), script.into()]),
+        env: Some(vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("DOMAIN={domain}")]),
+        host_config: Some(HostConfig {
+            binds: Some(vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    d.create_container(Some(CreateContainerOptions { name: RECONFIGURE, platform: None }), cfg).await?;
+    d.start_container::<String>(RECONFIGURE, None).await?;
+    Ok(host_dir)
 }
 
 /// Records how the last update ended, once its helper container has exited: success,

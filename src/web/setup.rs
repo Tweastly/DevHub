@@ -1,19 +1,22 @@
 //! Installation guide, /setup: from the installation code printed in the logs to the first
-//! project. The first two steps (code, owner passkey) run before anyone is signed in; the
-//! others use the existing settings and can be replayed later from the settings menu.
+//! project. The first three steps (code, domain name, owner account) run before anyone is
+//! signed in; the others use the existing settings and can be replayed later from the
+//! settings menu. install.sh asks nothing: without a domain, DevHub starts on the server's
+//! IP, and the "domain name" step can move it to a domain from here.
 
 use super::*;
 use crate::{auth, docker, github, mcp_admin, ops, proxy, updater};
 use axum::extract::{Path, Query, State};
 use axum::response::Redirect;
-use axum::Form;
+use axum::{Form, Json};
 use std::net::IpAddr;
 use std::time::Duration;
 
-const STEPS: [(&str, &str); 8] = [
+const STEPS: [(&str, &str); 9] = [
     ("code", "Code d'installation"),
+    ("choice", "Nom de domaine"),
     ("account", "Ton compte"),
-    ("domain", "Domaine et HTTPS"),
+    ("domain", "Adresse et HTTPS"),
     ("resources", "Ressources"),
     ("github", "GitHub"),
     ("updates", "Mises à jour"),
@@ -22,8 +25,11 @@ const STEPS: [(&str, &str); 8] = [
 ];
 
 fn index(step: &str) -> usize {
-    STEPS.iter().position(|s| s.0 == step).unwrap_or(2)
+    STEPS.iter().position(|s| s.0 == step).unwrap_or(FIRST_SIGNED_IN)
 }
+
+/// "domain": the first step once signed in (the ones before run in the browser alone).
+const FIRST_SIGNED_IN: usize = 3;
 
 fn next_url(step: &str) -> String {
     match STEPS.get(index(step) + 1) {
@@ -77,7 +83,7 @@ fn messages(q: &HashMap<String, String>) -> Markup {
 /// A step after sign-in: title, sentence, content, then Retour / the form's own button.
 fn step(st: &str, q: &HashMap<String, String>, title: &str, lead: Markup, body: Markup, foot: Markup) -> Markup {
     let i = index(st);
-    let back = if i > 2 { Some(format!("/setup?step={}", STEPS[i - 1].0)) } else { None };
+    let back = if i > FIRST_SIGNED_IN { Some(format!("/setup?step={}", STEPS[i - 1].0)) } else { None };
     html! {
         (kicker(i))
         h1 { (title) }
@@ -98,7 +104,7 @@ fn skip(st: &str, label: &str) -> Markup {
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Response {
     let th = theme(&jar);
     if st.setup_token.lock().unwrap().is_some() {
-        return frame(th, Some(0), first_steps(st.cfg.ip_mode)).into_response();
+        return frame(th, Some(0), first_steps(&st)).into_response();
     }
     let Some(me) = auth::current_profile(&st, &jar) else {
         let next: String = url::form_urlencoded::byte_serialize(format!("{}/setup", st.cfg.origin).as_bytes()).collect();
@@ -121,10 +127,14 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     frame(th, Some(index(which)), main).into_response()
 }
 
-// ---------- 1 and 2: installation code, owner passkey (nobody signed in yet) ----------
+// ---------- 1 to 3: installation code, domain name, owner account (nobody signed in yet) ----------
 
-/// `ip_mode`: no domain name, so a password instead of a passkey (WebAuthn needs a domain).
-fn first_steps(ip_mode: bool) -> Markup {
+/// Without a domain name (`ip_mode`): the choice to move to one, then a password instead of
+/// a passkey (WebAuthn needs a domain).
+fn first_steps(st: &AppState) -> Markup {
+    let ip_mode = st.cfg.ip_mode;
+    let ip = st.cfg.domain.as_str();
+    let lo = st.cfg.port_range.0;
     html! {
         section #s-code {
             (kicker(0))
@@ -144,8 +154,56 @@ fn first_steps(ip_mode: bool) -> Markup {
                 }
             }
         }
+        @if ip_mode {
+            section #s-choice hidden {
+                (kicker(1))
+                h1 { "As-tu un nom de domaine ?" }
+                p.wz-lead { "Avec un domaine, tu te connectes par passkey et chaque projet a son adresse, " code { "projet.ton-domaine" } ". Sans domaine, DevHub reste sur l'adresse IP du serveur. Tu pourras changer plus tard." }
+                div.wz-body {
+                    div.wz-choices {
+                        label.wz-choice { input type="radio" name="has" value="ip" checked; span.rd {} div { b { "Non, utiliser l'adresse IP" } span.muted { "Connexion par mot de passe, et chaque projet web sur son port : " span.mono { "https://" (ip) ":" (lo) } "…" } } }
+                        label.wz-choice { input type="radio" name="has" value="domain"; span.rd {} div { b { "Oui, j'ai un nom de domaine" } span.muted { "Passkeys, un sous-domaine par projet, certificat reconnu par tous les navigateurs." } } }
+                    }
+                    div #dom.wz-dom hidden {
+                        label.field {
+                            span.lbl { "Domaine du panel" }
+                            input.mono-input #dname placeholder="dev.mondomaine.fr" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200";
+                            span.help { "Un domaine ou un sous-domaine à toi. Les projets seront sur " span.mono #dsub { "*.dev.mondomaine.fr" } "." }
+                        }
+                        div.wz-card.wz-dns {
+                            p { "Chez ton fournisseur de domaine, crée ces deux enregistrements :" }
+                            table {
+                                thead { tr { th { "Type" } th { "Nom" } th { "Valeur" } } }
+                                tbody {
+                                    tr { td { "A" } td.mono #dn1 { "dev.mondomaine.fr" } td.mono { (ip) } }
+                                    tr { td { "A" } td.mono #dn2 { "*.dev.mondomaine.fr" } td.mono { (ip) } }
+                                }
+                            }
+                            p.muted { "Chez Cloudflare, laisse-les en « DNS only » (nuage gris). Ils sont pris en compte en quelques secondes à quelques minutes." }
+                        }
+                        div #dns.wz-card.wz-checks hidden {}
+                    }
+                }
+            }
+            section #s-move hidden {
+                (kicker(1))
+                h1 { "Passage sur ton domaine" }
+                p.wz-lead { "DevHub redémarre sur " b.mono #mv-host {} " et demande son certificat HTTPS. Cette page t'y emmène dès qu'il répond, avec ton code." }
+                div.wz-body {
+                    div.wz-card.wz-checks {
+                        div.wz-check { span.mk.ok { (PreEscaped(CHECK)) } span.t { "Domaine enregistré dans la configuration du serveur" } span.side {} }
+                        div.wz-check { span.mk.spin {} span.t #mv-state { "Redémarrage de DevHub et de Caddy, certificat HTTPS…" } span.side {} }
+                    }
+                    div.wz-hint #mv-slow hidden {
+                        b { "Ça prend du temps ?" }
+                        span { "Vérifie que les ports 80 et 443 du serveur sont ouverts, puis " a.link #mv-link href="#" { "ouvre l'adresse" } " toi-même. Pour revenir à l'adresse IP, sur le serveur :" }
+                        div.wz-cmd { code #mv-back {} button.btn.sm #mv-copy type="button" data-copy="" { "Copier" } }
+                    }
+                }
+            }
+        }
         section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) {
-            (kicker(1))
+            (kicker(2))
             h1 { "Crée ton compte propriétaire" }
             @if ip_mode {
                 p.wz-lead { "DevHub n'a pas de nom de domaine : la connexion se fait par mot de passe (les passkeys exigent un domaine). Choisis-en un long, gardé dans un gestionnaire de mots de passe." }
@@ -173,6 +231,7 @@ fn first_steps(ip_mode: bool) -> Markup {
             span #nob {}
             div.wz-foot-r {
                 button.btn.primary #go-code type="button" { "Continuer" }
+                button.btn.primary #go-choice type="button" hidden { "Continuer" }
                 button.btn.primary #go-pk type="button" hidden { (icon("key")) @if ip_mode { "Créer mon compte" } @else { "Créer mon passkey" } }
             }
         }
@@ -201,11 +260,18 @@ const FIRST_JS: &str = r#"
     });
     b.addEventListener('paste', e => { e.preventDefault(); fill(e.clipboardData.getData('text'), 0); (boxes.find(x => !x.value) || boxes[7]).focus(); if (code().length === 8) check(); });
   });
+  // Panes: 0 code, 1 domain name (only without one), 2 account, 3 moving to the domain.
+  const ipMode = !!$('#s-choice');
+  let pane = 0;
   const show = n => {
-    $('#s-code').hidden = n !== 0; $('#s-account').hidden = n !== 1;
-    $('#go-code').hidden = n !== 0; $('#go-pk').hidden = n !== 1; $('#back').hidden = n !== 1; $('#nob').hidden = n === 1;
-    document.querySelectorAll('.wz-st').forEach((el, i) => { el.classList.toggle('cur', i === n); el.classList.toggle('done', i < n); });
+    pane = n;
+    ['#s-code', '#s-choice', '#s-account', '#s-move'].forEach((s, i) => { const el = $(s); if (el) el.hidden = i !== n; });
+    $('#go-code').hidden = n !== 0; $('#go-choice').hidden = n !== 1; $('#go-pk').hidden = n !== 2;
+    $('#back').hidden = n !== 1 && n !== 2; $('#nob').hidden = !$('#back').hidden;
+    const cur = n === 3 ? 1 : n;
+    document.querySelectorAll('.wz-st').forEach((el, i) => { el.classList.toggle('cur', i === cur); el.classList.toggle('done', i < cur); });
     msg('');
+    if (n === 1) choice();
   };
   let busy = false;
   async function check() {
@@ -216,7 +282,7 @@ const FIRST_JS: &str = r#"
       const r = await fetch('/setup/code', { method: 'POST', body: new URLSearchParams({ code: code() }) });
       if (r.status === 409) { location.reload(); return; }
       if (!r.ok) { msg('Code incorrect : vérifie-le dans les journaux du serveur.'); boxes.forEach(x => x.classList.add('bad')); return; }
-      show(1); $('#oname').focus();
+      if (ipMode) { show(1); } else { show(2); $('#oname').focus(); }
     } catch { msg('Connexion perdue : réessaie.'); }
     finally { busy = false; }
   }
@@ -242,10 +308,78 @@ const FIRST_JS: &str = r#"
       location.href = '/setup?step=domain';
     } catch { btn.disabled = false; }
   }
+  // Domain name: the DNS records to create, their check, then the move.
+  const yes = () => !!$('input[name=has][value=domain]')?.checked;
+  const dom = () => $('#dname').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/\.$/, '');
+  let verified = '';
+  function choice() {
+    if (!ipMode) return;
+    $('#dom').hidden = !yes();
+    const d = dom() || 'dev.mondomaine.fr';
+    $('#dn1').textContent = d; $('#dn2').textContent = '*.' + d; $('#dsub').textContent = '*.' + d;
+    if (verified && verified !== dom()) { verified = ''; $('#dns').hidden = true; }
+    $('#go-choice').textContent = !yes() ? 'Continuer' : verified ? 'Passer sur ce domaine' : 'Vérifier le DNS';
+  }
+  async function post(path, d) {
+    const r = await fetch(path, { method: 'POST', body: new URLSearchParams({ code: code(), domain: d }) });
+    if (r.status === 409) { location.reload(); return null; }
+    if (r.status === 403) { show(0); msg('Code expiré : tape le nouveau code affiché dans les journaux.'); return null; }
+    if (!r.ok) { msg(await r.text()); return null; }
+    return r.json();
+  }
+  async function goChoice() {
+    if (!yes()) { show(2); $('#oname').focus(); return; }
+    const d = dom(), btn = $('#go-choice');
+    if (!d) { msg('Indique ton domaine.'); $('#dname').focus(); return; }
+    if (btn.disabled) return;
+    btn.disabled = true; msg('');
+    try {
+      if (verified === d) {
+        const j = await post('/setup/domain-apply', d);
+        if (j) move(j);
+        return;
+      }
+      const j = await post('/setup/domain-check', d);
+      if (!j) return;
+      $('#dname').value = j.domain;
+      $('#dns').innerHTML = j.html; $('#dns').hidden = false;
+      verified = j.ok ? j.domain : '';
+      choice();
+    } catch { msg('Connexion perdue : réessaie.'); }
+    finally { btn.disabled = false; }
+  }
+  function move(j) {
+    show(3);
+    const start = Date.now(), to = j.url + '/setup#code=' + code();
+    $('#mv-host').textContent = j.url.replace('https://', '');
+    $('#mv-link').href = to;
+    $('#mv-back').textContent = j.back; $('#mv-copy').dataset.copy = j.back;
+    const tick = async () => {
+      try {
+        // Answers once Caddy has a valid certificate for the domain: before, TLS fails.
+        await fetch(j.url + '/login', { mode: 'no-cors', cache: 'no-store' });
+        $('#mv-state').textContent = 'DevHub répond sur ' + j.url + ' : on y va…';
+        setTimeout(() => { location.href = to; }, 1200);
+        return;
+      } catch {}
+      if (Date.now() - start > 120000) $('#mv-slow').hidden = false;
+      setTimeout(tick, 3000);
+    };
+    setTimeout(tick, 5000);
+  }
+  if (ipMode) {
+    document.querySelectorAll('input[name=has]').forEach(r => r.addEventListener('change', () => { choice(); if (yes()) $('#dname').focus(); }));
+    $('#dname').addEventListener('input', choice);
+    $('#dname').addEventListener('keydown', e => { if (e.key === 'Enter') goChoice(); });
+    $('#go-choice').onclick = goChoice;
+  }
   $('#go-code').onclick = check;
   $('#go-pk').onclick = create;
-  $('#back').onclick = () => { show(0); boxes[7].focus(); };
+  $('#back').onclick = () => { if (pane === 2 && ipMode) { show(1); } else { show(0); boxes[7].focus(); } };
   document.querySelectorAll('#s-account input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') create(); }));
+  // From the move to a domain: the code comes along in the address, never sent to a server.
+  const carried = new URLSearchParams(location.hash.slice(1)).get('code');
+  if (carried) { history.replaceState(null, '', location.pathname + location.search); fill(carried, 0); check(); }
 })();
 "#;
 
@@ -641,19 +775,100 @@ async fn done(st: &AppState, me: &db::Profile, q: &HashMap<String, String>) -> M
     }
 }
 
+// ---------- 2: moving from the IP to a domain name (before sign-in) ----------
+
+/// "Dev.Example.com/" → "dev.example.com": a host name with at least two labels, not an IP.
+fn clean_domain(raw: &str) -> Result<String, String> {
+    let d = raw.trim().to_ascii_lowercase();
+    let d = d.strip_prefix("https://").or_else(|| d.strip_prefix("http://")).unwrap_or(&d);
+    let d = d.split(['/', '?', '#']).next().unwrap_or("").trim_end_matches('.');
+    let labels: Vec<&str> = d.split('.').collect();
+    let label_ok = |l: &&str| {
+        !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    if d.is_empty() {
+        return Err("indique ton domaine".into());
+    }
+    if labels.len() < 2 || d.len() > 253 || !labels.iter().all(label_ok) || d.parse::<IpAddr>().is_ok() || labels.last().is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit())) {
+        return Err(format!("« {d} » n'est pas un nom de domaine valide (exemple : dev.mondomaine.fr)"));
+    }
+    if d == "example.com" || d.ends_with(".example.com") {
+        return Err("example.com est un exemple : mets ton propre domaine".into());
+    }
+    Ok(d.to_string())
+}
+
+/// The two records the guide asks for, checked against this server's IP.
+async fn dns_checks(server: IpAddr, domain: &str) -> (bool, Markup) {
+    let probe = format!("devhub-setup-check.{domain}");
+    let (main, wild) = tokio::join!(resolve(domain), resolve(&probe));
+    let main_ok = main.contains(&server);
+    let html = html! {
+        @if main_ok {
+            (check_row(Check::Ok, html! { b.mono { (domain) } " pointe vers ce serveur" }, &ips_text(&main)))
+        } @else if main.is_empty() {
+            (check_row(Check::Bad, html! { b.mono { (domain) } " ne se résout pas encore : crée l'enregistrement A vers " b.mono { (server) } ", puis revérifie" }, ""))
+        } @else {
+            (check_row(Check::Bad, html! { b.mono { (domain) } " pointe vers un autre serveur que " b.mono { (server) } " (proxy Cloudflare ? mets-le en « DNS only »)" }, &ips_text(&main)))
+        }
+        @if wild.contains(&server) {
+            (check_row(Check::Ok, html! { b.mono { "*." (domain) } " pointe vers ce serveur" }, "joker"))
+        } @else if wild.is_empty() {
+            (check_row(Check::Warn, html! { b.mono { "*." (domain) } " absent : les projets n'auront pas d'adresse tant qu'il manque (tu peux l'ajouter après)" }, ""))
+        } @else {
+            (check_row(Check::Warn, html! { b.mono { "*." (domain) } " pointe vers un autre serveur : les projets n'y seront pas joignables" }, &ips_text(&wild)))
+        }
+        @if main_ok {
+            (check_row(Check::Ok, html! { "Prêt : DevHub va redémarrer sur ce domaine et obtenir son certificat HTTPS" }, ""))
+        }
+    };
+    (main_ok, html)
+}
+
+/// `apply` false: the DNS check alone. True: check again, then restart DevHub on the domain.
+async fn move_to_domain(st: &AppState, apply: bool, raw: &str) -> Response {
+    if !st.cfg.ip_mode {
+        return (StatusCode::CONFLICT, "DevHub a déjà un nom de domaine").into_response();
+    }
+    let domain = match clean_domain(raw) {
+        Ok(d) => d,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let Ok(server) = st.cfg.domain.parse::<IpAddr>() else {
+        return (StatusCode::BAD_REQUEST, "adresse IP du serveur inconnue").into_response();
+    };
+    let (ok, html) = dns_checks(server, &domain).await;
+    if !apply {
+        return Json(serde_json::json!({ "ok": ok, "domain": domain, "html": html.into_string() })).into_response();
+    }
+    if !ok {
+        return (StatusCode::BAD_REQUEST, format!("{domain} ne pointe pas encore vers ce serveur : revérifie le DNS")).into_response();
+    }
+    match updater::switch_domain(st, &domain).await {
+        Ok(dir) => {
+            db::audit(&st.db.lock().unwrap(), "installation", "devhub.domain", &domain);
+            let back = format!("docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v {dir}:{dir} ghcr.io/tweastly/devhub:install --dir {dir} --ip");
+            Json(serde_json::json!({ "url": format!("https://{domain}"), "back": back })).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("passage sur le domaine impossible : {e}")).into_response(),
+    }
+}
+
 // ---------- Saving each step ----------
 
 pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<String>, Form(f): Form<HashMap<String, String>>) -> Response {
-    // The code is checked before anyone exists to sign in.
-    if which == "code" {
+    // The code is checked before anyone exists to sign in, and guards the domain step.
+    if matches!(which.as_str(), "code" | "domain-check" | "domain-apply") {
         if st.setup_token.lock().unwrap().is_none() {
             return (StatusCode::CONFLICT, "déjà installé").into_response();
         }
-        return if auth::setup_code_ok(&st, f.get("code").map(String::as_str).unwrap_or("")) {
-            StatusCode::NO_CONTENT.into_response()
-        } else {
-            (StatusCode::FORBIDDEN, "code incorrect").into_response()
-        };
+        if !auth::setup_code_ok(&st, f.get("code").map(String::as_str).unwrap_or("")) {
+            return (StatusCode::FORBIDDEN, "code incorrect").into_response();
+        }
+        if which == "code" {
+            return StatusCode::NO_CONTENT.into_response();
+        }
+        return move_to_domain(&st, which == "domain-apply", f.get("domain").map(String::as_str).unwrap_or("")).await;
     }
     let who = match auth::require_admin(&st, &jar) {
         Ok(p) => p,
@@ -721,6 +936,20 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
                 back = crate::with_param(&crate::with_param(&back, "name", &get("name")), "template", &get("template"));
             }
             Redirect::to(&back).into_response()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_domain;
+
+    #[test]
+    fn domain_names() {
+        assert_eq!(clean_domain(" https://Dev.MonDomaine.fr/setup ").unwrap(), "dev.mondomaine.fr");
+        assert_eq!(clean_domain("mondomaine.fr.").unwrap(), "mondomaine.fr");
+        for bad in ["", "localhost", "203.0.113.5", "a..b", "-a.fr", "a_b.fr", "dev.example.com", "x.123", "a b.fr", "é.fr"] {
+            assert!(clean_domain(bad).is_err(), "{bad}");
         }
     }
 }
