@@ -8,7 +8,7 @@
 
 ## Avec ou sans nom de domaine
 - Avec un domaine : passkeys, un sous-domaine par projet (Caddy en bridge, `Caddyfile`).
-- Sans domaine, mode « IP seule » (`DEVHUB_DOMAIN` = une IP, `cfg.ip_mode`) : connexion par mot de passe (les passkeys refusent une IP), un port par projet web (`https://IP:20000`…), Caddy sur le réseau du serveur (`docker-compose.ip.yml`, `caddy/Caddyfile.ip`). Ou `dev.<IP>.sslip.io`, qui se comporte comme un vrai domaine.
+- Sans domaine, mode « IP seule » (`DEVHUB_DOMAIN` = une IP, `cfg.ip_mode`) : connexion par mot de passe (les passkeys refusent une IP), un port par projet web (`https://IP:20000`…), Caddy sur le réseau du serveur (`docker-compose.ip.yml`, `caddy/Caddyfile.ip`).
 
 ## Accès au VPS
 - DevHub a la main sur le VPS depuis son conteneur, pour piloter les projets (socket Docker) et lire les statistiques du serveur (CPU, mémoire, disque, durée de fonctionnement…).

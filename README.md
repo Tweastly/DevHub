@@ -88,18 +88,17 @@ Les images de DevHub (`ghcr.io/tweastly/devhub:latest`), de son Caddy (`:caddy`)
 
 ### Sans nom de domaine
 
-Le script demande « As-tu un nom de domaine ? ». Sans domaine, deux choix :
+Le script demande « As-tu un nom de domaine ? » :
 
-| | Domaine automatique (`--sslip`) | IP seule (`--ip`) |
+| | Avec un domaine | Sans domaine (`--ip`) |
 |---|---|---|
-| Adresse du panel | `https://dev.203-0-113-7.sslip.io` | `https://203.0.113.7` |
+| Adresse du panel | `https://dev.example.com` | `https://203.0.113.7` |
 | Connexion | passkey | mot de passe (12 caractères min.) |
-| Projets web | `https://projet.dev.203-0-113-7.sslip.io` | `https://203.0.113.7:20000`, `:20001`… (un port par projet) |
-| Certificat | Let's Encrypt (ou ZeroSSL) par projet | Let's Encrypt pour l'IP (6 jours, renouvelé seul), sinon celui de Caddy avec un avertissement du navigateur |
+| Projets web | `https://projet.dev.example.com` | `https://203.0.113.7:20000`, `:20001`… (un port par projet) |
+| Certificat | Let's Encrypt par projet, ou joker | Let's Encrypt pour l'IP (6 jours, renouvelé seul), sinon celui de Caddy avec un avertissement du navigateur |
 | Ports à ouvrir | 80, 443 | 80, 443 et 20000-20099 |
 
-- **sslip.io** est un service gratuit qui transforme l'IP en nom de domaine : passkeys et sous-domaines marchent comme avec un vrai domaine.
-- **IP seule** : les passkeys sont impossibles sur une adresse IP (règle de WebAuthn), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. Caddy tourne sur le réseau du serveur (`docker-compose.ip.yml`, activé par `COMPOSE_FILE` dans le `.env`).
+- Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. Caddy tourne sur le réseau du serveur (`docker-compose.ip.yml`, activé par `COMPOSE_FILE` dans le `.env`).
 - **Passer plus tard à un domaine** : relance l'installation avec `--domain dev.example.com`. Le `.env` est mis à jour, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey.
 
 ### Dépôt privé

@@ -14,7 +14,6 @@
 #
 # Options (or the matching environment variables, for unattended installs):
 #   --domain dev.example.com     DEVHUB_DOMAIN       panel domain (projects: *.dev.example.com)
-#   --sslip                                          no domain: dev.<IP>.sslip.io, automatic
 #   --ip                                             no domain: the server's IP, sign-in by
 #                                                    password, one port per web project
 #   --dir /opt/devhub            DEVHUB_DIR          installation folder
@@ -29,7 +28,7 @@ CADDY_IMAGE="${DEVHUB_CADDY_IMAGE:-ghcr.io/tweastly/devhub:caddy}"
 DIR="${DEVHUB_DIR:-/opt/devhub}"
 BRANCH="${DEVHUB_BRANCH:-main}"
 DOMAIN="${DEVHUB_DOMAIN:-}"
-# domain (a name), ip (no domain: the server's address) or sslip (dev.<IP>.sslip.io).
+# domain (a name: passkeys) or ip (no domain: the server's address, password).
 MODE="${DEVHUB_MODE:-}"
 # Without a domain, the web projects' ports (one per project, opened on the server).
 IP_RANGE="${DEVHUB_PORT_RANGE:-20000-20099}"
@@ -61,7 +60,6 @@ while [ $# -gt 0 ]; do
     --domain) DOMAIN="${2:-}"; shift 2 ;;
     --domain=*) DOMAIN="${1#*=}"; shift ;;
     --ip) MODE=ip; shift ;;
-    --sslip) MODE=sslip; shift ;;
     --dir) DIR="${2:-}"; shift 2 ;;
     --dir=*) DIR="${1#*=}"; shift ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
@@ -162,7 +160,6 @@ fi
 
 # ---------- Domain ----------
 is_ip() { printf '%s' "$1" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
-dashed() { printf '%s' "$1" | tr . -; }
 PUBLIC_IP="$(fetch https://api.ipify.org 2>/dev/null || fetch https://ifconfig.me 2>/dev/null || true)"
 is_ip "$PUBLIC_IP" || PUBLIC_IP=""
 need_ip() {
@@ -174,24 +171,17 @@ need_ip() {
 # An existing installation without a domain keeps its mode.
 if [ -z "$MODE" ] && is_ip "$DOMAIN"; then MODE=ip; fi
 if [ -z "$DOMAIN" ] && [ -z "$MODE" ]; then
-  [ "$TTY" -eq 1 ] || die "indique le domaine (--domain dev.example.com), ou --sslip / --ip sans domaine"
+  [ "$TTY" -eq 1 ] || die "indique le domaine (--domain dev.example.com), ou --ip sans domaine"
+  # A domain: passkeys and one subdomain per project. None: the IP, a password, one port per project.
   ask HAS "As-tu un nom de domaine pour DevHub ? [o/N]"
   case "$HAS" in
     o|O|oui|Oui|y|Y|yes) MODE=domain ;;
-    *)
-      need_ip
-      printf '  %sSans nom de domaine, deux possibilités :%s\n' "$B" "$N"
-      printf '    1. Domaine automatique  %sdev.%s.sslip.io%s  passkeys, un sous-domaine par projet (recommandé)\n' "$B" "$(dashed "$PUBLIC_IP")" "$N"
-      printf '    2. IP seule             %shttps://%s%s  mot de passe, un port par projet\n' "$B" "$PUBLIC_IP" "$N"
-      ask CHOICE "Ton choix" "1"
-      case "$CHOICE" in 2) MODE=ip ;; *) MODE=sslip ;; esac
-      ;;
+    *) MODE=ip ;;
   esac
   CHOSEN=1
 fi
 case "$MODE" in
   ip) need_ip; is_ip "$DOMAIN" || DOMAIN="$PUBLIC_IP" ;;
-  sslip) need_ip; DOMAIN="dev.$(dashed "$PUBLIC_IP").sslip.io"; MODE=domain ;;
   *) MODE=domain ;;
 esac
 while [ "$MODE" = domain ]; do
@@ -306,7 +296,7 @@ elif [ -f "$DIR/.env" ]; then
   ok "Configuration existante gardée ($DIR/.env)"
 else
   # The Cloudflare wildcard certificate needs a domain in a Cloudflare zone.
-  if [ "$MODE" = domain ] && [ -z "$CF_TOKEN" ] && [ "$TTY" -eq 1 ] && ! printf '%s' "$DOMAIN" | grep -q '\.sslip\.io$'; then
+  if [ "$MODE" = domain ] && [ -z "$CF_TOKEN" ] && [ "$TTY" -eq 1 ]; then
     printf '  %sCertificat joker *.%s : un jeton Cloudflare « Zone › DNS › Modifier », sinon un certificat par projet.%s\n' "$D" "$DOMAIN" "$N"
     ask CF_TOKEN "Jeton Cloudflare (Entrée pour passer)" "" secret
   fi
