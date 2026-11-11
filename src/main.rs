@@ -159,7 +159,21 @@ async fn main() -> anyhow::Result<()> {
             return deploy::run(a).await;
         }
         Some("install") => Some(&argv[1..]),
-        _ if install::bare_container() => Some(&argv[..]),
+        _ if install::bare_container() => {
+            // The long command (`--name devhub`, server's network, volumes) is the panel
+            // itself; any other bare run of the image installs it.
+            let me = match bollard::Docker::connect_with_local_defaults() {
+                Ok(d) => install::own_container(&d).await,
+                Err(_) => None,
+            };
+            match me {
+                Some((name, _, network)) if name == "devhub" && argv.is_empty() => {
+                    install::panel_defaults(&network).await;
+                    None
+                }
+                _ => Some(&argv[..]),
+            }
+        }
         _ => None,
     };
     if let Some(args) = installing {

@@ -76,6 +76,20 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 Les options s'ajoutent à la fin de la commande, à l'installation comme plus tard pour changer un réglage : `--domain dev.example.com` démarre directement sur le domaine, `--ip` revient à l'adresse IP, `--cloudflare-token` active le certificat joker, `--env CLÉ=VALEUR` règle n'importe quelle variable de la table plus bas (`--help` les liste). Exemple : `docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub --domain dev.example.com`.
 
+<details><summary>Sans installateur : une seule commande qui crée directement DevHub</summary>
+
+La commande courte lance un installateur temporaire qui crée le conteneur `devhub` puis disparaît (`--rm`). Celle-ci crée directement le conteneur `devhub`, avec tout ce qu'il lui faut :
+
+```bash
+docker run -d --name devhub --restart unless-stopped --network host --init \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v devhub-data:/data -v devhub-caddy:/caddy \
+  ghcr.io/tweastly/devhub
+```
+
+Nommée `devhub`, l'image se reconnaît comme le panel : réseau du serveur, Caddy, DevHub joignable seulement par Caddy, et l'adresse IP publique du serveur trouvée toute seule (sinon `-e DEVHUB_PUBLIC_IP=…`, ou `-e DEVHUB_DOMAIN=dev.example.com` pour un domaine). Le code d'installation : `docker logs devhub | grep CODE`. Les mises à jour se font ensuite depuis le panel, comme avec la commande courte.
+</details>
+
 **Installé avant, avec docker compose dans `/opt/devhub` ?** La mise à jour suivante fait passer DevHub dans les volumes Docker tout seul (sa base et ses certificats sont copiés, ses réglages repris du conteneur), ou la page Mise à jour propose « Passer dans Docker ». Relancer l'installateur fait de même. Le dossier reste en place : supprime-le une fois que tout va bien.
 
 **Sauvegarde** de la base : `docker run --rm -v devhub-data:/d -v "$PWD":/b debian tar czf /b/devhub-data.tgz -C /d .`

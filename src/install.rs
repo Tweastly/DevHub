@@ -33,13 +33,64 @@ Options (ou les variables d'environnement, avec -e) :
                                DEVHUB_PUBLIC_IP      IP publique du serveur, si elle n'est pas trouvée
 ";
 
-/// Started with nothing to do as a panel: in a container, without the settings an installed
-/// DevHub has (docker run of the bare image). That run installs DevHub.
+/// In a container without the settings an installed DevHub has (a docker run of the bare
+/// image): either the long command that makes the panel itself (named `devhub`), or the
+/// short one, which installs it.
 pub fn bare_container() -> bool {
     std::path::Path::new("/.dockerenv").exists()
         && std::env::var("DEVHUB_SELF_CONTAINER").map_or(true, |v| v.is_empty())
         && std::env::var("DEVHUB_CADDY").map_or(true, |v| v.is_empty())
         && !crate::docker::nested()
+}
+
+/// This container's id, from the files Docker mounts into it (/etc/hostname comes from
+/// /var/lib/docker/containers/<id>/, also on the server's network where the host name is
+/// the server's).
+fn own_id() -> Option<String> {
+    let info = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    info.split("/containers/").skip(1).find_map(|rest| {
+        let id: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        (id.len() == 64).then_some(id)
+    })
+}
+
+/// This container (name, image, network mode), when Docker can be reached.
+pub async fn own_container(d: &Docker) -> Option<(String, String, String)> {
+    let key = match own_id() {
+        Some(id) => id,
+        None => std::fs::read_to_string("/etc/hostname").ok()?.trim().to_string(),
+    };
+    let c = d.inspect_container(&key, None::<InspectContainerOptions>).await.ok()?;
+    let network = c.host_config.as_ref().and_then(|h| h.network_mode.clone()).unwrap_or_default();
+    Some((c.name?.trim_start_matches('/').to_string(), c.config?.image?, network))
+}
+
+/// The long command: the bare image run as `devhub`, on the server's network, with its
+/// volumes. It is the panel itself: the settings an installer would give it are taken by
+/// default, the address is the server's public IP unless DEVHUB_DOMAIN says otherwise.
+pub async fn panel_defaults(network: &str) {
+    let unset = |k: &str| std::env::var(k).map_or(true, |v| v.is_empty());
+    for (k, v) in [("DEVHUB_SELF_CONTAINER", NAME), ("DEVHUB_CADDY", "on"), ("DEVHUB_BIND_IP", "127.0.0.1")] {
+        if unset(k) {
+            std::env::set_var(k, v);
+        }
+    }
+    // The image's default listens everywhere: on the server's network, only Caddy may.
+    if std::env::var("DEVHUB_LISTEN").map_or(true, |l| l.is_empty() || l.starts_with("0.0.0.0")) {
+        std::env::set_var("DEVHUB_LISTEN", "127.0.0.1:8080");
+    }
+    if network != "host" {
+        tracing::warn!("le conteneur devhub n'est pas sur le réseau du serveur (--network host) : Caddy ne sera pas joignable depuis Internet");
+    }
+    if unset("DEVHUB_DOMAIN") {
+        match public_ip().await {
+            Some(ip) => std::env::set_var("DEVHUB_DOMAIN", ip.to_string()),
+            None => {
+                eprintln!("  ✗ adresse IP publique introuvable : ajoute -e DEVHUB_PUBLIC_IP=… (ou -e DEVHUB_DOMAIN=…) à la commande docker run");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 struct Out {
@@ -149,9 +200,7 @@ async fn resolve(host: &str) -> Vec<IpAddr> {
 
 /// This installer's own container (name and image), to know what to install.
 async fn me(d: &Docker) -> Option<(String, String)> {
-    let host = std::fs::read_to_string("/etc/hostname").ok()?;
-    let c = d.inspect_container(host.trim(), None::<InspectContainerOptions>).await.ok()?;
-    Some((c.name?.trim_start_matches('/').to_string(), c.config?.image?))
+    own_container(d).await.map(|(n, i, _)| (n, i))
 }
 
 /// The installation code in DevHub's log, once it has started (None: it already has an owner).
@@ -226,7 +275,7 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
         set.push(("DEVHUB_DOMAIN".into(), dom.clone()));
         unset.push("DEVHUB_PORT_RANGE".into());
         dom
-    } else if o.ip || existing.is_none() {
+    } else if o.ip || existing.is_none() || old_domain.is_none() {
         let ip = ip.ok_or_else(|| anyhow::anyhow!("adresse IP publique introuvable : indique-la avec -e DEVHUB_PUBLIC_IP=…, ou un domaine avec --domain"))?;
         set.push(("DEVHUB_DOMAIN".into(), ip.to_string()));
         if existing.is_none() {

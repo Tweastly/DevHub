@@ -482,6 +482,11 @@ async fn start_helper(st: &AppState, name: &str, image: &str, settings: Vec<Stri
         .unwrap_or_else(|| "/var/run/docker.sock".into());
     let _ = d.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
     let mut cmd = vec!["devhub".to_string(), "deploy".into(), "--container".into(), me, "--image".into(), image.to_string()];
+    // Started by the long docker run command, the container may not carry its address (the
+    // public IP found at startup): the new one gets it written down.
+    if !settings.iter().any(|s| s.starts_with("DEVHUB_DOMAIN=")) {
+        cmd.extend(["--env".to_string(), format!("DEVHUB_DOMAIN={}", st.cfg.domain), "--env".to_string(), format!("DEVHUB_ORIGIN={}", st.cfg.origin)]);
+    }
     cmd.extend(settings);
     let cfg = Config {
         image: Some(image.to_string()),
