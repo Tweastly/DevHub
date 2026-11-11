@@ -68,6 +68,9 @@ pub struct Limits {
     /// DevHub's address ("https://dev.example.com") and port range, to set up a DevHub run as a project.
     pub origin: String,
     pub port_range: (u16, u16),
+    /// Web ports also published on the server (bind_ip). Off without a domain: Caddy listens
+    /// on those port numbers itself and DevHub reaches projects by container name.
+    pub publish_web: bool,
 }
 
 const SOCKET: &str = "/var/run/docker.sock";
@@ -257,6 +260,9 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
         let key = format!("{}/{}", m.container, m.proto());
         exposed.insert(key.clone(), HashMap::new());
         // Public TCP/UDP ports (players) listen on every interface; HTTP ones stay behind the proxy.
+        if !m.is_public() && !lim.publish_web {
+            continue;
+        }
         let ip = if m.is_public() { "0.0.0.0".to_string() } else { lim.bind_ip.clone() };
         bindings.insert(key, Some(vec![PortBinding { host_ip: Some(ip), host_port: Some(m.host.to_string()) }]));
     }

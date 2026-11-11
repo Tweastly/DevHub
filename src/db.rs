@@ -133,6 +133,9 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE projects ADD COLUMN autostart INTEGER NOT NULL DEFAULT 1", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN auto_domain INTEGER NOT NULL DEFAULT 1", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN docker_access INTEGER NOT NULL DEFAULT 0", []);
+    // Without a domain ("IP seule"), sign-in is by password: the session then names the profile.
+    c.execute_batch("CREATE TABLE IF NOT EXISTS passwords(profile_id INTEGER PRIMARY KEY, hash TEXT NOT NULL, updated INTEGER NOT NULL)")?;
+    let _ = c.execute("ALTER TABLE sessions ADD COLUMN profile_id INTEGER", []);
     c.execute_batch("CREATE TABLE IF NOT EXISTS project_logos(name TEXT PRIMARY KEY, data BLOB NOT NULL, type TEXT NOT NULL, ver INTEGER NOT NULL)")?;
     let _ = c.execute("ALTER TABLE images ADD COLUMN volumes TEXT NOT NULL DEFAULT ''", []);
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
@@ -301,11 +304,12 @@ pub fn delete_invite(c: &Connection, token: &str) {
 
 /// Profile behind a session. Sessions opened before profiles existed (no passkey recorded) are the owner's.
 pub fn session_profile(c: &Connection, token: &str) -> Option<Profile> {
-    // A session belongs to the passkey that opened it: none (or a deleted one) means no session,
-    // never the owner by default.
+    // A session belongs to the passkey that opened it, or for a password sign-in to its
+    // profile. A deleted passkey (or neither) means no session, never the owner by default.
     let pid: i64 = c
         .query_row(
-            "SELECT p.profile_id FROM sessions s JOIN passkeys p ON p.id = s.passkey_id WHERE s.token=?1 AND s.expires > ?2",
+            "SELECT COALESCE(p.profile_id, s.profile_id) FROM sessions s LEFT JOIN passkeys p ON p.id = s.passkey_id
+             WHERE s.token=?1 AND s.expires > ?2 AND (p.id IS NOT NULL OR (s.passkey_id IS NULL AND s.profile_id IS NOT NULL))",
             params![token, now()],
             |r| r.get(0),
         )
@@ -504,12 +508,39 @@ pub fn delete_passkey(c: &Connection, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn create_session(c: &Connection, token: &str, ttl: i64, passkey_id: Option<i64>) -> anyhow::Result<()> {
+/// A session opened with a passkey (`passkey_id`) or, without a domain, a password (`profile_id`).
+pub fn create_session(c: &Connection, token: &str, ttl: i64, passkey_id: Option<i64>, profile_id: Option<i64>) -> anyhow::Result<()> {
     c.execute("DELETE FROM sessions WHERE expires < ?1", [now()])?;
     c.execute(
-        "INSERT INTO sessions(token, expires, passkey_id) VALUES (?1,?2,?3)",
-        params![token, now() + ttl, passkey_id],
+        "INSERT INTO sessions(token, expires, passkey_id, profile_id) VALUES (?1,?2,?3,?4)",
+        params![token, now() + ttl, passkey_id, profile_id],
     )?;
+    Ok(())
+}
+
+pub fn set_password(c: &Connection, profile_id: i64, hash: &str) -> anyhow::Result<()> {
+    c.execute(
+        "INSERT INTO passwords(profile_id, hash, updated) VALUES (?1,?2,?3)
+         ON CONFLICT(profile_id) DO UPDATE SET hash=excluded.hash, updated=excluded.updated",
+        params![profile_id, hash, now()],
+    )?;
+    Ok(())
+}
+
+/// (profile, hash) of every profile that has a password.
+pub fn passwords(c: &Connection) -> Vec<(i64, String)> {
+    let Ok(mut s) = c.prepare("SELECT profile_id, hash FROM passwords ORDER BY profile_id") else { return Vec::new() };
+    s.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()).unwrap_or_default()
+}
+
+/// When updated (None = no password).
+pub fn password_updated(c: &Connection, profile_id: i64) -> Option<i64> {
+    c.query_row("SELECT updated FROM passwords WHERE profile_id=?1", [profile_id], |r| r.get(0)).ok()
+}
+
+/// A new password signs out the profile's other password sessions.
+pub fn drop_password_sessions(c: &Connection, profile_id: i64, keep: &str) -> anyhow::Result<()> {
+    c.execute("DELETE FROM sessions WHERE passkey_id IS NULL AND profile_id=?1 AND token != ?2", params![profile_id, keep])?;
     Ok(())
 }
 

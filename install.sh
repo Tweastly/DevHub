@@ -14,6 +14,9 @@
 #
 # Options (or the matching environment variables, for unattended installs):
 #   --domain dev.example.com     DEVHUB_DOMAIN       panel domain (projects: *.dev.example.com)
+#   --sslip                                          no domain: dev.<IP>.sslip.io, automatic
+#   --ip                                             no domain: the server's IP, sign-in by
+#                                                    password, one port per web project
 #   --dir /opt/devhub            DEVHUB_DIR          installation folder
 #   --branch main                DEVHUB_BRANCH       branch to follow
 #   --cloudflare-token TOKEN     CLOUDFLARE_API_TOKEN wildcard certificate through Cloudflare's DNS
@@ -26,6 +29,10 @@ CADDY_IMAGE="${DEVHUB_CADDY_IMAGE:-ghcr.io/tweastly/devhub:caddy}"
 DIR="${DEVHUB_DIR:-/opt/devhub}"
 BRANCH="${DEVHUB_BRANCH:-main}"
 DOMAIN="${DEVHUB_DOMAIN:-}"
+# domain (a name), ip (no domain: the server's address) or sslip (dev.<IP>.sslip.io).
+MODE="${DEVHUB_MODE:-}"
+# Without a domain, the web projects' ports (one per project, opened on the server).
+IP_RANGE="${DEVHUB_PORT_RANGE:-20000-20099}"
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 YES=0
 # Run from the installer image: the server's Docker comes through its socket and DIR is
@@ -45,7 +52,7 @@ info() { printf '  %s…%s %s\n' "$D" "$N" "$*"; }
 die() { printf '  %s✗%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,19p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
+  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" 2>/dev/null || true
   echo "Voir https://github.com/Tweastly/DevHub"
 }
 
@@ -53,6 +60,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN="${2:-}"; shift 2 ;;
     --domain=*) DOMAIN="${1#*=}"; shift ;;
+    --ip) MODE=ip; shift ;;
+    --sslip) MODE=sslip; shift ;;
     --dir) DIR="${2:-}"; shift 2 ;;
     --dir=*) DIR="${1#*=}"; shift ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
@@ -64,6 +73,10 @@ while [ $# -gt 0 ]; do
     *) die "option inconnue : $1 (voir --help)" ;;
   esac
 done
+
+# A domain or mode given to this run rewrites those lines of an existing .env.
+CHOSEN=0
+[ -z "$DOMAIN$MODE" ] || CHOSEN=1
 
 # Questions go through the terminal: with `curl … | sh`, the script itself is on stdin.
 TTY=0
@@ -148,7 +161,40 @@ if [ -f "$DIR/docker-compose.yml" ]; then
 fi
 
 # ---------- Domain ----------
-while :; do
+is_ip() { printf '%s' "$1" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
+dashed() { printf '%s' "$1" | tr . -; }
+PUBLIC_IP="$(fetch https://api.ipify.org 2>/dev/null || fetch https://ifconfig.me 2>/dev/null || true)"
+is_ip "$PUBLIC_IP" || PUBLIC_IP=""
+need_ip() {
+  [ -n "$PUBLIC_IP" ] && return 0
+  [ "$TTY" -eq 1 ] || die "adresse IP publique introuvable : indique un domaine avec --domain"
+  ask PUBLIC_IP "Adresse IP publique du serveur"
+  is_ip "$PUBLIC_IP" || die "adresse IP invalide : $PUBLIC_IP"
+}
+# An existing installation without a domain keeps its mode.
+if [ -z "$MODE" ] && is_ip "$DOMAIN"; then MODE=ip; fi
+if [ -z "$DOMAIN" ] && [ -z "$MODE" ]; then
+  [ "$TTY" -eq 1 ] || die "indique le domaine (--domain dev.example.com), ou --sslip / --ip sans domaine"
+  ask HAS "As-tu un nom de domaine pour DevHub ? [o/N]"
+  case "$HAS" in
+    o|O|oui|Oui|y|Y|yes) MODE=domain ;;
+    *)
+      need_ip
+      printf '  %sSans nom de domaine, deux possibilités :%s\n' "$B" "$N"
+      printf '    1. Domaine automatique  %sdev.%s.sslip.io%s  passkeys, un sous-domaine par projet (recommandé)\n' "$B" "$(dashed "$PUBLIC_IP")" "$N"
+      printf '    2. IP seule             %shttps://%s%s  mot de passe, un port par projet\n' "$B" "$PUBLIC_IP" "$N"
+      ask CHOICE "Ton choix" "1"
+      case "$CHOICE" in 2) MODE=ip ;; *) MODE=sslip ;; esac
+      ;;
+  esac
+  CHOSEN=1
+fi
+case "$MODE" in
+  ip) need_ip; is_ip "$DOMAIN" || DOMAIN="$PUBLIC_IP" ;;
+  sslip) need_ip; DOMAIN="dev.$(dashed "$PUBLIC_IP").sslip.io"; MODE=domain ;;
+  *) MODE=domain ;;
+esac
+while [ "$MODE" = domain ]; do
   if [ -z "$DOMAIN" ]; then
     [ "$TTY" -eq 1 ] || die "indique le domaine : … | sh -s -- --domain dev.example.com"
     ask DOMAIN "Domaine du panel, ex. dev.mondomaine.fr (les projets seront sur *.ce-domaine)"
@@ -166,11 +212,15 @@ while :; do
   [ "$TTY" -eq 1 ] || exit 1
   DOMAIN=""
 done
-ok "Domaine du panel : $B$DOMAIN$N"
+if [ "$MODE" = ip ]; then
+  ok "Sans nom de domaine : panel sur ${B}https://$DOMAIN$N, connexion par mot de passe"
+  ok "Projets web sur les ports ${B}$IP_RANGE$N (un par projet)"
+else
+  ok "Domaine du panel : $B$DOMAIN$N"
+fi
 
 # ---------- DNS ----------
 resolve() { getent ahostsv4 "$1" 2>/dev/null | awk 'NR == 1 { print $1 }' || true; }
-PUBLIC_IP="$(fetch https://api.ipify.org 2>/dev/null || fetch https://ifconfig.me 2>/dev/null || true)"
 IP_HINT="$PUBLIC_IP"
 [ -n "$IP_HINT" ] || IP_HINT="l'IP du serveur"
 check_dns() { # check_dns name label
@@ -186,8 +236,10 @@ check_dns() { # check_dns name label
   fi
 }
 DNS_OK=1
-check_dns "$DOMAIN" "$DOMAIN"
-check_dns "devhub-install-check.$DOMAIN" "*.$DOMAIN"
+if [ "$MODE" = domain ]; then
+  check_dns "$DOMAIN" "$DOMAIN"
+  check_dns "devhub-install-check.$DOMAIN" "*.$DOMAIN"
+fi
 if [ "$DNS_OK" -eq 0 ]; then
   warn "sans ces enregistrements, le HTTPS ne marchera pas : tu peux continuer et corriger le DNS ensuite"
   confirm "Continuer quand même ?" || exit 1
@@ -195,9 +247,11 @@ fi
 
 # ---------- Ports and firewall ----------
 listening() { command -v ss >/dev/null 2>&1 && run ss -ltnH 2>/dev/null | awk '{ print $4 }' | grep -Eq "[:.]$1\$"; }
+PORTS="80 et 443"
+[ "$MODE" != ip ] || PORTS="80, 443 et $IP_RANGE"
 if [ "$IN_DOCKER" = "1" ]; then
   # A container sees neither the server's ports nor its firewall.
-  info "Vérifie que les ports 80 et 443 sont ouverts sur le serveur (pare-feu)"
+  info "Vérifie que les ports $PORTS sont ouverts sur le serveur (pare-feu)"
 elif [ "$UPDATE" -eq 0 ]; then
   for p in 80 443; do
     if listening "$p"; then
@@ -208,8 +262,11 @@ elif [ "$UPDATE" -eq 0 ]; then
   ok "Ports 80 et 443 libres"
 fi
 if [ "$IN_DOCKER" != "1" ] && command -v ufw >/dev/null 2>&1 && run ufw status 2>/dev/null | grep -q "Status: active"; then
-  if confirm "Le pare-feu ufw est actif : ouvrir les ports 80 et 443 ?"; then
+  if confirm "Le pare-feu ufw est actif : ouvrir les ports $PORTS ?"; then
     run ufw allow 80/tcp >/dev/null && run ufw allow 443/tcp >/dev/null && ok "Ports 80 et 443 ouverts dans ufw"
+    if [ "$MODE" = ip ]; then
+      run ufw allow "$(printf '%s' "$IP_RANGE" | tr - :)/tcp" >/dev/null && ok "Ports $IP_RANGE ouverts dans ufw"
+    fi
   fi
 fi
 
@@ -223,23 +280,48 @@ else
 fi
 
 # ---------- Configuration ----------
-if [ -f "$DIR/.env" ]; then
+# The .env lines that follow the domain / mode.
+ip_sites() {
+  lo="${IP_RANGE%-*}"; hi="${IP_RANGE#*-}"
+  sites="https://$DOMAIN"; p="$lo"
+  while [ "$p" -le "$hi" ]; do sites="$sites, https://$DOMAIN:$p"; p=$((p + 1)); done
+  printf '%s' "$sites"
+}
+mode_lines() {
+  echo "DEVHUB_DOMAIN=$DOMAIN"
+  if [ "$MODE" = ip ]; then
+    # No domain: docker-compose.ip.yml (Caddy on the server's network, one port per project).
+    echo "COMPOSE_FILE=docker-compose.yml:docker-compose.ip.yml"
+    echo "DEVHUB_PORT_RANGE=$IP_RANGE"
+    echo "DEVHUB_IP_SITES=$(ip_sites)"
+  fi
+}
+MODE_KEYS='^(DEVHUB_DOMAIN|COMPOSE_FILE|DEVHUB_PORT_RANGE|DEVHUB_IP_SITES)='
+if [ -f "$DIR/.env" ] && [ "$CHOSEN" -eq 1 ]; then
+  KEEP="$(run grep -vE "$MODE_KEYS" "$DIR/.env" || true)"
+  { [ -z "$KEEP" ] || printf '%s\n' "$KEEP"; mode_lines; } | run tee "$DIR/.env" >/dev/null
+  run chmod 600 "$DIR/.env"
+  ok "Configuration mise à jour pour $DOMAIN (le reste du .env est gardé)"
+elif [ -f "$DIR/.env" ]; then
   ok "Configuration existante gardée ($DIR/.env)"
 else
-  if [ -z "$CF_TOKEN" ] && [ "$TTY" -eq 1 ]; then
+  # The Cloudflare wildcard certificate needs a domain in a Cloudflare zone.
+  if [ "$MODE" = domain ] && [ -z "$CF_TOKEN" ] && [ "$TTY" -eq 1 ] && ! printf '%s' "$DOMAIN" | grep -q '\.sslip\.io$'; then
     printf '  %sCertificat joker *.%s : un jeton Cloudflare « Zone › DNS › Modifier », sinon un certificat par projet.%s\n' "$D" "$DOMAIN" "$N"
     ask CF_TOKEN "Jeton Cloudflare (Entrée pour passer)" "" secret
   fi
   {
     echo "# Écrit par install.sh. Les autres réglages possibles sont dans .env.example."
-    echo "DEVHUB_DOMAIN=$DOMAIN"
-    if [ -n "$CF_TOKEN" ]; then
+    mode_lines
+    if [ "$MODE" = domain ] && [ -n "$CF_TOKEN" ]; then
       echo "DEVHUB_TLS=wildcard"
       echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
     fi
   } | run tee "$DIR/.env" >/dev/null
   run chmod 600 "$DIR/.env"
-  if [ -n "$CF_TOKEN" ]; then ok "Configuration écrite, certificat joker par Cloudflare"; else ok "Configuration écrite, un certificat par projet"; fi
+  if [ "$MODE" = ip ]; then ok "Configuration écrite, sans nom de domaine"
+  elif [ -n "$CF_TOKEN" ]; then ok "Configuration écrite, certificat joker par Cloudflare"
+  else ok "Configuration écrite, un certificat par projet"; fi
 fi
 
 # ---------- Images ----------
@@ -293,6 +375,9 @@ echo "$LINE"
 if [ -n "$CODE" ]; then
   printf '  Ouvre   %s%s/setup%s\n' "$A$B" "$URL" "$N"
   printf '  Code    %s%s%s  %s(une seule fois)%s\n' "$A$B" "$CODE" "$N" "$D" "$N"
+  if [ "$MODE" = ip ]; then
+    printf '  %sSans nom de domaine, le navigateur peut afficher un avertissement de certificat\n  la première fois (certificat de secours de Caddy) : tu peux continuer.%s\n' "$D" "$N"
+  fi
 elif [ "$READY" -eq 1 ]; then
   printf '  DevHub est prêt : %s%s%s\n' "$A$B" "$URL" "$N"
   printf '  %sIl a déjà un propriétaire : connecte-toi avec ton passkey.%s\n' "$D" "$N"

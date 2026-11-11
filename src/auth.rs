@@ -194,9 +194,120 @@ pub fn masked_ip(h: &HeaderMap) -> String {
     }
 }
 
+/// The client's address as Caddy saw it (first X-Forwarded-For entry).
+fn client_ip(h: &HeaderMap) -> String {
+    h.get("x-forwarded-for").and_then(|v| v.to_str().ok()).and_then(|v| v.split(',').next()).map(str::trim).unwrap_or("").to_string()
+}
+
 /// Until the owner has a passkey, DevHub is in first-setup mode (installation code in the logs).
 pub fn owner_has_passkey(st: &AppState) -> bool {
     db::passkey_rows(&st.db.lock().unwrap()).iter().any(|k| k.profile_id == db::OWNER)
+}
+
+const NO_PASSKEYS: &str = "pas de passkey sans nom de domaine : connecte-toi avec le mot de passe";
+
+// ---------- Passwords (servers without a domain name) ----------
+
+fn hash_blocking(password: String) -> impl std::future::Future<Output = anyhow::Result<String>> {
+    async move { tokio::task::spawn_blocking(move || crate::password::hash(&password)).await? }
+}
+
+#[derive(Deserialize)]
+pub struct PasswordLogin {
+    password: String,
+}
+
+/// Sign-in by password: tries the profiles that have one (usually just the owner).
+pub async fn password_login(State(st): State<AppState>, jar: CookieJar, headers: HeaderMap, Json(b): Json<PasswordLogin>) -> Result<Response, AppError> {
+    if !st.cfg.ip_mode {
+        return Ok((StatusCode::NOT_FOUND, "connexion par mot de passe désactivée : DevHub a un nom de domaine, utilise ton passkey").into_response());
+    }
+    let (ip, shown) = (client_ip(&headers), masked_ip(&headers));
+    let now = db::now();
+    let wait = crate::password::wait_for(&ip, now);
+    if wait > 0 {
+        return Ok((StatusCode::TOO_MANY_REQUESTS, format!("trop d'essais : réessaie dans {} min", wait / 60 + 1)).into_response());
+    }
+    let stored = db::passwords(&st.db.lock().unwrap());
+    let typed = b.password;
+    let found = tokio::task::spawn_blocking(move || stored.into_iter().find(|(_, h)| crate::password::verify(&typed, h)).map(|(id, _)| id)).await?;
+    let Some(profile_id) = found else {
+        crate::password::failed(&ip, now);
+        db::audit(&st.db.lock().unwrap(), "?", "login.fail", &format!("mot de passe · {shown}"));
+        return Ok((StatusCode::UNAUTHORIZED, "mot de passe incorrect").into_response());
+    };
+    crate::password::succeeded(&ip);
+    {
+        let c = st.db.lock().unwrap();
+        let who = db::profile(&c, profile_id).map(|p| p.actor()).unwrap_or_else(|| "?".into());
+        db::audit(&c, &who, "login.ok", &format!("mot de passe · {shown}"));
+    }
+    Ok((new_session(&st, jar, None, Some(profile_id))?, Json(json!({"ok": true}))).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct PasswordSetup {
+    code: String,
+    name: String,
+    password: String,
+}
+
+/// First setup without a domain: the installation code, then the owner's name and password.
+pub async fn password_setup(State(st): State<AppState>, jar: CookieJar, Json(b): Json<PasswordSetup>) -> Result<Response, AppError> {
+    if !st.cfg.ip_mode || st.setup_token.lock().unwrap().is_none() {
+        return Ok((StatusCode::CONFLICT, "déjà installé").into_response());
+    }
+    if let Err(e) = crate::password::check_new(&b.password) {
+        return Ok((StatusCode::BAD_REQUEST, e).into_response());
+    }
+    if !setup_code_ok(&st, &b.code) {
+        return Ok((StatusCode::FORBIDDEN, "code d'installation invalide").into_response());
+    }
+    let hash = hash_blocking(b.password).await?;
+    {
+        let c = st.db.lock().unwrap();
+        if let Some(mut p) = db::profile(&c, db::OWNER) {
+            let name: String = b.name.trim().chars().take(40).collect();
+            if !name.is_empty() {
+                p.name = name;
+                db::save_profile(&c, &p)?;
+            }
+        }
+        db::set_password(&c, db::OWNER, &hash)?;
+        db::audit(&c, "owner", "password.set", "installation");
+    }
+    *st.setup_token.lock().unwrap() = None;
+    Ok((new_session(&st, jar, None, Some(db::OWNER))?, Json(json!({"ok": true}))).into_response())
+}
+
+/// Mon profil: a new password (the current one first, if there is one). Other password
+/// sessions of the profile are signed out.
+pub async fn password_change(State(st): State<AppState>, jar: CookieJar, axum::Form(f): axum::Form<std::collections::HashMap<String, String>>) -> Result<Response, Response> {
+    let Some(me) = current_profile(&st, &jar) else { return Err(Redirect::to("/login").into_response()) };
+    let back = |kind: &str, msg: &str| Redirect::to(&crate::with_param("/security#password", kind, msg)).into_response();
+    let get = |k: &str| f.get(k).cloned().unwrap_or_default();
+    let (current, new) = (get("current"), get("new"));
+    if let Err(e) = crate::password::check_new(&new) {
+        return Ok(back("err", &e));
+    }
+    if new != get("confirm") {
+        return Ok(back("err", "les deux nouveaux mots de passe ne sont pas identiques"));
+    }
+    let stored = db::passwords(&st.db.lock().unwrap()).into_iter().find(|(id, _)| *id == me.id).map(|(_, h)| h);
+    if let Some(h) = stored {
+        let ok = tokio::task::spawn_blocking(move || crate::password::verify(&current, &h)).await.unwrap_or(false);
+        if !ok {
+            return Ok(back("err", "mot de passe actuel incorrect"));
+        }
+    }
+    let hash = hash_blocking(new).await.map_err(|e| AppError(e).into_response())?;
+    let c = st.db.lock().unwrap();
+    db::set_password(&c, me.id, &hash).map_err(|e| AppError(e).into_response())?;
+    if let Some(token) = jar.get(COOKIE) {
+        let _ = db::drop_password_sessions(&c, me.id, token.value());
+    }
+    db::audit(&c, &me.actor(), "password.set", "");
+    Ok(back("ok", "Mot de passe changé. Les autres appareils connectés par mot de passe sont déconnectés."))
 }
 
 fn stored_passkeys(st: &AppState) -> anyhow::Result<Vec<(i64, Passkey)>> {
@@ -216,6 +327,9 @@ pub struct RegStart {
 
 /// Who the new passkey is for: the owner on first setup, the invited profile, or the signed-in one.
 pub async fn register_start(State(st): State<AppState>, jar: CookieJar, Json(b): Json<RegStart>) -> Result<Response, AppError> {
+    if st.cfg.ip_mode {
+        return Ok((StatusCode::BAD_REQUEST, NO_PASSKEYS).into_response());
+    }
     let existing = stored_passkeys(&st)?;
     let (profile_id, invite) = if let Some(t) = b.invite.filter(|t| !t.is_empty()) {
         match db::invite_profile(&st.db.lock().unwrap(), &t) {
@@ -278,13 +392,16 @@ pub async fn register_finish(State(st): State<AppState>, jar: CookieJar, Json(b)
     // First registration and invitations log you straight in.
     if first || invite.is_some() {
         db::passkey_used(&st.db.lock().unwrap(), id);
-        Ok((new_session(&st, jar, Some(id))?, Json(json!({"ok": true, "name": name}))).into_response())
+        Ok((new_session(&st, jar, Some(id), None)?, Json(json!({"ok": true, "name": name}))).into_response())
     } else {
         Ok(Json(json!({"ok": true, "name": name})).into_response())
     }
 }
 
 pub async fn login_start(State(st): State<AppState>) -> Result<Response, AppError> {
+    if st.cfg.ip_mode {
+        return Ok((StatusCode::BAD_REQUEST, NO_PASSKEYS).into_response());
+    }
     let pks: Vec<Passkey> = stored_passkeys(&st)?.into_iter().map(|(_, p)| p).collect();
     if pks.is_empty() {
         return Ok((StatusCode::CONFLICT, "aucun passkey enregistré").into_response());
@@ -336,12 +453,12 @@ pub async fn login_finish(State(st): State<AppState>, jar: CookieJar, headers: H
     let Some((id, _)) = used else {
         return Ok((StatusCode::UNAUTHORIZED, "passkey supprimé").into_response());
     };
-    Ok((new_session(&st, jar, Some(id))?, Json(json!({"ok": true}))).into_response())
+    Ok((new_session(&st, jar, Some(id), None)?, Json(json!({"ok": true}))).into_response())
 }
 
-fn new_session(st: &AppState, jar: CookieJar, passkey_id: Option<i64>) -> anyhow::Result<CookieJar> {
+fn new_session(st: &AppState, jar: CookieJar, passkey_id: Option<i64>, profile_id: Option<i64>) -> anyhow::Result<CookieJar> {
     let token = random_token(32);
-    db::create_session(&st.db.lock().unwrap(), &token, SESSION_TTL, passkey_id)?;
+    db::create_session(&st.db.lock().unwrap(), &token, SESSION_TTL, passkey_id, profile_id)?;
     let c = Cookie::build((COOKIE, token))
         .http_only(true)
         .secure(st.cfg.origin.starts_with("https"))
@@ -349,8 +466,9 @@ fn new_session(st: &AppState, jar: CookieJar, passkey_id: Option<i64>) -> anyhow
         .path("/")
         .max_age(time_dur(SESSION_TTL));
     // Share the cookie with project subdomains (the proxy strips it before forwarding).
-    // Not possible on bare "localhost", so private projects need a real domain.
-    let c = if st.cfg.domain.contains('.') { c.domain(st.cfg.domain.clone()) } else { c };
+    // Not possible on bare "localhost", so private projects need a real domain. With an IP
+    // address the cookie stays on it, and reaches the projects on its other ports.
+    let c = if !st.cfg.ip_mode && st.cfg.domain.contains('.') { c.domain(st.cfg.domain.clone()) } else { c };
     Ok(jar.add(c.build()))
 }
 
@@ -364,7 +482,7 @@ pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> impl IntoResp
     }
     let mut c = Cookie::from(COOKIE);
     c.set_path("/");
-    if st.cfg.domain.contains('.') {
+    if !st.cfg.ip_mode && st.cfg.domain.contains('.') {
         c.set_domain(st.cfg.domain.clone());
     }
     (jar.remove(c), Redirect::to("/login"))

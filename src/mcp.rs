@@ -166,8 +166,8 @@ pub async fn project_tool(st: &AppState, p: &db::Project, name: &str, a: &Value,
                         if m.is_public() {
                             format!("{}/{} -> {} public, joueurs : {}", m.container, m.proto(), m.proto().to_uppercase(), proxy::public_address(st, m))
                         } else {
-                            let main = if Some(m.container) == first_http { format!(" et {}", proxy::url_for(st, &p.name, None)) } else { String::new() };
-                            format!("{} -> {}{main}", m.container, proxy::url_for(st, &p.name, Some(m.container)))
+                            let main = if Some(m.container) == first_http { format!(" et {}", proxy::url_for(st, &p, None)) } else { String::new() };
+                            format!("{} -> {}{main}", m.container, proxy::url_for(st, &p, Some(m.container)))
                         }
                     })
                     .collect();

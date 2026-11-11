@@ -44,9 +44,9 @@ pub async fn load(ctx: &Ctx, name: &str) -> Result<P, Response> {
 pub fn addresses(ctx: &Ctx, x: &P) -> Vec<(String, u16)> {
     let mut v = Vec::new();
     if let (Some(first), true) = (x.p.first_http(), x.p.auto_domain) {
-        v.push((proxy::url_for(&ctx.st, &x.p.name, None), first.container));
+        v.push((proxy::url_for(&ctx.st, &x.p, None), first.container));
         for m in x.p.http_ports() {
-            v.push((proxy::url_for(&ctx.st, &x.p.name, Some(m.container)), m.container));
+            v.push((proxy::url_for(&ctx.st, &x.p, Some(m.container)), m.container));
         }
     }
     let scheme = if ctx.st.cfg.origin.starts_with("https") { "https" } else { "http" };
@@ -440,7 +440,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
     let host_of = |url: &str| url.split("://").nth(1).unwrap_or(url).to_string();
     let auto = x.p.auto_domain;
     let site = main_url(&ctx, &x).unwrap_or_default();
-    let auto_host = host_of(&proxy::url_for(&st, n, None));
+    let auto_host = host_of(&proxy::url_for(&st, &x.p, None));
     let err = q.get("err");
     let state = |o: Option<bool>| html! {
         @match o {
@@ -487,13 +487,13 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             @for (h, _) in &others { a.chip href={"https://" (h)} target="_blank" rel="noopener" { (h) } }
                             @if auto {
                                 @for m in x.p.http_ports().filter(|m| Some(m.container) != first_http) {
-                                    @let u = proxy::url_for(&st, n, Some(m.container));
+                                    @let u = proxy::url_for(&st, &x.p, Some(m.container));
                                     a.chip href=(u) target="_blank" rel="noopener" { (host_of(&u)) }
                                 }
                             }
                         }
                         span.end {
-                            @if x.p.public { "Public : tout le monde peut ouvrir ces adresses" } @else { "Privé : passkey obligatoire pour toutes ces adresses" }
+                            @if x.p.public { "Public : tout le monde peut ouvrir ces adresses" } @else if st.cfg.ip_mode { "Privé : connexion à DevHub obligatoire pour toutes ces adresses" } @else { "Privé : passkey obligatoire pour toutes ces adresses" }
                             @if let Some(t) = since { ", depuis " (ago(t)) } "."
                         }
                     }
@@ -553,7 +553,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                                     @if m.is_public() { (proxy::public_address(&st, m)) }
                                     @else if !auto { @if let Some((h, _)) = x.domains.iter().find(|(_, p)| *p == m.container) { (h) } @else { span.dim { "pas d'adresse" } } }
                                     @else if Some(m.container) == first_http { (auto_host) }
-                                    @else { (host_of(&proxy::url_for(&st, n, Some(m.container)))) }
+                                    @else { (host_of(&proxy::url_for(&st, &x.p, Some(m.container)))) }
                                 }
                                 span.hide-m role="cell" { (state(*o)) }
                                 @if manages {
@@ -584,8 +584,8 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                 }
             }
 
-            // ---- Subdomains (sites only) ----
-            @if first_http.is_some() {
+            // ---- Subdomains (sites only; none without a domain name) ----
+            @if first_http.is_some() && !st.cfg.ip_mode {
                 section.card.card-b.nsub {
                     div.nhero-h {
                         h3 { "Sous-domaines" }

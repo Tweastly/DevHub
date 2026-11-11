@@ -1,0 +1,38 @@
+# Mode « IP seule » (pas de nom de domaine), utilisé par docker-compose.ip.yml.
+# Caddy tourne sur le réseau du serveur : le panel sur https://<IP>, chaque projet web
+# sur https://<IP>:<port>. DEVHUB_IP_SITES liste ces adresses (écrit par install.sh dans
+# le .env), car Caddy n'accepte pas de plage de ports dans une adresse.
+
+{
+	# Browsers send no server name (SNI) for an IP address: pick the IP's certificate anyway,
+	# also behind NAT where the connection's local address isn't the public one.
+	default_sni {$DEVHUB_DOMAIN}
+}
+
+# While DevHub restarts (update, crash), a small page that reloads itself.
+(restarting) {
+	handle_errors 502 503 504 {
+		root * /etc/caddy
+		rewrite * /restarting.html
+		header Cache-Control no-store
+		header Retry-After 5
+		file_server {
+			status 503
+		}
+	}
+}
+
+{$DEVHUB_IP_SITES} {
+	# A certificate for the IP address: Let's Encrypt's (valid 6 days, renewed on its own),
+	# else Caddy's own, which browsers warn about once.
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+		issuer internal
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+	import restarting
+}

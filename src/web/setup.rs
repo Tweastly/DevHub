@@ -98,7 +98,7 @@ fn skip(st: &str, label: &str) -> Markup {
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Response {
     let th = theme(&jar);
     if st.setup_token.lock().unwrap().is_some() {
-        return frame(th, Some(0), first_steps()).into_response();
+        return frame(th, Some(0), first_steps(st.cfg.ip_mode)).into_response();
     }
     let Some(me) = auth::current_profile(&st, &jar) else {
         let next: String = url::form_urlencoded::byte_serialize(format!("{}/setup", st.cfg.origin).as_bytes()).collect();
@@ -109,7 +109,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     }
     let which = q.get("step").map(String::as_str).unwrap_or("domain");
     let main = match which {
-        "account" => account(&me, &q),
+        "account" => account(&me, &q, st.cfg.ip_mode),
         "resources" => resources(&st, &q).await,
         "github" => github_step(&q),
         "updates" => updates(&st, &q),
@@ -123,7 +123,8 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
 
 // ---------- 1 and 2: installation code, owner passkey (nobody signed in yet) ----------
 
-fn first_steps() -> Markup {
+/// `ip_mode`: no domain name, so a password instead of a passkey (WebAuthn needs a domain).
+fn first_steps(ip_mode: bool) -> Markup {
     html! {
         section #s-code {
             (kicker(0))
@@ -143,15 +144,26 @@ fn first_steps() -> Markup {
                 }
             }
         }
-        section #s-account hidden {
+        section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) {
             (kicker(1))
             h1 { "Crée ton compte propriétaire" }
-            p.wz-lead { "Tu te connecteras avec un passkey : l'empreinte, le visage ou le code de cet appareil. Aucun mot de passe." }
+            @if ip_mode {
+                p.wz-lead { "DevHub n'a pas de nom de domaine : la connexion se fait par mot de passe (les passkeys exigent un domaine). Choisis-en un long, gardé dans un gestionnaire de mots de passe." }
+            } @else {
+                p.wz-lead { "Tu te connecteras avec un passkey : l'empreinte, le visage ou le code de cet appareil. Aucun mot de passe." }
+            }
             div.wz-body {
                 label.field { span.lbl { "Ton nom" } input #oname maxlength="40" placeholder="Propriétaire" autocomplete="name"; }
-                div.wz-card.wz-pk {
-                    span.wz-ic.lg { (icon("key")) }
-                    div { b { "Passkey de cet appareil" } span.muted { "Tu pourras en ajouter d'autres (téléphone, clé USB) depuis Mon profil." } }
+                @if ip_mode {
+                    div.wz-grid2 {
+                        label.field { span.lbl { "Mot de passe" } input #opw type="password" autocomplete="new-password" minlength=(crate::password::MIN_LEN); span.help { (crate::password::MIN_LEN) " caractères minimum" } }
+                        label.field { span.lbl { "Confirmation" } input #opw2 type="password" autocomplete="new-password"; }
+                    }
+                } @else {
+                    div.wz-card.wz-pk {
+                        span.wz-ic.lg { (icon("key")) }
+                        div { b { "Passkey de cet appareil" } span.muted { "Tu pourras en ajouter d'autres (téléphone, clé USB) depuis Mon profil." } }
+                    }
                 }
             }
         }
@@ -161,7 +173,7 @@ fn first_steps() -> Markup {
             span #nob {}
             div.wz-foot-r {
                 button.btn.primary #go-code type="button" { "Continuer" }
-                button.btn.primary #go-pk type="button" hidden { (icon("key")) "Créer mon passkey" }
+                button.btn.primary #go-pk type="button" hidden { (icon("key")) @if ip_mode { "Créer mon compte" } @else { "Créer mon passkey" } }
             }
         }
         script { (PreEscaped(crate::web::auth::WEBAUTHN_JS)) (PreEscaped(FIRST_JS)) }
@@ -209,30 +221,47 @@ const FIRST_JS: &str = r#"
     finally { busy = false; }
   }
   async function create() {
-    const btn = $('#go-pk');
+    const btn = $('#go-pk'), name = $('#oname').value.trim();
+    if ($('#s-account').dataset.mode === 'password') {
+      const pw = $('#opw').value;
+      if (pw.length < +$('#opw').minLength) { msg('Mot de passe trop court : ' + $('#opw').minLength + ' caractères minimum.'); return; }
+      if (pw !== $('#opw2').value) { msg('Les deux mots de passe ne sont pas identiques.'); return; }
+      btn.disabled = true;
+      try {
+        const r = await fetch('/auth/password/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code(), name, password: pw }) });
+        if (r.ok) { location.href = '/setup?step=domain'; return; }
+        msg(await r.text());
+      } catch { msg('Connexion perdue : réessaie.'); }
+      btn.disabled = false;
+      return;
+    }
     btn.disabled = true;
     try {
       await register('Passkey principal', code());
-      await fetch('/setup/account', { method: 'POST', body: new URLSearchParams({ name: $('#oname').value.trim() }) });
+      await fetch('/setup/account', { method: 'POST', body: new URLSearchParams({ name }) });
       location.href = '/setup?step=domain';
     } catch { btn.disabled = false; }
   }
   $('#go-code').onclick = check;
   $('#go-pk').onclick = create;
   $('#back').onclick = () => { show(0); boxes[7].focus(); };
-  $('#oname').addEventListener('keydown', e => { if (e.key === 'Enter') create(); });
+  document.querySelectorAll('#s-account input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') create(); }));
 })();
 "#;
 
-/// The account step once signed in: the owner's name, and a pointer to the other passkeys.
-fn account(me: &db::Profile, q: &HashMap<String, String>) -> Markup {
+/// The account step once signed in: the owner's name, and a pointer to the passkeys (or the password).
+fn account(me: &db::Profile, q: &HashMap<String, String>, ip_mode: bool) -> Markup {
     step("account", q, "Ton compte", html! { "Ton nom apparaît dans le journal et sur tes actions." }, html! {
         form #f-account method="post" action="/setup/account" data-reload {
             label.field { span.lbl { "Ton nom" } input name="name" value=(me.name) maxlength="40" required; }
         }
         div.wz-card.wz-pk {
             span.wz-ic.lg { (icon("key")) }
-            div { b { "Tes passkeys" } span.muted { "Ajoute un passkey de secours (téléphone, clé USB) pour ne jamais perdre l'accès. " a.link href="/security" data-reload { "Mon profil →" } } }
+            @if ip_mode {
+                div { b { "Ton mot de passe" } span.muted { "Il se change dans Mon profil. " a.link href="/security#password" data-reload { "Mon profil →" } } }
+            } @else {
+                div { b { "Tes passkeys" } span.muted { "Ajoute un passkey de secours (téléphone, clé USB) pour ne jamais perdre l'accès. " a.link href="/security" data-reload { "Mon profil →" } } }
+            }
         }
     }, html! { button.btn.primary form="f-account" { "Continuer" } })
 }
@@ -275,7 +304,51 @@ fn check_row(c: Check, text: Markup, side: &str) -> Markup {
     html! { div.wz-check { span class={ "mk " (cls) } { (mark) } span.t { (text) } span.side { (side) } } }
 }
 
+/// Without a domain name: the address, its certificate, the ports to open, and how to move
+/// to a domain later.
+async fn ip_address(st: &AppState, q: &HashMap<String, String>) -> Markup {
+    let base = proxy::base_host(st).to_string();
+    let ip = base.rsplit_once(':').map_or(base.as_str(), |x| x.0).to_string();
+    let https = st.cfg.origin.starts_with("https://");
+    // Let's Encrypt's certificate for the IP is trusted by browsers, Caddy's own isn't.
+    let trusted = https && https_ok(&st.cfg.origin).await;
+    let (lo, hi) = st.cfg.port_range;
+    html! {
+        (step("domain", q, "Adresse et HTTPS", html! { "DevHub n'a pas de nom de domaine : il répond sur l'adresse IP du serveur, et chaque projet web sur son propre port." }, html! {
+            div.wz-card.wz-checks {
+                (check_row(Check::Ok, html! { "Panel sur " b.mono { (st.cfg.origin) } }, ""))
+                @if trusted {
+                    (check_row(Check::Ok, html! { "Certificat HTTPS " b { "reconnu par les navigateurs" } " (Let's Encrypt, renouvelé tout seul)" }, ""))
+                } @else if https {
+                    (check_row(Check::Warn, html! { "Certificat interne de Caddy : le navigateur affiche un avertissement à la première visite (Let's Encrypt n'a pas délivré de certificat pour " b.mono { (ip) } ")" }, ""))
+                } @else {
+                    (check_row(Check::Warn, html! { "DevHub est servi en " b { "HTTP" } " : le mot de passe circule en clair" }, ""))
+                }
+                (check_row(Check::Warn, html! { "Projets web sur " b.mono { "https://" (ip) ":" (lo) } " à " b.mono { ":" (hi) } " : ouvre ces ports dans le pare-feu du serveur" }, ""))
+                (check_row(Check::Ok, html! { "Connexion par " b { "mot de passe" } " (les passkeys exigent un nom de domaine)" }, ""))
+            }
+            div.wz-card.wz-cert {
+                p.muted { "Pour passer plus tard à un nom de domaine : passkeys, sous-domaines des projets et certificat sans avertissement." }
+                details.wz-more {
+                    summary { "Passer à un nom de domaine" }
+                    ol {
+                        li { "DNS : deux enregistrements " b { "A" } " vers " b.mono { (ip) } ", " code { "dev.mondomaine.fr" } " et " code { "*.dev.mondomaine.fr" } "." }
+                        li { "Relance l'installation avec " code { "--domain dev.mondomaine.fr" } " : elle met le " code { ".env" } " à jour et garde tes projets." }
+                        li { "Au redémarrage, un nouveau code d'installation s'affiche : il sert à créer ton passkey sur le domaine." }
+                    }
+                }
+            }
+        }, html! {
+            a.btn href="/setup?step=domain" data-reload { (icon("refresh")) "Revérifier" }
+            a.btn.primary href=(next_url("domain")) data-reload { "Continuer" }
+        }))
+    }
+}
+
 async fn domain(st: &AppState, q: &HashMap<String, String>) -> Markup {
+    if st.cfg.ip_mode {
+        return ip_address(st, q).await;
+    }
     let base = proxy::base_host(st).to_string();
     let host = base.split(':').next().unwrap_or(&base).to_string();
     let probe = format!("devhub-setup-check.{host}");
@@ -523,10 +596,11 @@ fn project(st: &AppState, q: &HashMap<String, String>) -> Markup {
 // ---------- Done ----------
 
 async fn done(st: &AppState, me: &db::Profile, q: &HashMap<String, String>) -> Markup {
-    let (keys, auto, ai_on) = {
+    let (keys, has_password, auto, ai_on) = {
         let c = st.db.lock().unwrap();
         (
             db::passkey_rows(&c).iter().filter(|k| k.profile_id == me.id).count(),
+            db::password_updated(&c, me.id).is_some(),
             db::setting(&c, updater::AUTO_SETTING).is_some(),
             db::setting(&c, mcp_admin::ENABLED).is_some(),
         )
@@ -541,7 +615,11 @@ async fn done(st: &AppState, me: &db::Profile, q: &HashMap<String, String>) -> M
             h1 { "DevHub est prêt" }
             p.wz-lead { "Voici ce qui est configuré. Tout se change plus tard dans les réglages." }
             div.wz-card.wz-rec {
-                div { span class=(ok(keys > 0)) { (PreEscaped(CHECK)) } (keys) " passkey" @if keys > 1 { "s" } " pour " b { (me.name) } }
+                @if st.cfg.ip_mode {
+                    div { span class=(ok(has_password)) { (PreEscaped(CHECK)) } "Mot de passe pour " b { (me.name) } }
+                } @else {
+                    div { span class=(ok(keys > 0)) { (PreEscaped(CHECK)) } (keys) " passkey" @if keys > 1 { "s" } " pour " b { (me.name) } }
+                }
                 div { span class=(ok(st.cfg.origin.starts_with("https://"))) { (PreEscaped(CHECK)) } (if st.cfg.origin.starts_with("https://") { "HTTPS sur " } else { "Pas encore de HTTPS sur " }) b { (host) } }
                 div {
                     @if let Some(c) = github::cred() { span.mk.ok { (PreEscaped(CHECK)) } "GitHub connecté · " b { "@" (c.login) } }
@@ -553,7 +631,9 @@ async fn done(st: &AppState, me: &db::Profile, q: &HashMap<String, String>) -> M
                     div { span.spin {} b { (p) } " en cours de création… " a.link href={"/projects/" (p)} data-reload { "voir" } }
                 }
             }
-            @if keys < 2 {
+            @if st.cfg.ip_mode {
+                p.wz-tip { b { "Conseil : " } "garde ton mot de passe dans un gestionnaire de mots de passe. Avec un nom de domaine plus tard, tu passeras aux passkeys." }
+            } @else if keys < 2 {
                 p.wz-tip { b { "Conseil : " } "ajoute un passkey de secours (ton téléphone, une clé USB) pour ne jamais perdre l'accès. " a.link href="/security" data-reload { "Ajouter maintenant" } }
             }
             a.btn.primary href=(created.map(|p| format!("/projects/{p}")).unwrap_or_else(|| "/".into())) data-reload { @if created.is_some() { "Ouvrir mon projet" } @else { "Ouvrir le tableau de bord" } }

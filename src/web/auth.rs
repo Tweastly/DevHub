@@ -40,7 +40,7 @@ const AUTH_CSS: &str = r#"
 #msg{min-height:18px;margin:12px 0 0;justify-content:center}
 "#;
 
-pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
+pub fn login(needs_setup: bool, ip_mode: bool, next: Option<&str>, footer: &str) -> Markup {
     // Always rendered on the dashboard's own host: relative assets are fine.
     let next_js = serde_json::to_string(&next.unwrap_or("/")).unwrap().replace("</", "<\\/");
     shell("Connexion · DevHub", "", footer, false, html! {
@@ -50,6 +50,14 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
             label.field { span.lbl { "Code d'installation" } input #setup.mono-input autocomplete="off" placeholder="XXXX-XXXX"; }
             label.field { span.lbl { "Nom de l'appareil" } input #pkname value="Mon appareil"; }
             button.btn.primary onclick="register(pkname.value, setup.value).then(()=>location.href=NEXT)" { (icon("key")) "Créer mon passkey" }
+        } @else if ip_mode {
+            // No domain name, so no passkeys: the owner's password.
+            h1 { "Se connecter à DevHub" }
+            p.sub { "Entre ton mot de passe pour continuer." }
+            form #pwform {
+                label.field { span.lbl { "Mot de passe" } input #pw type="password" autocomplete="current-password" required autofocus; }
+                button.btn.primary { (icon("key")) "Se connecter" }
+            }
         } @else {
             h1 { "Se connecter à DevHub" }
             p.sub {
@@ -60,7 +68,7 @@ pub fn login(needs_setup: bool, next: Option<&str>, footer: &str) -> Markup {
             button.btn.primary onclick="login()" autofocus { (icon("key")) "Se connecter avec un passkey" }
         }
         p #msg.err-text {}
-        script { (PreEscaped(format!("const NEXT={next_js};"))) (PreEscaped(WEBAUTHN_JS)) }
+        script { (PreEscaped(format!("const NEXT={next_js};"))) (PreEscaped(if ip_mode && !needs_setup { PASSWORD_JS } else { WEBAUTHN_JS })) }
     })
 }
 
@@ -119,6 +127,20 @@ pub fn error_page(code: u16, title: &str, message: &str, detail: Option<&str>, a
         @if let Some((label, href)) = action { a.btn href=(href) { (label) } }
     })
 }
+
+const PASSWORD_JS: &str = r#"
+document.getElementById('pwform').addEventListener('submit', async e => {
+  e.preventDefault();
+  const b = e.target.querySelector('button'), m = document.getElementById('msg');
+  b.disabled = true; m.textContent = '';
+  try {
+    const r = await fetch('/auth/password/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: document.getElementById('pw').value }) });
+    if (r.ok) { location.href = NEXT; return; }
+    m.textContent = await r.text();
+  } catch { m.textContent = 'Connexion perdue : réessaie.'; }
+  b.disabled = false; document.getElementById('pw').select();
+});
+"#;
 
 pub const WEBAUTHN_JS: &str = r#"
 const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));

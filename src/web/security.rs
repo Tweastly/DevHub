@@ -77,6 +77,27 @@ fn github_card(st: &AppState) -> Markup {
     }
 }
 
+/// Without a domain: change the password (the current one first).
+fn password_card(st: &AppState, me: &db::Profile) -> Markup {
+    let updated = db::password_updated(&st.db.lock().unwrap(), me.id);
+    html! {
+        div.card #password {
+            div.card-h { h3 { "Mot de passe" } @if let Some(t) = updated { span.sub { "changé " (ago(t)) } } }
+            form.card-b method="post" action="/auth/password/change" {
+                @if updated.is_some() {
+                    label.field { span.lbl { "Mot de passe actuel" } input name="current" type="password" autocomplete="current-password" required; }
+                }
+                div.grid2 style="margin-top:12px" {
+                    label.field { span.lbl { "Nouveau mot de passe" } input name="new" type="password" autocomplete="new-password" required minlength=(crate::password::MIN_LEN); }
+                    label.field { span.lbl { "Confirmation" } input name="confirm" type="password" autocomplete="new-password" required; }
+                }
+                p.help { (crate::password::MIN_LEN) " caractères minimum. Les autres appareils connectés par mot de passe seront déconnectés." }
+                button.btn.primary style="margin-top:12px" { "Changer le mot de passe" }
+            }
+        }
+    }
+}
+
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx(&st, &jar)?;
     let (keys, logins) = {
@@ -96,12 +117,15 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     let me = ctx.passkey.as_ref().map(|p| p.0);
     let only_one = keys.len() <= 1;
     let body = html! {
-        div.page-head { div { h1 { "Mon profil" } p.lead { "Profil " b { (ctx.profile.name) } " · " (ctx.profile.role()) ". DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents." } } }
+        div.page-head { div { h1 { "Mon profil" } p.lead { "Profil " b { (ctx.profile.name) } " · " (ctx.profile.role()) ". "
+            @if st.cfg.ip_mode { "Sans nom de domaine, on entre avec un mot de passe (les passkeys exigent un domaine)." }
+            @else { "DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents." } } } }
         @if let Some(n) = q.get("added") { div.flash { (alert("ok", html! { "Passkey « " (n) " » ajouté. Tu peux maintenant te connecter depuis cet appareil." })) } }
         (flash(&q))
         div style="margin-bottom:24px" { (super::profiles::avatar_card(&ctx.profile, "/security")) }
         @if ctx.profile.admin { div style="margin-bottom:24px" { (github_card(&st)) } }
         div.split {
+            @if st.cfg.ip_mode { (password_card(&st, &ctx.profile)) } @else {
             div.card {
                 div.card-h { h3 { "Mes passkeys" } span.sub { (keys.len()) " appareil" @if keys.len() > 1 { "s" } } }
                 @for k in &keys {
@@ -132,6 +156,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                     }
                     p #msg.err-text {}
                 }
+            }
             }
             div.stack {
                 div.card {

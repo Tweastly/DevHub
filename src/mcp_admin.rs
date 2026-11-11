@@ -341,7 +341,7 @@ async fn call(st: &AppState, who: &db::Profile, actor: &str, params: &Value) -> 
                 };
                 let p = ops::create(st, np, actor).await?;
                 let addr = match (p.first_http(), p.public_ports().next()) {
-                    (Some(_), _) => format!("URL : {}", proxy::url_for(st, &p.name, None)),
+                    (Some(_), _) => format!("URL : {}", proxy::url_for(st, &p, None)),
                     (None, Some(m)) => format!("adresse des joueurs : {} ({})", proxy::public_address(st, m), m.proto().to_uppercase()),
                     _ => "aucun port".into(),
                 };

@@ -9,6 +9,7 @@ mod mcp;
 mod mcp_admin;
 mod oauth;
 mod ops;
+mod password;
 mod proxy;
 mod terminal;
 mod timefmt;
@@ -39,6 +40,9 @@ pub struct Config {
     pub self_container: Option<String>,
     /// Parent domain for custom project subdomains (dev.example.com → example.com).
     pub apps_domain: Option<String>,
+    /// No domain name: DEVHUB_DOMAIN is the server's IP address. Sign-in by password
+    /// (passkeys need a domain) and each web project on its own port.
+    pub ip_mode: bool,
 }
 
 #[derive(Clone)]
@@ -81,6 +85,8 @@ impl AppState {
             self_container: self.cfg.self_container.clone(),
             origin: self.cfg.origin.clone(),
             port_range: self.cfg.port_range,
+            // Without DevHub in Docker, the proxy reaches projects through these host ports.
+            publish_web: !self.cfg.ip_mode || self.cfg.self_container.is_none(),
         }
     }
     fn num_setting<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
@@ -130,7 +136,9 @@ async fn main() -> anyhow::Result<()> {
         .split_once('-')
         .map(|(a, b)| (a.parse().unwrap(), b.parse().unwrap()))
         .expect("DEVHUB_PORT_RANGE=lo-hi");
+    let ip_mode = domain.parse::<std::net::IpAddr>().is_ok();
     let cfg = Config {
+        ip_mode,
         domain: domain.clone(),
         origin: origin.clone(),
         port_range: (lo, hi),
@@ -138,7 +146,10 @@ async fn main() -> anyhow::Result<()> {
         nano_cpus: (env("DEVHUB_CPUS", "2").parse::<f64>()? * 1e9) as i64,
         bind_ip: env("DEVHUB_BIND_IP", "0.0.0.0"),
         self_container: std::env::var("DEVHUB_SELF_CONTAINER").ok().filter(|s| !s.is_empty()),
-        apps_domain: std::env::var("DEVHUB_APPS_DOMAIN").ok().filter(|s| !s.is_empty()).or_else(|| {
+        apps_domain: std::env::var("DEVHUB_APPS_DOMAIN").ok().filter(|s| !s.is_empty() && !ip_mode).or_else(|| {
+            if ip_mode {
+                return None;
+            }
             // Drop the first label when the dashboard lives on a subdomain.
             let parts: Vec<&str> = domain.split('.').collect();
             (parts.len() >= 3).then(|| parts[1..].join("."))
@@ -149,9 +160,21 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&data_dir)?;
     let conn = db::open(&format!("{data_dir}/devhub.sqlite"))?;
     github::load(&conn);
-    let needs_setup = !db::passkey_rows(&conn).iter().any(|k| k.profile_id == db::OWNER);
+    // Until the owner can sign in: a password without a domain, a passkey with one (moving
+    // to a domain asks for the owner's passkey with a new installation code).
+    let needs_setup = if ip_mode {
+        !db::passwords(&conn).iter().any(|(id, _)| *id == db::OWNER)
+    } else {
+        !db::passkey_rows(&conn).iter().any(|k| k.profile_id == db::OWNER)
+    };
 
-    let webauthn = WebauthnBuilder::new(&domain, &Url::parse(&origin)?)?.rp_name("DevHub").build()?;
+    // An IP address can't be a passkey "relying party": WebAuthn is set up on a placeholder
+    // and its routes refuse, sign-in goes through the password.
+    let webauthn = if ip_mode {
+        WebauthnBuilder::new("localhost", &Url::parse("http://localhost")?)?.rp_name("DevHub").build()?
+    } else {
+        WebauthnBuilder::new(&domain, &Url::parse(&origin)?)?.rp_name("DevHub").build()?
+    };
     let st = AppState {
         db: Arc::new(Mutex::new(conn)),
         docker: bollard::Docker::connect_with_local_defaults()?,
@@ -199,6 +222,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/assets/{file}", get(web::asset))
         .route("/menu", get(web::menu))
         .route("/login", get(login_page))
+        .route("/auth/password/login", post(auth::password_login))
+        .route("/auth/password/setup", post(auth::password_setup))
+        .route("/auth/password/change", post(auth::password_change))
         .route("/setup", get(web::setup::page))
         .route("/setup/{step}", post(web::setup::save))
         .route("/logout", post(auth::logout))
@@ -354,7 +380,7 @@ async fn login_page(
     if needs_setup {
         return Redirect::to("/setup").into_response();
     }
-    web::auth::login(needs_setup, next.as_deref(), proxy::base_host(&st)).into_response()
+    web::auth::login(needs_setup, st.cfg.ip_mode, next.as_deref(), proxy::base_host(&st)).into_response()
 }
 
 /// Your own passkeys (never the last one), or, for an administrator, those of another profile.

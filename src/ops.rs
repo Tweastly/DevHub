@@ -581,6 +581,9 @@ pub async fn apply(st: &AppState, name: &str, change: Change, actor: &str) -> R<
                 .await;
         }
         Change::AddDomain { host, port } => {
+            if st.cfg.ip_mode {
+                return Err("pas de sous-domaine sans nom de domaine : chaque projet a son port sur l'adresse du serveur".into());
+            }
             let host = subdomain_host(st, &host)?;
             let base = crate::proxy::base_host(st);
             if host == base || host.ends_with(&format!(".{base}")) {

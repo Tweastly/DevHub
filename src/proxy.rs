@@ -31,7 +31,9 @@ pub fn safe_next(st: &AppState, next: &str) -> Option<String> {
         None => u.host_str()?.to_string(),
     };
     let base = base_host(st);
-    (u.scheme() == scheme && (host == base || host.ends_with(&format!(".{base}")))).then(|| u.to_string())
+    // Without a domain, projects are the same address on other ports.
+    let same_ip = st.cfg.ip_mode && host.rsplit_once(':').map_or(host.as_str(), |x| x.0) == base_ip(st);
+    (u.scheme() == scheme && (host == base || host.ends_with(&format!(".{base}")) || same_ip)).then(|| u.to_string())
 }
 
 /// Host players connect to: the dashboard's domain already points at the VPS.
@@ -47,18 +49,45 @@ pub fn public_address(st: &AppState, m: &crate::db::PortMap) -> String {
     if m.tcp && m.host == 25565 { host } else { format!("{host}:{}", m.host) }
 }
 
-pub fn url_for(st: &AppState, p: &str, port: Option<u16>) -> String {
+/// The server's address without the dashboard's port ("203.0.113.7" for "203.0.113.7:8443").
+fn base_ip(st: &AppState) -> &str {
+    let b = base_host(st);
+    b.rsplit_once(':').map_or(b, |x| x.0)
+}
+
+/// Address of a project's web port (`port`: container port, None = the first one).
+pub fn url_for(st: &AppState, p: &db::Project, port: Option<u16>) -> String {
     let scheme = st.cfg.origin.split_once("://").map(|x| x.0).unwrap_or("https");
-    match port {
-        Some(port) => format!("{scheme}://{p}-{port}.{}", base_host(st)),
-        None => format!("{scheme}://{p}.{}", base_host(st)),
+    if st.cfg.ip_mode {
+        // No subdomains: the project's port on the server answers for it.
+        let m = match port {
+            Some(c) => p.http_ports().find(|m| m.container == c),
+            None => p.first_http(),
+        };
+        return match m {
+            Some(m) => format!("{scheme}://{}:{}", base_ip(st), m.host),
+            None => format!("{scheme}://{}", base_ip(st)),
+        };
     }
+    match port {
+        Some(port) => format!("{scheme}://{}-{port}.{}", p.name, base_host(st)),
+        None => format!("{scheme}://{}.{}", p.name, base_host(st)),
+    }
+}
+
+/// Without a domain: the project whose web port has this number on the server.
+fn resolve_port(st: &AppState, port: u16) -> Option<Target> {
+    let c = st.db.lock().unwrap();
+    db::list_projects(&c).ok()?.into_iter().filter(|p| p.auto_domain).find_map(|p| {
+        let m = p.http_ports().find(|m| m.host == port)?.clone();
+        Some(Target { project: p, container_port: m.container, host_port: m.host })
+    })
 }
 
 /// The automatic address of a project (its first web port, or `port`), unless the
 /// project turned it off.
 pub fn auto_url(st: &AppState, p: &db::Project, port: Option<u16>) -> Option<String> {
-    p.auto_domain.then(|| url_for(st, &p.name, port))
+    p.auto_domain.then(|| url_for(st, p, port))
 }
 
 /// Resolves a subdomain label to a project and port.
@@ -148,7 +177,7 @@ fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
         return error_page(st, StatusCode::FORBIDDEN, "Lien expiré", "Ce lien de connexion n'est plus valable. Recharge la page du projet.", None, None);
     };
     let token = crate::random_token(32);
-    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey).is_err() {
+    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey, None).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//") && !n.contains('\\')).cloned().unwrap_or_else(|| "/".into());
@@ -164,16 +193,33 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
     if host == base_host(&st) {
         return next.run(req).await;
     }
-    let custom = resolve_custom(&st, &host);
-    if custom.is_none() && !host.ends_with(&format!(".{}", base_host(&st))) {
+    // Without a domain: a port of the project range is a project, anything else the dashboard.
+    let ip_port = st.cfg.ip_mode.then(|| {
+        host.rsplit_once(':')
+            .filter(|(h, _)| *h == base_ip(&st))
+            .and_then(|(_, p)| p.parse::<u16>().ok())
+            .filter(|p| (st.cfg.port_range.0..=st.cfg.port_range.1).contains(p))
+    });
+    if ip_port == Some(None) {
+        return next.run(req).await;
+    }
+    let custom = if ip_port.is_some() { None } else { resolve_custom(&st, &host) };
+    if ip_port.is_none() && custom.is_none() && !host.ends_with(&format!(".{}", base_host(&st))) {
         return next.run(req).await;
     }
     if custom.is_some() && req.uri().path() == HANDOFF_PATH {
         return handoff_finish(&st, &host, &req);
     }
-    let Some(t) = custom.or_else(|| resolve(&st, &host)) else {
+    let found = match ip_port {
+        Some(Some(port)) => resolve_port(&st, port),
+        _ => custom.or_else(|| resolve(&st, &host)),
+    };
+    let Some(t) = found else {
         // The Host header comes from the client: escaped before going into the HTML message.
-        let label = maud::html! { (host.split('.').next().unwrap_or("")) }.into_string();
+        let label = match ip_port {
+            Some(Some(port)) => format!("port {port}"),
+            _ => maud::html! { (host.split('.').next().unwrap_or("")) }.into_string(),
+        };
         return error_page(&st, StatusCode::NOT_FOUND, "Introuvable",
             &format!("Aucun projet ne correspond à « {label} »."), None, None);
     };
@@ -184,7 +230,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
         let back = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
         // Custom domains don't share the dashboard cookie: go through the session handoff.
-        let entry = if host.ends_with(&format!(".{}", base_host(&st))) { "login" } else { "auth/handoff" };
+        let entry = if st.cfg.ip_mode || host.ends_with(&format!(".{}", base_host(&st))) { "login" } else { "auth/handoff" };
         let login = url::Url::parse_with_params(&format!("{}/{entry}", st.cfg.origin), [("next", back)])
             .map(|u| u.to_string())
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
