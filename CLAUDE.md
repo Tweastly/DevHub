@@ -1,15 +1,16 @@
 # DevHub : règles pour Claude
 
 ## Où tourne DevHub
-- DevHub tourne **uniquement dans des conteneurs Docker** : le panel (`devhub`), Caddy (`caddy`), les projets (`devhub-<nom>`), et les tâches ponctuelles (installation, mise à jour) dans des conteneurs temporaires.
+- DevHub tourne **uniquement dans des conteneurs Docker**, et **un seul conteneur pour DevHub** : `devhub`, qui contient le panel et Caddy (lancé et surveillé par DevHub, `src/caddy.rs`, fichiers dans l'image sous `/etc/caddy`). Il est sur le réseau du serveur (`network_mode: host`) et joint les projets par l'adresse de leur conteneur (`docker::Reach::Address`). Les projets ont chacun leur conteneur (`devhub-<nom>`), et les tâches ponctuelles (installation, mise à jour, passage sur un domaine) tournent dans des conteneurs temporaires.
+- Pas de second service dans `docker-compose.yml`. `caddy/Dockerfile` n'est plus utilisé mais reste tel quel : les anciennes versions de DevHub le comparent pendant leur mise à jour et reconstruiraient sinon un service `caddy` qui n'existe plus.
 - Rien d'autre ne s'installe ni ne tourne sur le VPS que Docker lui-même : pas de binaire, de service systemd, de paquet ou de règle système ajoutés par DevHub. Une nouvelle fonction qui a besoin de l'hôte passe par un montage ou par le socket Docker, jamais par un programme installé sur le VPS.
 - Sur le VPS, seulement des fichiers : `/opt/devhub` (code, `.env`, `data/`), montés dans les conteneurs.
 - Installation recommandée : `docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install` (voir `installer/Dockerfile` et `install.sh`).
 - L'installation se fait dans le navigateur, pas dans la console : `install.sh` ne pose aucune question (seulement installer Docker s'il manque), démarre DevHub sur l'IP du serveur et affiche l'adresse de `/setup` et le code. Le guide web (`src/web/setup.rs`) demande ensuite le nom de domaine, vérifie le DNS et fait passer DevHub sur le domaine (`updater::switch_domain`, conteneur temporaire qui réécrit le `.env` puis `docker compose up -d`). Le code d'installation est gardé dans les réglages (`setup_code`) jusqu'à la création du propriétaire.
 
 ## Avec ou sans nom de domaine
-- Avec un domaine : passkeys, un sous-domaine par projet (Caddy en bridge, `Caddyfile`).
-- Sans domaine, mode « IP seule » (`DEVHUB_DOMAIN` = une IP, `cfg.ip_mode`) : connexion par mot de passe (les passkeys refusent une IP), un port par projet web (`https://IP:20000`…), Caddy sur le réseau du serveur (`docker-compose.ip.yml`, `caddy/Caddyfile.ip`).
+- Avec un domaine : passkeys, un sous-domaine par projet (`caddy/Caddyfile`).
+- Sans domaine, mode « IP seule » (`DEVHUB_DOMAIN` = une IP, `cfg.ip_mode`) : connexion par mot de passe (les passkeys refusent une IP), un port par projet web (`https://IP:20000`…), `caddy/Caddyfile.ip` (DevHub calcule `DEVHUB_IP_SITES`). `docker-compose.ip.yml` ne reste que pour les anciens `.env` qui le citent.
 
 ## Accès au VPS
 - DevHub a la main sur le VPS depuis son conteneur, pour piloter les projets (socket Docker) et lire les statistiques du serveur (CPU, mémoire, disque, durée de fonctionnement…).
@@ -21,4 +22,4 @@
 - Ne jamais lire ni commiter `.env` ni `data/`. Le dépôt est public : aucun secret, jeton ou domaine réel (utiliser `example.com`).
 - Pas de force-push ni de réécriture d'historique sans demande explicite.
 - Ne pas lancer la mise à jour de DevHub en production (`devhub_update` « apply ») sans demande : pousser sur `main`, l'utilisateur installe.
-- Images publiées par GitHub dans un seul paquet : `ghcr.io/tweastly/devhub` (tags `latest`, `caddy`, `install`).
+- Images publiées par GitHub dans un seul paquet : `ghcr.io/tweastly/devhub` (tags `latest`, `install` ; l'ancien tag `caddy` n'est plus construit).

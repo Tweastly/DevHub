@@ -71,6 +71,50 @@ pub struct Limits {
     /// Web ports also published on the server (bind_ip). Off without a domain: Caddy listens
     /// on those port numbers itself and DevHub reaches projects by container name.
     pub publish_web: bool,
+    /// DevHub on the server's network: it can't join project networks (see `Reach`).
+    pub host_network: bool,
+}
+
+/// How DevHub reaches a project's ports.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Reach {
+    /// DevHub outside Docker: the ports published on the server.
+    Published,
+    /// DevHub in a container that joins each project's network: the container's name.
+    Name,
+    /// DevHub on the server's network (its usual setup, with Caddy inside): the container's
+    /// address on its project network, which the server routes to.
+    Address,
+}
+
+static ADDRESSES: std::sync::LazyLock<std::sync::Mutex<HashMap<String, std::net::IpAddr>>> = std::sync::LazyLock::new(Default::default);
+
+/// A project container's address on its network. `fresh`: ask Docker again (it changes when
+/// the container is recreated), else the last one seen.
+pub async fn container_address(d: &Docker, project: &str, fresh: bool) -> Option<std::net::IpAddr> {
+    if !fresh {
+        if let Some(ip) = ADDRESSES.lock().unwrap().get(project) {
+            return Some(*ip);
+        }
+    }
+    let info = d.inspect_container(&container_name(project), None::<InspectContainerOptions>).await.ok()?;
+    let nets = info.network_settings?.networks?;
+    let net = nets.get(&network_name(project)).or_else(|| nets.values().next())?;
+    let ip: std::net::IpAddr = net.ip_address.as_deref()?.parse().ok()?;
+    ADDRESSES.lock().unwrap().insert(project.to_string(), ip);
+    Some(ip)
+}
+
+/// "host:port" where DevHub reaches a project's port.
+pub async fn project_addr(d: &Docker, reach: Reach, project: &str, container_port: u16, host_port: u16, fresh: bool) -> String {
+    match reach {
+        Reach::Published => format!("127.0.0.1:{host_port}"),
+        Reach::Name => format!("{}:{container_port}", container_name(project)),
+        Reach::Address => match container_address(d, project, fresh).await {
+            Some(ip) => std::net::SocketAddr::new(ip, container_port).to_string(),
+            None => format!("127.0.0.1:{host_port}"),
+        },
+    }
 }
 
 const SOCKET: &str = "/var/run/docker.sock";
@@ -247,7 +291,7 @@ pub async fn create(docker: &Docker, p: &Project, lim: &Limits) -> anyhow::Resul
             }
         }
     }
-    if let Some(me) = &lim.self_container {
+    if let (Some(me), false) = (&lim.self_container, lim.host_network) {
         join_network(docker, &net, me).await;
     }
     if docker.inspect_image(&p.image).await.is_err() {
@@ -467,12 +511,8 @@ pub async fn detail(d: &Docker, p: &str) -> Detail {
 }
 
 /// Is something listening on this container port? (Proxy-style check, 300 ms max.)
-pub async fn port_open(self_container: bool, project: &str, container_port: u16, host_port: u16) -> bool {
-    let addr = if self_container {
-        format!("{}:{container_port}", container_name(project))
-    } else {
-        format!("127.0.0.1:{host_port}")
-    };
+pub async fn port_open(d: &Docker, reach: Reach, project: &str, container_port: u16, host_port: u16) -> bool {
+    let addr = project_addr(d, reach, project, container_port, host_port, true).await;
     matches!(
         tokio::time::timeout(Duration::from_millis(300), tokio::net::TcpStream::connect(addr)).await,
         Ok(Ok(_))
@@ -487,9 +527,9 @@ pub struct BedrockStatus {
     pub max: String,
 }
 
-pub async fn bedrock_ping(self_container: bool, project: &str, container_port: u16, host_port: u16) -> Option<BedrockStatus> {
+pub async fn bedrock_ping(d: &Docker, reach: Reach, project: &str, container_port: u16, host_port: u16) -> Option<BedrockStatus> {
     const MAGIC: [u8; 16] = [0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78];
-    let addr = if self_container { format!("{}:{container_port}", container_name(project)) } else { format!("127.0.0.1:{host_port}") };
+    let addr = project_addr(d, reach, project, container_port, host_port, true).await;
     let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
     sock.connect(&addr).await.ok()?;
     let mut ping = vec![0x01];

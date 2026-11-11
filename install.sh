@@ -7,8 +7,9 @@
 #
 #   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install
 #
-# Checks Docker (installs it if needed), fetches DevHub into /opt/devhub, pulls its images
-# from GitHub (or builds them) and starts it on the server's IP address, then prints the
+# Checks Docker (installs it if needed), fetches DevHub into /opt/devhub, pulls its image
+# from GitHub (or builds it) and starts it, in one container with its HTTPS front (Caddy),
+# on the server's IP address, then prints the
 # address of the installation guide and its code. Nothing else is asked here: the domain
 # name, the account and the rest are chosen in the browser, in the guide.
 # Run it again to update an existing installation: the .env is kept.
@@ -25,7 +26,6 @@ set -eu
 
 REPO_URL="${DEVHUB_REPO_URL:-https://github.com/Tweastly/DevHub}"
 IMAGE="${DEVHUB_IMAGE:-ghcr.io/tweastly/devhub:latest}"
-CADDY_IMAGE="${DEVHUB_CADDY_IMAGE:-ghcr.io/tweastly/devhub:caddy}"
 DIR="${DEVHUB_DIR:-/opt/devhub}"
 BRANCH="${DEVHUB_BRANCH:-main}"
 DOMAIN="${DEVHUB_DOMAIN:-}"
@@ -33,6 +33,7 @@ DOMAIN="${DEVHUB_DOMAIN:-}"
 MODE="${DEVHUB_MODE:-}"
 # Without a domain, the web projects' ports (one per project, opened on the server).
 IP_RANGE="${DEVHUB_PORT_RANGE:-20000-20099}"
+RANGE_SET="${DEVHUB_PORT_RANGE:+1}"
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 YES=0
 # Run from the installer image: the server's Docker comes through its socket and DIR is
@@ -239,22 +240,13 @@ else
 fi
 
 # ---------- Configuration ----------
-# The .env lines that follow the domain / mode.
-ip_sites() {
-  lo="${IP_RANGE%-*}"; hi="${IP_RANGE#*-}"
-  sites="https://$DOMAIN"; p="$lo"
-  while [ "$p" -le "$hi" ]; do sites="$sites, https://$DOMAIN:$p"; p=$((p + 1)); done
-  printf '%s' "$sites"
-}
+# The .env lines that follow the domain / mode. Without a domain, DEVHUB_DOMAIN is the IP:
+# DevHub sees it and serves one HTTPS port per web project (20000-20099 by default).
 mode_lines() {
   echo "DEVHUB_DOMAIN=$DOMAIN"
-  if [ "$MODE" = ip ]; then
-    # No domain: docker-compose.ip.yml (Caddy on the server's network, one port per project).
-    echo "COMPOSE_FILE=docker-compose.yml:docker-compose.ip.yml"
-    echo "DEVHUB_PORT_RANGE=$IP_RANGE"
-    echo "DEVHUB_IP_SITES=$(ip_sites)"
-  fi
+  if [ "$MODE" = ip ] && [ -n "$RANGE_SET" ]; then echo "DEVHUB_PORT_RANGE=$IP_RANGE"; fi
 }
+# Also the lines of older versions (COMPOSE_FILE, DEVHUB_IP_SITES), dropped on a rewrite.
 MODE_KEYS='^(DEVHUB_DOMAIN|COMPOSE_FILE|DEVHUB_PORT_RANGE|DEVHUB_IP_SITES)='
 if [ -f "$DIR/.env" ] && [ "$CHOSEN" -eq 1 ]; then
   KEEP="$(run grep -vE "$MODE_KEYS" "$DIR/.env" || true)"
@@ -278,14 +270,14 @@ else
   else ok "Configuration écrite, un certificat par projet"; fi
 fi
 
-# ---------- Images ----------
-# Built by GitHub on every push: pulled here and tagged with the names compose expects.
-# Without them (no access, registry down), compose builds them on this server.
+# ---------- Image ----------
+# Built by GitHub on every push (DevHub and its Caddy): pulled here and tagged with the name
+# compose expects. Without it (no access, registry down), compose builds it on this server.
 cd "$DIR"
 LOCAL_IMG="$(run docker compose config --images devhub 2>/dev/null | head -n 1 || true)"
 [ -n "$LOCAL_IMG" ] || LOCAL_IMG="$(basename "$DIR" | tr '[:upper:]' '[:lower:]')-devhub"
 pull_as() { run docker pull -q "$1" >/dev/null 2>&1 && run docker tag "$1" "$2"; }
-info "Téléchargement des images depuis GitHub"
+info "Téléchargement de l'image depuis GitHub"
 if pull_as "$IMAGE" "$LOCAL_IMG"; then
   ok "Image $IMAGE"
 else
@@ -293,20 +285,14 @@ else
   run docker compose build -q devhub || die "la compilation de DevHub a échoué"
   ok "DevHub compilé"
 fi
-if pull_as "$CADDY_IMAGE" devhub-caddy; then
-  ok "Image $CADDY_IMAGE"
-else
-  info "Caddy est compilé sur ce serveur (1 à 3 min)"
-  run docker compose build -q caddy || die "la compilation de Caddy a échoué"
-  ok "Caddy compilé"
-fi
 
 # ---------- Start ----------
-run docker compose up -d >/dev/null 2>&1 || {
-  run docker compose up -d
+# One container. --remove-orphans: the separate Caddy container of older versions.
+run docker compose up -d --remove-orphans >/dev/null 2>&1 || {
+  run docker compose up -d --remove-orphans
   die "le démarrage a échoué (voir ci-dessus)"
 }
-ok "DevHub et Caddy démarrés"
+ok "DevHub démarré (un seul conteneur, Caddy compris)"
 
 # ---------- Installation code ----------
 CODE=""

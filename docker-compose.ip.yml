@@ -1,15 +1,5 @@
-# Mode « IP seule » (pas de nom de domaine), activé par install.sh dans le .env :
-#   COMPOSE_FILE=docker-compose.yml:docker-compose.ip.yml
-# Caddy écoute directement sur le serveur : 80 et 443 pour le panel, une plage de ports
-# pour les projets (un port par projet web), et rejoint DevHub sur 127.0.0.1:8080.
+# Former override for installations without a domain name, still named by COMPOSE_FILE in
+# the .env of those installed before DevHub ran in one container. Nothing left to change:
+# DevHub sees that DEVHUB_DOMAIN is an IP address and sets Caddy up for it.
 services:
-  devhub:
-    ports: ["127.0.0.1:8080:8080"]
-    environment:
-      DEVHUB_PORT_RANGE: ${DEVHUB_PORT_RANGE:-20000-20099}
-  caddy:
-    network_mode: host
-    ports: !reset []
-    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.ip", "--adapter", "caddyfile"]
-    environment:
-      DEVHUB_IP_SITES: ${DEVHUB_IP_SITES:?install.sh écrit DEVHUB_IP_SITES dans le .env}
+  devhub: {}

@@ -192,7 +192,7 @@ fn first_steps(st: &AppState) -> Markup {
                 div.wz-body {
                     div.wz-card.wz-checks {
                         div.wz-check { span.mk.ok { (PreEscaped(CHECK)) } span.t { "Domaine enregistré dans la configuration du serveur" } span.side {} }
-                        div.wz-check { span.mk.spin {} span.t #mv-state { "Redémarrage de DevHub et de Caddy, certificat HTTPS…" } span.side {} }
+                        div.wz-check { span.mk.spin {} span.t #mv-state { "Redémarrage de DevHub, certificat HTTPS…" } span.side {} }
                     }
                     div.wz-hint #mv-slow hidden {
                         b { "Ça prend du temps ?" }
@@ -539,7 +539,7 @@ async fn domain(st: &AppState, q: &HashMap<String, String>) -> Markup {
                         ol {
                             li { "Cloudflare › Mon profil › Jetons d'API : un jeton " b { "Zone › DNS › Modifier" } " pour ta zone." }
                             li { "Dans le " code { ".env" } " de DevHub : " code { "DEVHUB_TLS=wildcard" } " et " code { "CLOUDFLARE_API_TOKEN=…" } }
-                            li { "Sur le serveur : " code { "docker compose up -d caddy" } ", puis « Revérifier »." }
+                            li { "Sur le serveur, dans le dossier de DevHub : " code { "docker compose up -d" } ", puis « Revérifier »." }
                         }
                     }
                 }

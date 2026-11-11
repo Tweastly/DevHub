@@ -275,7 +275,7 @@ async fn project_json(st: &AppState, p: &db::Project, with_env: bool) -> Value {
         v["env"] = json!(p.env);
     }
     let domains = db::domains_of(&st.db.lock().unwrap(), &p.name);
-    let https = futures_util::future::join_all(domains.iter().map(|(h, _)| crate::tls::status(st, h))).await;
+    let https = futures_util::future::join_all(domains.iter().map(|(h, _)| crate::tls::status(h))).await;
     v["domains"] = json!(domains
         .iter()
         .zip(https)

@@ -274,6 +274,15 @@ async fn connect(st: &AppState, t: &Target) -> anyhow::Result<tokio::net::TcpStr
     let Some(me) = &st.cfg.self_container else {
         return Ok(tokio::net::TcpStream::connect(("127.0.0.1", t.host_port)).await?);
     };
+    if st.cfg.host_network {
+        // The address is remembered; a recreated container has a new one: look again once.
+        let (name, cp, hp) = (&t.project.name, t.container_port, t.host_port);
+        let addr = docker::project_addr(&st.docker, docker::Reach::Address, name, cp, hp, false).await;
+        return match tokio::net::TcpStream::connect(&addr).await {
+            Ok(s) => Ok(s),
+            Err(_) => Ok(tokio::net::TcpStream::connect(docker::project_addr(&st.docker, docker::Reach::Address, name, cp, hp, true).await).await?),
+        };
+    }
     let addr = format!("{}:{}", docker::container_name(&t.project.name), t.container_port);
     match tokio::net::TcpStream::connect(&addr).await {
         Ok(s) => Ok(s),

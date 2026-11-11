@@ -1,4 +1,5 @@
 mod auth;
+mod caddy;
 mod db;
 mod docker;
 mod files;
@@ -43,6 +44,9 @@ pub struct Config {
     /// No domain name: DEVHUB_DOMAIN is the server's IP address. Sign-in by password
     /// (passkeys need a domain) and each web project on its own port.
     pub ip_mode: bool,
+    /// DevHub's container is on the server's network (docker-compose.yml, Caddy inside):
+    /// projects are reached at their container's address, without joining their networks.
+    pub host_network: bool,
 }
 
 #[derive(Clone)]
@@ -87,6 +91,15 @@ impl AppState {
             port_range: self.cfg.port_range,
             // Without DevHub in Docker, the proxy reaches projects through these host ports.
             publish_web: !self.cfg.ip_mode || self.cfg.self_container.is_none(),
+            host_network: self.cfg.host_network,
+        }
+    }
+    /// How this DevHub reaches its projects' ports.
+    pub fn reach(&self) -> docker::Reach {
+        match (&self.cfg.self_container, self.cfg.host_network) {
+            (None, _) => docker::Reach::Published,
+            (Some(_), false) => docker::Reach::Name,
+            (Some(_), true) => docker::Reach::Address,
         }
     }
     fn num_setting<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
@@ -132,20 +145,30 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
     let domain = env("DEVHUB_DOMAIN", "localhost");
     let origin = env("DEVHUB_ORIGIN", &format!("https://{domain}"));
-    let (lo, hi) = env("DEVHUB_PORT_RANGE", "20000-20999")
+    let ip_mode = domain.parse::<std::net::IpAddr>().is_ok();
+    // Without a domain, Caddy listens on each of these ports: a hundred by default.
+    let range = env("DEVHUB_PORT_RANGE", "");
+    let range = if !range.is_empty() { range } else if ip_mode { "20000-20099".into() } else { "20000-20999".into() };
+    let (lo, hi) = range
         .split_once('-')
         .map(|(a, b)| (a.parse().unwrap(), b.parse().unwrap()))
         .expect("DEVHUB_PORT_RANGE=lo-hi");
-    let ip_mode = domain.parse::<std::net::IpAddr>().is_ok();
+    let docker = bollard::Docker::connect_with_local_defaults()?;
+    let self_container = std::env::var("DEVHUB_SELF_CONTAINER").ok().filter(|s| !s.is_empty());
+    let host_network = match &self_container {
+        Some(me) => docker.inspect_container(me, None).await.ok().and_then(|c| c.host_config).and_then(|h| h.network_mode).as_deref() == Some("host"),
+        None => false,
+    };
     let cfg = Config {
         ip_mode,
+        host_network,
         domain: domain.clone(),
         origin: origin.clone(),
         port_range: (lo, hi),
         memory_bytes: env("DEVHUB_MEMORY_MB", "4096").parse::<i64>()? * 1024 * 1024,
         nano_cpus: (env("DEVHUB_CPUS", "2").parse::<f64>()? * 1e9) as i64,
         bind_ip: env("DEVHUB_BIND_IP", "0.0.0.0"),
-        self_container: std::env::var("DEVHUB_SELF_CONTAINER").ok().filter(|s| !s.is_empty()),
+        self_container,
         apps_domain: std::env::var("DEVHUB_APPS_DOMAIN").ok().filter(|s| !s.is_empty() && !ip_mode).or_else(|| {
             if ip_mode {
                 return None;
@@ -177,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let st = AppState {
         db: Arc::new(Mutex::new(conn)),
-        docker: bollard::Docker::connect_with_local_defaults()?,
+        docker,
         webauthn: Arc::new(webauthn),
         cfg: Arc::new(cfg),
         setup_token: Arc::new(Mutex::new(None)),
@@ -193,8 +216,10 @@ async fn main() -> anyhow::Result<()> {
         data_dir: Arc::new(data_dir.clone()),
     };
     if let Some(me) = &st.cfg.self_container {
-        let projects = db::list_projects(&st.db.lock().unwrap())?;
-        docker::join_all(&st.docker, &projects, me).await;
+        if !st.cfg.host_network {
+            let projects = db::list_projects(&st.db.lock().unwrap())?;
+            docker::join_all(&st.docker, &projects, me).await;
+        }
         // An update recreates the container without limits: put them back.
         let (mem, cpus) = st.devhub_limits();
         if mem.is_some() || cpus.is_some() {
@@ -220,6 +245,7 @@ async fn main() -> anyhow::Result<()> {
         *st.setup_token.lock().unwrap() = Some(code);
     }
 
+    let front = st.clone();
     let app = Router::new()
         .route("/", get(web::overview::page))
         .route("/assets/{file}", get(web::asset))
@@ -312,8 +338,16 @@ async fn main() -> anyhow::Result<()> {
         .with_state(st);
 
     let addr = env("DEVHUB_LISTEN", "0.0.0.0:8080");
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("listening on {addr}");
-    axum::serve(tokio::net::TcpListener::bind(&addr).await?, app).await?;
+    if front.cfg.host_network && !addr.starts_with("127.") && !addr.starts_with("[::1]") && !addr.starts_with("localhost") {
+        tracing::warn!("DEVHUB_LISTEN={addr} sur le réseau du serveur : DevHub est joignable sans passer par Caddy");
+    }
+    // Caddy once DevHub's port is open: it never proxies to a closed port.
+    if caddy::enabled() {
+        caddy::spawn(front, addr.clone());
+    }
+    axum::serve(listener, app).await?;
     Ok(())
 }
 

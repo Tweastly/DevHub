@@ -214,7 +214,8 @@ pub fn spawn_periodic(st: AppState) {
     tokio::spawn({
         let st = st.clone();
         async move {
-            // The update that restarted DevHub ends a few seconds later (Caddy reload).
+            // The update that restarted DevHub ends just after (or, from an older version,
+            // a few seconds later).
             for _ in 0..12 {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 finalize(&st).await;
@@ -436,18 +437,12 @@ if [ -n "$REMOTE" ]; then
   done
 fi
 [ -n "$GOT" ] || docker compose -p "$PROJECT" build devhub
-# Caddy is rebuilt only when its image changes: recreating it cuts every site
-# (Cloudflare then shows its 521 page). Its config is reloaded below instead.
-if [ -z "$(docker images -q devhub-caddy)" ] || ! git diff --quiet "$OLD" HEAD -- caddy/Dockerfile; then
-  docker compose -p "$PROJECT" build caddy
-fi
-docker compose -p "$PROJECT" up -d
-step "rechargement de Caddy"
-docker compose -p "$PROJECT" exec -T caddy caddy reload --config "$CADDYFILE" || echo "Caddy non rechargé"
+# One container (Caddy inside): recreating it restarts the panel and its HTTPS front.
+# --remove-orphans: the Caddy container of older versions, if it is still there.
+step "redémarrage"
+docker compose -p "$PROJECT" up -d --remove-orphans
 step "terminé""#;
-    // Without a domain, Caddy runs Caddyfile.ip (docker-compose.ip.yml).
-    let caddyfile = if st.cfg.ip_mode { "/etc/caddy/Caddyfile.ip" } else { "/etc/caddy/Caddyfile" };
-    let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}"), format!("CADDYFILE={caddyfile}")];
+    let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}")];
     if let Some(slug) = github_slug(&repo_dir()) {
         env.push(format!("REMOTE=ghcr.io/{}", slug.to_ascii_lowercase()));
     }
@@ -503,7 +498,7 @@ const RECONFIGURE: &str = "devhub-reconfigure";
 
 /// From the server's IP to a domain name, during the installation guide: a short-lived
 /// container rewrites the mode lines of the server's .env (as `install.sh --domain` would)
-/// and restarts DevHub and Caddy with docker compose. Nothing else is touched.
+/// and recreates DevHub's container with docker compose. Nothing else is touched.
 /// Returns the installation folder on the server.
 pub async fn switch_domain(st: &AppState, domain: &str) -> anyhow::Result<String> {
     let d = &st.docker;
@@ -525,7 +520,7 @@ grep -vE '^(DEVHUB_DOMAIN|COMPOSE_FILE|DEVHUB_PORT_RANGE|DEVHUB_IP_SITES)=' .env
 echo "DEVHUB_DOMAIN=$DOMAIN" >> /tmp/env
 cat /tmp/env > .env
 echo "== .env : DEVHUB_DOMAIN=$DOMAIN"
-docker compose -p "$PROJECT" up -d
+docker compose -p "$PROJECT" up -d --remove-orphans
 echo "== terminé""#;
     let cfg = Config {
         image: Some(image.to_string()),
@@ -593,39 +588,38 @@ pub struct Step {
     pub state: &'static str,
 }
 
-/// The five steps of an update, read from the helper's log ("== step (N s)" lines and
+/// The four steps of an update, read from the helper's log ("== step (N s)" lines and
 /// compose's output). `failed`: the update ended in error, at the step it reached.
 pub fn steps(log: &str, failed: bool) -> Vec<Step> {
     let mark = |needle: &str| log.lines().find(|l| l.contains(needle)).and_then(|l| l.rsplit_once('(')).and_then(|(_, r)| r.trim_end_matches(|c| c == ')' || c == ' ').trim_end_matches(" s").trim().parse::<i64>().ok());
     let reached = [
         log.contains("== récupération du code"),
         log.contains("== reconstruction de DevHub"),
-        log.contains("Recreate") || log.contains("Recreated"),
-        log.contains("== rechargement de Caddy"),
+        log.contains("== redémarrage") || log.contains("Recreate") || log.contains("Recreated"),
         log.contains("== terminé"),
     ];
     let t_build = mark("== reconstruction de DevHub");
-    let t_caddy = mark("== rechargement de Caddy");
+    // Older updates reloaded a separate Caddy after compose: the build ended there.
+    let t_restart = mark("== redémarrage").or_else(|| mark("== rechargement de Caddy"));
     let t_end = mark("== terminé");
     let secs = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(a), Some(b)) if b >= a => format!("{} s", b - a), _ => String::new() };
     let method = if log.contains("image GitHub récupérée") { "image GitHub" } else if log.contains("image GitHub pas encore prête") && !log.contains("Recreate") { "attente de l'image GitHub" } else if reached[1] { "compilation" } else { "" };
     let details = [
         format!("git pull{}", t_build.map(|t| format!(" · {t} s")).unwrap_or_default()),
-        [method.to_string(), secs(t_build, t_caddy)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
-        "devhub et caddy".to_string(),
-        secs(t_caddy, t_end),
+        [method.to_string(), secs(t_build, t_restart)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
+        ["devhub".to_string(), secs(t_restart, t_end)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
         "nouvelle version".to_string(),
     ];
-    let labels = ["Code récupéré", "Construction", "Redémarrage", "Caddy rechargé", "En ligne"];
+    let labels = ["Code récupéré", "Construction", "Redémarrage", "En ligne"];
     // The current step is the last one reached that has no successor yet.
-    let current = reached.iter().rposition(|r| *r).map(|i| if reached[4] { 5 } else { i }).unwrap_or(0);
+    let current = reached.iter().rposition(|r| *r).map(|i| if reached[3] { 4 } else { i }).unwrap_or(0);
     labels
         .iter()
         .enumerate()
         .map(|(i, l)| Step {
             label: l,
             detail: details[i].clone(),
-            state: if i < current { "done" } else if i == current && current < 5 { if failed { "fail" } else { "now" } } else { "todo" },
+            state: if i < current { "done" } else if i == current && current < 4 { if failed { "fail" } else { "now" } } else { "todo" },
         })
         .collect()
 }
@@ -683,7 +677,9 @@ pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
 mod tests {
     use super::steps;
 
-    const LOG: &str = "== récupération du code (0 s)\nUpdating 6ee7269..bc49915\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n Container devhub  Recreate\n Container devhub  Recreated\n Container devhub  Started\n== rechargement de Caddy (49 s)\n== terminé (50 s)\n";
+    const LOG: &str = "== récupération du code (0 s)\nUpdating 6ee7269..bc49915\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n== redémarrage (49 s)\n Container devhub  Recreate\n Container devhub  Recreated\n Container devhub  Started\n== terminé (51 s)\n";
+    /// From a version that still had a separate Caddy container.
+    const OLD_LOG: &str = "== récupération du code (0 s)\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n Container devhub  Recreate\n Container devhub  Started\n== rechargement de Caddy (49 s)\n== terminé (50 s)\n";
 
     fn states(log: &str, failed: bool) -> Vec<&'static str> {
         steps(log, failed).iter().map(|s| s.state).collect()
@@ -691,19 +687,22 @@ mod tests {
 
     #[test]
     fn finished_update_is_all_done() {
-        assert_eq!(states(LOG, false), ["done"; 5]);
+        assert_eq!(states(LOG, false), ["done"; 4]);
         assert_eq!(steps(LOG, false)[1].detail, "compilation · 47 s");
+        assert_eq!(steps(LOG, false)[2].detail, "devhub · 2 s");
+        assert_eq!(states(OLD_LOG, false), ["done"; 4]);
+        assert_eq!(steps(OLD_LOG, false)[1].detail, "compilation · 47 s");
     }
 
     #[test]
     fn running_build_is_the_current_step() {
         let log = &LOG[..LOG.find("#27").unwrap()];
-        assert_eq!(states(log, false), ["done", "now", "todo", "todo", "todo"]);
+        assert_eq!(states(log, false), ["done", "now", "todo", "todo"]);
     }
 
     #[test]
     fn failed_build_marks_its_step() {
         let log = &LOG[..LOG.find("#27").unwrap()];
-        assert_eq!(states(log, true), ["done", "fail", "todo", "todo", "todo"]);
+        assert_eq!(states(log, true), ["done", "fail", "todo", "todo"]);
     }
 }

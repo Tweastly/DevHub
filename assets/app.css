@@ -997,7 +997,7 @@ img.avatar { object-fit: cover; padding: 0; background: var(--card-2); }
 .upd-pct { font: 500 26px var(--mono); color: var(--accent-ink); }
 .upd-bar { height: 6px; }
 .upd-bar > i { background: var(--accent); }
-.upd-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.upd-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .upd-steps li { padding: 14px; border-radius: 11px; background: var(--card-2); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .upd-steps .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--border-2); box-sizing: border-box; }
 .upd-steps .ic svg { width: 12px; height: 12px; stroke-width: 3; }

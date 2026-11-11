@@ -286,8 +286,8 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
         let l = event(&names, &r.action, &r.detail).label;
         matches!(l.as_str(), "project.restart" | "project.start" | "project.rebuild" | "project.create" | "project_action")
     });
-    let self_c = st.cfg.self_container.is_some();
-    let checks = futures_util::future::join_all(x.p.ports.iter().map(|m| async move { m.udp || docker::port_open(self_c, n, m.container, m.host).await })).await;
+    let (d, reach) = (&st.docker, st.reach());
+    let checks = futures_util::future::join_all(x.p.ports.iter().map(|m| async move { m.udp || docker::port_open(d, reach, n, m.container, m.host).await })).await;
     let logs = if x.s.state == "absent" { String::new() } else { docker::logs(&st.docker, n, 60).await };
     let mcp_url = format!("{}/mcp/{}", st.cfg.origin, x.p.mcp_token);
     let minecraft = if x.p.is_game() { Some(minecraft_card(&st, &x).await) } else { None };
@@ -426,14 +426,14 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
         None => None,
     };
     let first_http = x.p.first_http().map(|m| m.container);
-    let self_c = st.cfg.self_container.is_some();
+    let (d, reach) = (&st.docker, st.reach());
     // Something listening? (UDP can't be probed: Bedrock answers its own ping, shown in the hero.)
     let open = futures_util::future::join_all(x.p.ports.iter().map(|m| async move {
-        if !running { Some(false) } else if m.udp { None } else { Some(docker::port_open(self_c, n, m.container, m.host).await) }
+        if !running { Some(false) } else if m.udp { None } else { Some(docker::port_open(d, reach, n, m.container, m.host).await) }
     }))
     .await;
     let game = if x.p.is_game() { game_status(&st, &x).await } else { None };
-    let https = futures_util::future::join_all(x.domains.iter().map(|(h, _)| crate::tls::status(&st, h))).await;
+    let https = futures_util::future::join_all(x.domains.iter().map(|(h, _)| crate::tls::status(h))).await;
     // A Bedrock server that answered its ping is listening on its UDP port.
     let open: Vec<Option<bool>> = open.into_iter().zip(&x.p.ports).map(|(o, m)| if m.udp && game.is_some() { Some(true) } else { o }).collect();
     let game_port = x.p.public_ports().next().cloned();
@@ -1096,7 +1096,7 @@ async fn game_status(st: &AppState, x: &P) -> Option<McStatus> {
     }
     if bedrock {
         let m = x.p.public_ports().find(|m| m.udp)?;
-        docker::bedrock_ping(st.cfg.self_container.is_some(), &x.p.name, m.container, m.host)
+        docker::bedrock_ping(&st.docker, st.reach(), &x.p.name, m.container, m.host)
             .await
             .map(|s| McStatus { version: s.version, online: s.online, max: s.max, motd: s.motd })
     } else {

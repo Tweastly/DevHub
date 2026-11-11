@@ -3,10 +3,12 @@
 Panel auto-hébergé (Rust) pour faire tourner tes projets sur un VPS : un conteneur Docker isolé par projet, un sous-domaine HTTPS automatique, une connexion uniquement par passkey, et un accès MCP pour que **Claude travaille directement dans les conteneurs**.
 
 ```
-Navigateur ──passkey──▶ Caddy (HTTPS) ──▶ devhub (Rust, axum) ──socket──▶ Docker
-Claude ──https://dev.example.com/mcp (OAuth)──┘                    ├─ devhub-projet-a (+ volume)
-                                                                   └─ devhub-projet-b (+ volume)
+Navigateur ──passkey──▶ [ conteneur devhub : Caddy (HTTPS) ──▶ DevHub (Rust, axum) ] ──socket──▶ Docker
+Claude ──https://dev.example.com/mcp (OAuth)─┘                                                    ├─ devhub-projet-a (+ volume)
+                                                                                                  └─ devhub-projet-b (+ volume)
 ```
+
+DevHub tient dans **un seul conteneur**, `devhub` : le panel et son Caddy (HTTPS), que DevHub lance lui-même. Il est sur le réseau du serveur, et chaque projet a son propre conteneur.
 
 Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son domaine parent : remplace-les par les tiens.
 
@@ -50,9 +52,9 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 - **MCP par projet** : une URL secrète par projet, limitée à ce seul conteneur (`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `project_info`), régénérable.
 
 ### Mises à jour
-- **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 5 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, résultat).
-- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull`, reconstruction de DevHub depuis un conteneur temporaire, puis rechargement de Caddy). Caddy n'est reconstruit que si `caddy/Dockerfile` change : les sites ne sont jamais coupés.
-- **Pas de page d'erreur** pendant le redémarrage : Caddy affiche « DevHub redémarre… », qui se recharge toute seule dès que le panel répond.
+- **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 4 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, résultat).
+- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull`, nouvelle image de DevHub depuis un conteneur temporaire, puis recréation du conteneur `devhub`). Le panel et les sites des projets sont coupés quelques secondes pendant ce redémarrage ; les projets eux-mêmes continuent de tourner.
+- La page de mise à jour suit le redémarrage et reprend toute seule dès que le panel répond.
 - **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
 - **Compilation sur le serveur** avec un cache : seul le code de DevHub est recompilé, le panel redémarre en environ une minute.
 
@@ -84,7 +86,7 @@ docker logs devhub | grep CODE
 ```
 </details>
 
-Les images de DevHub (`ghcr.io/tweastly/devhub:latest`), de son Caddy (`:caddy`) et de l'installateur (`:install`), toutes dans le même paquet, sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends le paquet public (GitHub › Packages › devhub › Package settings › Change visibility). Sinon le script les compile sur le serveur.
+L'image de DevHub (`ghcr.io/tweastly/devhub:latest`, Caddy compris) et celle de l'installateur (`:install`), dans le même paquet, sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends le paquet public (GitHub › Packages › devhub › Package settings › Change visibility). Sinon le script compile DevHub sur le serveur.
 
 ### Sans nom de domaine
 
@@ -98,7 +100,7 @@ C'est le choix « Non » de la première étape du guide, et le mode de départ 
 | Certificat | Let's Encrypt par projet, ou joker | Let's Encrypt pour l'IP (6 jours, renouvelé seul), sinon celui de Caddy avec un avertissement du navigateur |
 | Ports à ouvrir | 80, 443 | 80, 443 et 20000-20099 |
 
-- Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. Caddy tourne sur le réseau du serveur (`docker-compose.ip.yml`, activé par `COMPOSE_FILE` dans le `.env`).
+- Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. DevHub le reconnaît à l'IP dans `DEVHUB_DOMAIN` et lance Caddy avec `caddy/Caddyfile.ip`.
 - **Passer plus tard à un domaine** (une fois le compte créé) : relance l'installation avec `--domain dev.example.com`. Le `.env` est mis à jour, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey. `--ip` fait le chemin inverse.
 
 ### Dépôt privé
@@ -112,7 +114,7 @@ Par défaut, chaque projet reçoit son certificat à la première visite, et un 
    DEVHUB_TLS=wildcard
    CLOUDFLARE_API_TOKEN=...
    ```
-3. `docker compose up -d caddy`. L'état est visible par MCP (`server_resources` → `https`, sans jamais montrer le jeton).
+3. `docker compose up -d` (DevHub redémarre avec son Caddy). L'état est visible par MCP (`server_resources` → `https`, sans jamais montrer le jeton).
 
 ## Configuration
 
@@ -120,11 +122,13 @@ Par défaut, chaque projet reçoit son certificat à la première visite, et un 
 |---|---|---|
 | `DEVHUB_DOMAIN` | `localhost` | domaine du panel (aussi l'identifiant WebAuthn des passkeys) |
 | `DEVHUB_ORIGIN` | `https://$DOMAIN` | origine exacte du panel |
-| `DEVHUB_PORT_RANGE` | `20000-20999` | plage des ports hôte des projets |
+| `DEVHUB_PORT_RANGE` | `20000-20999` (`20000-20099` sans domaine) | plage des ports hôte des projets |
 | `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par défaut des projets (modifiables dans Ressources) |
 | `DEVHUB_TLS` / `CLOUDFLARE_API_TOKEN` | `ondemand` / — | `wildcard` + un jeton Cloudflare : un certificat pour `*.DEVHUB_DOMAIN` |
 | `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP où les ports web des projets sont publiés |
-| `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy par réseau Docker |
+| `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy vers les conteneurs des projets |
+| `DEVHUB_LISTEN` | `0.0.0.0:8080` (`127.0.0.1:8080` en compose) | adresse de DevHub derrière Caddy |
+| `DEVHUB_CADDY` | — (`on` en compose) | DevHub lance Caddy dans son conteneur |
 | `DEVHUB_DATA` | `./data` | base SQLite |
 | `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés |
 | `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour les mises à jour (dépôt privé) ; sinon le compte GitHub de Mon profil |

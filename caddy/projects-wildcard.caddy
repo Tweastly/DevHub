@@ -5,6 +5,6 @@
 	tls {
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
-	reverse_proxy devhub:8080
+	reverse_proxy {$DEVHUB_UPSTREAM}
 	import restarting
 }
