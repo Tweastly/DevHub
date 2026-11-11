@@ -583,6 +583,8 @@ pub async fn migrate_now(State(st): State<AppState>, jar: CookieJar) -> Result<R
 pub async fn finalize(st: &AppState) {
     let Some(last) = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next() else { return };
     if last.finished_at.is_some() {
+        // Its result is recorded: a helper that worked has nothing more to tell.
+        remove_helper_if_done(st).await;
         return;
     }
     if PREPARING.load(std::sync::atomic::Ordering::Relaxed) {
@@ -605,6 +607,21 @@ pub async fn finalize(st: &AppState) {
     let finished = state.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339).unwrap_or_else(db::now);
     let error = if ok { String::new() } else { error_excerpt(&log) };
     let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, finished, ok, method, &error);
+    // A successful update leaves nothing behind; a failed one keeps its helper (and its
+    // log, for the update page) until the next attempt.
+    if ok {
+        remove_helper_if_done(st).await;
+    }
+}
+
+/// Removes the update's helper container once it has exited without error.
+async fn remove_helper_if_done(st: &AppState) {
+    let d = &st.docker;
+    if let Ok(c) = d.inspect_container(UPDATER, None::<InspectContainerOptions>).await {
+        if c.state.is_some_and(|s| s.running != Some(true) && s.exit_code == Some(0)) {
+            let _ = d.remove_container(UPDATER, None).await;
+        }
+    }
 }
 
 async fn full_log(st: &AppState) -> String {
