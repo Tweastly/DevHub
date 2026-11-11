@@ -12,8 +12,8 @@ Ce que DevHub permet :
 - **Créer un projet** à partir d'un modèle (Node.js, Rust, Python, Go, Debian, « Page web » prête à l'emploi) ou d'une image Docker perso, avec un dépôt Git optionnel cloné automatiquement.
 - **Piloter les conteneurs** : démarrer, arrêter, redémarrer, reconstruire, supprimer.
 - **Exposer les projets sur le web** :
-  - chaque projet est servi automatiquement sur `projet.dev.tweastly.com` (premier port) et `projet-5173.dev.tweastly.com` (port précis) ;
-  - on peut ajouter des **sous-domaines personnalisés** `<nom>.tweastly.com` ;
+  - chaque projet est servi automatiquement sur `projet.dev.example.com` (premier port) et `projet-5173.dev.example.com` (port précis) ;
+  - on peut ajouter des **sous-domaines personnalisés** `<nom>.example.com` ;
   - le HTTPS est automatique ;
   - un projet est **privé par défaut** (il faut être connecté) et peut être rendu public.
 - **Travailler dans le conteneur depuis le navigateur** : terminal web, gestionnaire de fichiers avec éditeur de texte, logs.
@@ -77,11 +77,11 @@ Sur mobile, un menu compact (burger ou barre d'onglets en bas, à toi de propose
 Tous partagent le même gabarit :
 - une **carte centrée** (max ~400 px) sur fond neutre ;
 - le logo en haut, puis un titre, un sous-titre et **un bouton principal pleine largeur** (noir en clair, blanc en sombre) avec une icône de clé ;
-- en pied de page, en petit : « Protégé par DevHub · dev.tweastly.com ».
+- en pied de page, en petit : « Protégé par DevHub · dev.example.com ».
 
 ### 5.1 Connexion
 - Titre « Se connecter à DevHub ».
-- Sous-titre : « Utilise ton passkey pour continuer. » ou, si l'utilisateur arrive d'un projet, « pour accéder à **mon-site.dev.tweastly.com** ».
+- Sous-titre : « Utilise ton passkey pour continuer. » ou, si l'utilisateur arrive d'un projet, « pour accéder à **mon-site.dev.example.com** ».
 - Bouton « 🔑 Se connecter avec un passkey ».
 - Zone de message d'erreur discrète (rouge) sous le bouton, par ex. « Erreur : opération annulée ».
 
@@ -157,7 +157,7 @@ C'est la page la plus riche. Elle doit rester **lisible et hiérarchisée** : pr
 - Ligne de stats : « CPU 3.4 % · Mémoire 212 Mo / 1024 Mo ».
 - Actions : **Start** (principal), **Stop**, **Restart**, **Rebuild**. Rebuild a une info-bulle : « Recrée le conteneur, garde /workspace ».
 - Raccourcis : **Fichiers →**, **Terminal →**, **Logs →**.
-- Lien principal du projet : `https://mon-site.dev.tweastly.com` ↗.
+- Lien principal du projet : `https://mon-site.dev.example.com` ↗.
 
 ### 7.2 Connexion Claude Desktop (MCP)
 - Texte : « Dans Claude Desktop : **Réglages → Connecteurs → Ajouter un connecteur personnalisé**, colle cette URL : »
@@ -166,18 +166,18 @@ C'est la page la plus riche. Elle doit rester **lisible et hiérarchisée** : pr
 - Bouton secondaire « Régénérer l'URL » (avec confirmation).
 
 ### 7.3 Ports & sous-domaines
-- Tableau : **port du conteneur** | **URLs** (`https://mon-site.dev.tweastly.com` pour le premier port, puis `https://mon-site-3000.dev.tweastly.com`) | **port hôte** en gris (20000).
+- Tableau : **port du conteneur** | **URLs** (`https://mon-site.dev.example.com` pour le premier port, puis `https://mon-site-3000.dev.example.com`) | **port hôte** en gris (20000).
 - Champ « Ports conteneur (séparés par des virgules) » + bouton « Appliquer (rebuild) ».
 - Interrupteur d'accès : « Accès : **privé (passkey)** » ↔ « **public** », avec le bouton « Rendre public » / « Rendre privé ». Ce choix est important, il doit être bien visible.
 
 ### 7.4 Sous-domaines personnalisés
-- Texte : « Sers ce projet sur `<nom>.tweastly.com`. Il faut un enregistrement DNS `*.tweastly.com` vers l'IP du VPS (une seule fois pour tous). Le certificat HTTPS est créé à la première visite. »
-- Liste des sous-domaines : `new.tweastly.com` → port 8000 [Retirer].
-- Formulaire d'ajout : un champ `new` **collé à un suffixe fixe `.tweastly.com`** (input group), un sélecteur de port et le bouton « Ajouter ».
+- Texte : « Sers ce projet sur `<nom>.example.com`. Il faut un enregistrement DNS `*.example.com` vers l'IP du VPS (une seule fois pour tous). Le certificat HTTPS est créé à la première visite. »
+- Liste des sous-domaines : `new.example.com` → port 8000 [Retirer].
+- Formulaire d'ajout : un champ `new` **collé à un suffixe fixe `.example.com`** (input group), un sélecteur de port et le bouton « Ajouter ».
 - Messages d'erreur possibles :
-  - « new.tweastly.com est déjà utilisé par le projet app » ;
-  - « sous-domaine invalide : indique seulement le nom, par ex. « new » pour new.tweastly.com » ;
-  - « dev.tweastly.com est déjà géré automatiquement ».
+  - « new.example.com est déjà utilisé par le projet app » ;
+  - « sous-domaine invalide : indique seulement le nom, par ex. « new » pour new.example.com » ;
+  - « dev.example.com est déjà géré automatiquement ».
 
 ### 7.5 Ressources
 - Deux jauges : **RAM utilisée** « 212 Mo / 1024 Mo » et **CPU utilisé** « 3.4 % / 100 % » (100 % = 1 cœur).
