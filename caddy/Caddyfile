@@ -3,6 +3,8 @@
 {
 	# Nothing to reconfigure at runtime: no admin endpoint on the server's network.
 	admin off
+	# Its local authority stays in its storage: no system trust store in a container.
+	skip_install_trust
 	# HTTP_PORT in the .env if port 80 is taken (certificates then go through 443).
 	http_port {$HTTP_PORT:80}
 	# Certificates for project hosts are issued on first visit,

@@ -4,6 +4,8 @@
 # src/caddy.rs), car Caddy n'accepte pas de plage de ports dans une adresse.
 {
 	admin off
+	# Its local authority stays in its storage: no system trust store in a container.
+	skip_install_trust
 	http_port {$HTTP_PORT:80}
 	# Browsers send no server name (SNI) for an IP address: pick the IP's certificate anyway,
 	# also behind NAT where the connection's local address isn't the public one.

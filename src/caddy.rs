@@ -87,11 +87,31 @@ async fn run(st: &AppState, listen: &str) -> anyhow::Result<std::process::ExitSt
     Ok(child.wait().await?)
 }
 
-/// Each line goes to DevHub's own log (docker logs devhub) and to the in-memory tail.
+/// What of Caddy's log reaches DevHub's own (docker logs devhub): its warnings and errors,
+/// and anything that isn't one of its JSON lines. Its routine lines (one "server running"
+/// per port, a hundred without a domain) would bury the installation code.
+fn shown(line: &str) -> bool {
+    // Warnings that only describe DevHub's own setup.
+    const EXPECTED: [&str; 3] = ["admin endpoint disabled", "skipped because it requires TLS", "installing root certificate"];
+    match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(v) => {
+            let msg = v["msg"].as_str().unwrap_or("");
+            !matches!(v["level"].as_str(), Some("debug" | "info")) && !EXPECTED.iter().any(|e| msg.contains(e))
+        }
+        Err(_) => !line.trim().is_empty(),
+    }
+}
+
+/// Every line goes to the in-memory tail (certificate diagnostics); the ones worth it to
+/// DevHub's own log, and one line when Caddy is ready.
 async fn keep(r: impl AsyncRead + Unpin) {
     let mut lines = BufReader::new(r).lines();
     while let Ok(Some(l)) = lines.next_line().await {
-        eprintln!("caddy {l}");
+        if shown(&l) {
+            eprintln!("caddy {l}");
+        } else if l.contains("serving initial configuration") {
+            tracing::info!("Caddy prêt : HTTPS en place");
+        }
         let mut g = LOG.lock().unwrap();
         if g.len() >= KEEP_LINES {
             g.pop_front();
@@ -127,6 +147,15 @@ async fn remove_former_container(st: &AppState) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_warnings_and_errors_are_shown() {
+        assert!(!super::shown(r#"{"level":"info","logger":"http","msg":"enabling HTTP/3 listener","addr":":20048"}"#));
+        assert!(super::shown(r#"{"level":"error","logger":"tls.obtain","msg":"could not get certificate from issuer"}"#));
+        assert!(super::shown(r#"{"level":"warn","logger":"tls","msg":"storage cleaning happened too recently"}"#));
+        assert!(!super::shown(r#"{"level":"warn","logger":"http","msg":"HTTP/2 skipped because it requires TLS","addr":":80"}"#));
+        assert!(super::shown("Error: loading initial config: bad address"));
+    }
+
     #[test]
     fn ip_sites() {
         assert_eq!(super::ip_sites("203.0.113.7", (20000, 20001)), "https://203.0.113.7, https://203.0.113.7:20000, https://203.0.113.7:20001");
