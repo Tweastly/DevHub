@@ -65,6 +65,12 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
    ```
    Le script installe Docker s'il manque, demande le domaine, vérifie le DNS et les ports 80/443 (et ouvre ufw s'il est actif), clone DevHub dans `/opt/devhub`, écrit le `.env` (avec le jeton Cloudflare du certificat joker si tu en donnes un), télécharge les images construites par GitHub (ou les compile), démarre tout et affiche l'adresse et le **code d'installation**. Relancé sur un serveur déjà installé, il met DevHub à jour en gardant le `.env`.
    Sans question : `… | sh -s -- --domain dev.example.com --yes` (options : `--dir`, `--branch`, `--cloudflare-token`, voir `install.sh --help`).
+
+   **Ou avec Docker**, si le serveur l'a déjà : la même installation depuis l'image `ghcr.io/tweastly/devhub:install`, qui passe par le Docker du serveur et écrit DevHub dans `/opt/devhub` (monté au même chemin) :
+   ```bash
+   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install
+   ```
+   Les mêmes options s'ajoutent à la fin (`--domain dev.example.com --yes`). Le pare-feu reste à ouvrir à la main (80 et 443).
 3. Ouvre `https://dev.example.com/setup` : l'**assistant d'installation** demande le code à 8 caractères, crée ton passkey, vérifie le DNS et le HTTPS, puis règle les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet. Le code ne sert qu'une fois (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
 4. **Pare-feu** : 80 et 443 doivent être ouverts, plus les ports des jeux (TCP / UDP) si tu en héberges.
 
@@ -78,7 +84,7 @@ docker logs devhub | grep CODE
 ```
 </details>
 
-Les images de DevHub (`ghcr.io/tweastly/devhub:latest`) et de son Caddy (`:caddy`, même paquet) sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends le paquet public (GitHub › Packages › devhub › Package settings › Change visibility). Sinon le script les compile sur le serveur.
+Les images de DevHub (`ghcr.io/tweastly/devhub:latest`), de son Caddy (`:caddy`) et de l'installateur (`:install`), toutes dans le même paquet, sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends le paquet public (GitHub › Packages › devhub › Package settings › Change visibility). Sinon le script les compile sur le serveur.
 
 ### Dépôt privé
 Les mises à jour ont besoin d'un jeton GitHub *fine-grained* limité au dépôt, avec la seule permission **Contents : Read-only**. Mets-le dans `.env` (`DEVHUB_GITHUB_TOKEN=…`) puis `docker compose up -d`. Il n'est jamais écrit ailleurs sur le disque.

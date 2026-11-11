@@ -49,3 +49,7 @@ jobs:
             --cache-to "type=registry,ref=${IMG}:caddy-cache,mode=max" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             -t "${IMG}:caddy" caddy
+          # The installer (install.sh in an image with the Docker CLI): one docker run installs DevHub.
+          docker buildx build --push \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            -f installer/Dockerfile -t "${IMG}:install" .

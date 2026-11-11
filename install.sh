@@ -3,6 +3,10 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh
 #
+# or, on a server that already has Docker, from its image (installer/Dockerfile):
+#
+#   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install
+#
 # Checks Docker (installs it if needed), asks for the panel's domain, checks the DNS and
 # the ports, fetches DevHub into /opt/devhub, pulls its images from GitHub (or builds them),
 # starts it, then prints the address of the installation guide and its code.
@@ -24,6 +28,9 @@ BRANCH="${DEVHUB_BRANCH:-main}"
 DOMAIN="${DEVHUB_DOMAIN:-}"
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 YES=0
+# Run from the installer image: the server's Docker comes through its socket and DIR is
+# a folder of the server mounted at the same path.
+IN_DOCKER="${DEVHUB_IN_DOCKER:-0}"
 
 # ---------- Output ----------
 if [ -t 1 ]; then
@@ -103,12 +110,21 @@ pkg_install() {
   else return 1; fi
 }
 
-command -v curl >/dev/null 2>&1 || die "curl est nécessaire"
+# fetch URL: prints the body (curl, or BusyBox wget in the installer image).
+fetch() {
+  if command -v curl >/dev/null 2>&1; then curl -fsS4 --max-time 6 "$1"
+  else wget -q -T 6 -O - "$1"; fi
+}
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || die "curl ou wget est nécessaire"
 if ! command -v git >/dev/null 2>&1; then
   info "git absent : installation"
   pkg_install git || die "installe git puis relance le script"
 fi
 
+if [ "$IN_DOCKER" = "1" ]; then
+  docker info >/dev/null 2>&1 || die "Docker injoignable : ajoute -v /var/run/docker.sock:/var/run/docker.sock à la commande docker run"
+  grep -q " $DIR " /proc/self/mountinfo || die "monte le dossier d'installation au même chemin : -v $DIR:$DIR"
+fi
 if ! command -v docker >/dev/null 2>&1; then
   warn "Docker n'est pas installé"
   confirm "Installer Docker avec le script officiel (get.docker.com) ?" || die "installe Docker puis relance le script"
@@ -153,8 +169,8 @@ done
 ok "Domaine du panel : $B$DOMAIN$N"
 
 # ---------- DNS ----------
-resolve() { getent ahostsv4 "$1" 2>/dev/null | awk 'NR == 1 { print $1 }'; }
-PUBLIC_IP="$(curl -fsS4 --max-time 6 https://api.ipify.org 2>/dev/null || curl -fsS4 --max-time 6 https://ifconfig.me 2>/dev/null || true)"
+resolve() { getent ahostsv4 "$1" 2>/dev/null | awk 'NR == 1 { print $1 }' || true; }
+PUBLIC_IP="$(fetch https://api.ipify.org 2>/dev/null || fetch https://ifconfig.me 2>/dev/null || true)"
 IP_HINT="$PUBLIC_IP"
 [ -n "$IP_HINT" ] || IP_HINT="l'IP du serveur"
 check_dns() { # check_dns name label
@@ -179,7 +195,10 @@ fi
 
 # ---------- Ports and firewall ----------
 listening() { command -v ss >/dev/null 2>&1 && run ss -ltnH 2>/dev/null | awk '{ print $4 }' | grep -Eq "[:.]$1\$"; }
-if [ "$UPDATE" -eq 0 ]; then
+if [ "$IN_DOCKER" = "1" ]; then
+  # A container sees neither the server's ports nor its firewall.
+  info "Vérifie que les ports 80 et 443 sont ouverts sur le serveur (pare-feu)"
+elif [ "$UPDATE" -eq 0 ]; then
   for p in 80 443; do
     if listening "$p"; then
       warn "le port $p est déjà utilisé sur ce serveur (un autre serveur web ?)"
@@ -188,7 +207,7 @@ if [ "$UPDATE" -eq 0 ]; then
   done
   ok "Ports 80 et 443 libres"
 fi
-if command -v ufw >/dev/null 2>&1 && run ufw status 2>/dev/null | grep -q "Status: active"; then
+if [ "$IN_DOCKER" != "1" ] && command -v ufw >/dev/null 2>&1 && run ufw status 2>/dev/null | grep -q "Status: active"; then
   if confirm "Le pare-feu ufw est actif : ouvrir les ports 80 et 443 ?"; then
     run ufw allow 80/tcp >/dev/null && run ufw allow 443/tcp >/dev/null && ok "Ports 80 et 443 ouverts dans ufw"
   fi
