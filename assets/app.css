@@ -1487,6 +1487,13 @@ body.setup-page { min-height: 100vh; display: grid; place-items: center; padding
 .wz-dns th { text-align: left; font: 500 11px var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 0 10px 6px 0; }
 .wz-dns td { padding: 7px 10px 7px 0; border-top: 1px solid var(--line); color: var(--text); word-break: break-all; }
 .wz-dns td:first-child { width: 52px; font: 12px var(--mono); color: var(--text-2); }
+.wz-cf { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.wz-cf .btn svg { width: 15px; height: 15px; }
+.wz-cf-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.wz-cf-box p { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.wz-cf-box p b { color: var(--text); font-weight: 500; }
+.wz-cf-box .wz-inline input { flex: 1; min-width: 0; }
+.wz-cf-box .wz-checks { background: var(--card); }
 .wz-cert { padding: 14px 16px; }
 .wz-cert-h { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-2); margin-bottom: 8px; }
 .wz-cert .seg span { padding: 5px 11px; border-radius: 4px; font: 500 12.5px var(--sans); color: var(--faint); }

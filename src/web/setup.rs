@@ -180,6 +180,21 @@ fn first_steps(st: &AppState) -> Markup {
                                 }
                             }
                             p.muted { "Chez Cloudflare, laisse-les en « DNS only » (nuage gris). Ils sont pris en compte en quelques secondes à quelques minutes." }
+                            div.wz-cf {
+                                button.btn.sm #cf-open type="button" aria-expanded="false" aria-controls="cf-box" { (icon("cloud")) "Ajouter dans Cloudflare" }
+                                a.btn.sm.ghost href=(crate::cloudflare::DNS_URL) target="_blank" rel="noopener" { "Ouvrir le DNS de Cloudflare ↗" }
+                            }
+                            div #cf-box.wz-cf-box hidden {
+                                p {
+                                    "Un jeton d'API Cloudflare avec la permission " b { "Zone › DNS › Modifier" } ". DevHub trouve la zone du domaine et crée (ou corrige) les deux enregistrements, en « DNS only ». Le jeton ne sert qu'à ça : il n'est gardé nulle part. "
+                                    a.link href=(crate::cloudflare::TOKEN_URL) target="_blank" rel="noopener" { "Créer le jeton ↗" }
+                                }
+                                div.wz-inline {
+                                    input.mono-input #cf-token type="password" placeholder="Jeton Cloudflare" autocomplete="off" spellcheck="false" aria-label="Jeton d'API Cloudflare";
+                                    button.btn.primary #cf-go type="button" { "Ajouter les 2 enregistrements" }
+                                }
+                                div #cf-res.wz-card.wz-checks hidden {}
+                            }
                         }
                         div #dns.wz-card.wz-checks hidden {}
                     }
@@ -320,8 +335,8 @@ const FIRST_JS: &str = r#"
     if (verified && verified !== dom()) { verified = ''; $('#dns').hidden = true; }
     $('#go-choice').textContent = !yes() ? 'Continuer' : verified ? 'Passer sur ce domaine' : 'Vérifier le DNS';
   }
-  async function post(path, d) {
-    const r = await fetch(path, { method: 'POST', body: new URLSearchParams({ code: code(), domain: d }) });
+  async function post(path, d, extra = {}) {
+    const r = await fetch(path, { method: 'POST', body: new URLSearchParams({ code: code(), domain: d, ...extra }) });
     if (r.status === 409) { location.reload(); return null; }
     if (r.status === 403) { show(0); msg('Code expiré : tape le nouveau code affiché dans les journaux.'); return null; }
     if (!r.ok) { msg(await r.text()); return null; }
@@ -367,7 +382,36 @@ const FIRST_JS: &str = r#"
     };
     setTimeout(tick, 5000);
   }
+  // Cloudflare: the records created through its API with a token used once, then the check.
+  async function cloudflare() {
+    const d = dom(), t = $('#cf-token').value.trim(), btn = $('#cf-go');
+    if (!d) { msg('Indique ton domaine.'); $('#dname').focus(); return; }
+    if (!t) { msg('Colle le jeton Cloudflare.'); $('#cf-token').focus(); return; }
+    if (btn.disabled) return;
+    btn.disabled = true; msg('');
+    const label = btn.textContent;
+    btn.textContent = 'Ajout dans Cloudflare…';
+    try {
+      const j = await post('/setup/cloudflare', d, { token: t });
+      if (!j) return;
+      $('#cf-res').innerHTML = j.html; $('#cf-res').hidden = false;
+      $('#cf-token').value = '';
+      $('#dname').value = j.domain;
+      verified = '';
+      btn.disabled = false;
+      await goChoice();
+    } catch { msg('Connexion perdue : réessaie.'); }
+    finally { btn.disabled = false; btn.textContent = label; }
+  }
   if (ipMode) {
+    $('#cf-open').onclick = () => {
+      const box = $('#cf-box');
+      box.hidden = !box.hidden;
+      $('#cf-open').setAttribute('aria-expanded', String(!box.hidden));
+      if (!box.hidden) $('#cf-token').focus();
+    };
+    $('#cf-go').onclick = cloudflare;
+    $('#cf-token').addEventListener('keydown', e => { if (e.key === 'Enter') cloudflare(); });
     document.querySelectorAll('input[name=has]').forEach(r => r.addEventListener('change', () => { choice(); if (yes()) $('#dname').focus(); }));
     $('#dname').addEventListener('input', choice);
     $('#dname').addEventListener('keydown', e => { if (e.key === 'Enter') goChoice(); });
@@ -802,17 +846,22 @@ fn clean_domain(raw: &str) -> Result<String, String> {
 async fn dns_checks(server: IpAddr, domain: &str) -> (bool, Markup) {
     let probe = format!("devhub-setup-check.{domain}");
     let (main, wild) = tokio::join!(resolve(domain), resolve(&probe));
-    let main_ok = main.contains(&server);
+    // Just created through Cloudflare's API: the server's resolver may still answer from its
+    // cache for a few minutes, Let's Encrypt asks Cloudflare directly.
+    let cf = crate::cloudflare::confirmed(domain) == Some(server);
+    let main_ok = main.contains(&server) || cf;
     let html = html! {
-        @if main_ok {
+        @if main.contains(&server) {
             (check_row(Check::Ok, html! { b.mono { (domain) } " pointe vers ce serveur" }, &ips_text(&main)))
+        } @else if cf {
+            (check_row(Check::Ok, html! { b.mono { (domain) } " pointe vers ce serveur dans Cloudflare (le serveur le verra d'ici quelques minutes)" }, "Cloudflare"))
         } @else if main.is_empty() {
             (check_row(Check::Bad, html! { b.mono { (domain) } " ne se résout pas encore : crée l'enregistrement A vers " b.mono { (server) } ", puis revérifie" }, ""))
         } @else {
             (check_row(Check::Bad, html! { b.mono { (domain) } " pointe vers un autre serveur que " b.mono { (server) } " (proxy Cloudflare ? mets-le en « DNS only »)" }, &ips_text(&main)))
         }
-        @if wild.contains(&server) {
-            (check_row(Check::Ok, html! { b.mono { "*." (domain) } " pointe vers ce serveur" }, "joker"))
+        @if wild.contains(&server) || cf {
+            (check_row(Check::Ok, html! { b.mono { "*." (domain) } " pointe vers ce serveur" }, if cf && !wild.contains(&server) { "Cloudflare" } else { "joker" }))
         } @else if wild.is_empty() {
             (check_row(Check::Warn, html! { b.mono { "*." (domain) } " absent : les projets n'auront pas d'adresse tant qu'il manque (tu peux l'ajouter après)" }, ""))
         } @else {
@@ -823,6 +872,40 @@ async fn dns_checks(server: IpAddr, domain: &str) -> (bool, Markup) {
         }
     };
     (main_ok, html)
+}
+
+/// "Ajouter dans Cloudflare": the two records through Cloudflare's API, with a token the
+/// owner pastes for this once (never stored nor logged).
+async fn add_to_cloudflare(st: &AppState, raw: &str, token: &str) -> Response {
+    if !st.cfg.ip_mode {
+        return (StatusCode::CONFLICT, "DevHub a déjà un nom de domaine").into_response();
+    }
+    let domain = match clean_domain(raw) {
+        Ok(d) => d,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let Ok(server) = st.cfg.domain.parse::<IpAddr>() else {
+        return (StatusCode::BAD_REQUEST, "adresse IP du serveur inconnue").into_response();
+    };
+    if token.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "colle le jeton Cloudflare").into_response();
+    }
+    match crate::cloudflare::point(token, &domain, server).await {
+        Ok(o) => {
+            db::audit(&st.db.lock().unwrap(), "installation", "devhub.cloudflare_dns", &domain);
+            let html = html! {
+                @for d in &o.done {
+                    (check_row(Check::Ok, html! {
+                        "Enregistrement " b.mono { (d.name) } " → " b.mono { (server) } " " (d.what)
+                        @if let Some(b) = &d.before { " (avant : " span.mono { (b) } ")" }
+                    }, &o.zone))
+                }
+                @for w in &o.warnings { (check_row(Check::Warn, html! { (w) }, "")) }
+            };
+            Json(serde_json::json!({ "domain": domain, "html": html.into_string() })).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
 }
 
 /// `apply` false: the DNS check alone. True: check again, then restart DevHub on the domain.
@@ -858,7 +941,7 @@ async fn move_to_domain(st: &AppState, apply: bool, raw: &str) -> Response {
 
 pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<String>, Form(f): Form<HashMap<String, String>>) -> Response {
     // The code is checked before anyone exists to sign in, and guards the domain step.
-    if matches!(which.as_str(), "code" | "domain-check" | "domain-apply") {
+    if matches!(which.as_str(), "code" | "domain-check" | "domain-apply" | "cloudflare") {
         if st.setup_token.lock().unwrap().is_none() {
             return (StatusCode::CONFLICT, "déjà installé").into_response();
         }
@@ -867,6 +950,9 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
         }
         if which == "code" {
             return StatusCode::NO_CONTENT.into_response();
+        }
+        if which == "cloudflare" {
+            return add_to_cloudflare(&st, f.get("domain").map(String::as_str).unwrap_or(""), f.get("token").map(String::as_str).unwrap_or("")).await;
         }
         return move_to_domain(&st, which == "domain-apply", f.get("domain").map(String::as_str).unwrap_or("")).await;
     }

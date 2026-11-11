@@ -68,7 +68,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
    L'image `ghcr.io/tweastly/devhub:install` passe par le Docker du serveur : elle clone DevHub dans `/opt/devhub` (monté au même chemin), écrit le `.env`, télécharge les images construites par GitHub (ou les compile), démarre DevHub sur l'**adresse IP du serveur** et affiche l'adresse du guide et le **code d'installation**. Relancée sur un serveur déjà installé, elle met DevHub à jour en gardant le `.env`.
    Sans Docker sur le serveur, le même script l'installe d'abord : `curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh`.
 2. **Dans ton navigateur**, ouvre `https://<IP du serveur>/setup` (le navigateur peut avertir du certificat la première fois : continue) et tape le code. L'**assistant d'installation** fait tout le reste :
-   - **Nom de domaine** : si tu en as un, il affiche les deux enregistrements DNS à créer (`dev.example.com` et `*.dev.example.com` vers l'IP du serveur), les vérifie, puis fait redémarrer DevHub sur le domaine et t'y emmène avec ton code. Sinon, DevHub reste sur l'adresse IP (voir plus bas).
+   - **Nom de domaine** : si tu en as un, il affiche les deux enregistrements DNS à créer (`dev.example.com` et `*.dev.example.com` vers l'IP du serveur) — ou les crée lui-même chez Cloudflare avec un jeton « Zone › DNS › Modifier » collé une fois et jamais gardé —, les vérifie, puis fait redémarrer DevHub sur le domaine et t'y emmène avec ton code. Sinon, DevHub reste sur l'adresse IP (voir plus bas).
    - **Ton compte** : un passkey avec un domaine, un mot de passe sans.
    - Puis le HTTPS, les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet.
 

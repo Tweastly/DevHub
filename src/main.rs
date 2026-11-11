@@ -1,5 +1,6 @@
 mod auth;
 mod caddy;
+mod cloudflare;
 mod db;
 mod docker;
 mod files;
