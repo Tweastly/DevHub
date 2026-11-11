@@ -33,6 +33,37 @@ pub fn new_setup_code() -> String {
     format!("{}-{}", &c[..4], &c[4..])
 }
 
+const LOGO: &str = r#"
+        ____            __  __      __
+       / __ \___ _   __/ / / /_  __/ /_
+      / / / / _ \ | / / /_/ / / / / __ \
+     / /_/ /  __/ |/ / __  / /_/ / /_/ /
+    /_____/\___/|___/_/ /_/\__,_/_.___/
+"#;
+
+/// What the logs show while DevHub waits for its owner: the logo, a framed code that is
+/// hard to miss, and one plain line for `grep CODE` (and install.sh).
+pub fn setup_banner(code: &str, origin: &str, intro: &str) -> String {
+    let spaced = code.chars().map(String::from).collect::<Vec<_>>().join(" ");
+    let rows = [
+        String::new(),
+        format!("Code d'installation    {spaced}"),
+        String::new(),
+        format!("Ouvre    {origin}/setup"),
+        "et tape ce code pour créer ton compte.".to_string(),
+        String::new(),
+    ];
+    let inner = rows.iter().map(|r| r.chars().count()).max().unwrap_or(0) + 6;
+    let mut out = format!("\n{LOGO}\n    {intro}\n\n");
+    out += &format!("    ╭{}╮\n", "─".repeat(inner));
+    for r in &rows {
+        out += &format!("    │   {r}{}│\n", " ".repeat(inner - 3 - r.chars().count()));
+    }
+    out += &format!("    ╰{}╯\n\n", "─".repeat(inner));
+    out += &format!("    CODE D'INSTALLATION : {code}   (une seule fois · perdu ? docker logs devhub | grep CODE)\n");
+    out
+}
+
 fn code_key(s: &str) -> String {
     s.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect()
 }
@@ -48,7 +79,7 @@ pub fn setup_code_ok(st: &AppState, typed: &str) -> bool {
     if CODE_FAILS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1 >= CODE_TRIES {
         CODE_FAILS.store(0, std::sync::atomic::Ordering::Relaxed);
         let new = new_setup_code();
-        println!("\n=== DevHub : trop d'essais, nouveau CODE D'INSTALLATION : {new} ===\n");
+        println!("{}", setup_banner(&new, &st.cfg.origin, "Trop d'essais faux : l'ancien code ne marche plus, voici le nouveau."));
         *code = Some(new);
     }
     false
@@ -314,5 +345,16 @@ mod tests {
         assert!(c.chars().filter(|&x| x != '-').all(|x| CODE_CHARS.contains(&(x as u8))));
         assert_eq!(code_key("7kq2 xf9m"), code_key("7KQ2-XF9M"));
         assert_ne!(code_key("7KQ2-XF9N"), code_key("7KQ2-XF9M"));
+    }
+
+    #[test]
+    fn banner() {
+        let b = super::setup_banner("7KQ2-XF9M", "https://dev.example.com", "Bienvenue !");
+        // install.sh and the guide's hint read this line.
+        assert!(b.lines().any(|l| l.trim_start().starts_with("CODE D'INSTALLATION : 7KQ2-XF9M ")));
+        assert!(b.contains("7 K Q 2 - X F 9 M") && b.contains("https://dev.example.com/setup"));
+        // Every line of the frame has the same width.
+        let widths: Vec<usize> = b.lines().filter(|l| l.trim_start().starts_with(['╭', '│', '╰'])).map(|l| l.chars().count()).collect();
+        assert!(widths.len() > 2 && widths.iter().all(|w| *w == widths[0]));
     }
 }

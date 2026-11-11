@@ -190,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
     }
     if needs_setup {
         let code = auth::new_setup_code();
-        println!("\n=== DevHub : CODE D'INSTALLATION : {code} ===\n=== Ouvre {origin}/setup pour configurer DevHub ===\n");
+        println!("{}", auth::setup_banner(&code, &origin, "Bienvenue ! DevHub est installé, il ne manque plus que toi."));
         *st.setup_token.lock().unwrap() = Some(code);
     }
 
