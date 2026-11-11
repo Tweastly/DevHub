@@ -17,11 +17,15 @@ fn took(secs: i64) -> String {
 fn why(error: &str) -> Option<(&'static str, Option<(&'static str, &'static str)>)> {
     let e = error.to_lowercase();
     if e.contains("bus error") || e.contains("no space") || e.contains("signal 7") {
-        Some(("Le disque du serveur est plein : la compilation a été coupée. Libère de la place (images inutilisées, volumes orphelins) puis réessaie.", Some(("/images", "Nettoyer les images"))))
+        Some(("Le disque du serveur est plein : le téléchargement de la nouvelle image a été coupé. Libère de la place (images inutilisées, volumes orphelins) puis réessaie.", Some(("/images", "Nettoyer les images"))))
     } else if e.contains("could not compile") || e.contains("error[e") {
         Some(("Le code de ce commit ne compile pas. Corrige-le et pousse un nouveau commit.", None))
-    } else if e.contains("git") && (e.contains("denied") || e.contains("authentication") || e.contains("could not read")) {
-        Some(("Le serveur n'a pas pu récupérer le code sur GitHub : vérifie DEVHUB_GITHUB_TOKEN dans le .env.", None))
+    } else if e.contains("inaccessible") || (e.contains("git") && (e.contains("denied") || e.contains("authentication") || e.contains("could not read"))) {
+        Some(("Le serveur n'a pas pu récupérer la nouvelle version sur GitHub : le paquet d'images doit être public.", None))
+    } else if e.contains("toujours absente") {
+        Some(("GitHub n'a pas encore publié l'image de ce commit (sa construction a peut-être échoué) : regarde l'onglet Actions du dépôt, puis réessaie.", None))
+    } else if e.contains("ne démarre pas") {
+        Some(("La nouvelle version n'a pas démarré : l'ancienne a été remise en route, rien n'a changé.", None))
     } else if e.contains("interrompue") {
         Some(("La mise à jour a été interrompue avant la fin.", None))
     } else {
@@ -66,10 +70,12 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     let state = if u.running { "running" } else if failed { "failed" } else if u.available() { "available" } else { "ok" };
     let steps = updater::steps(&u.last_log, failed);
     let done = steps.iter().filter(|s| s.state == "done").count();
-    let pct = if u.running { (done * 20 + 10).min(95) } else { 100 };
+    let pct = if u.running { (done * 25 + 10).min(95) } else { 100 };
+    let former_dir = db::setting(&st.db.lock().unwrap(), updater::FORMER_DIR);
+    let compose_dir = updater::compose_dir(&st).await;
     let running_since = last.filter(|d| d.finished_at.is_none()).map(|d| db::now() - d.started_at);
     let apply = html! {
-        form.inline method="post" action="/update/apply" data-confirm={"Mettre à jour DevHub vers " (short(&target)) " ?"} data-confirm-body="Le panel redémarre pendant environ 1 min ; tes projets continuent de tourner." data-tone="neutral" data-confirm-ok="Mettre à jour" {
+        form.inline method="post" action="/update/apply" data-confirm={"Mettre à jour DevHub vers " (short(&target)) " ?"} data-confirm-body="DevHub télécharge la nouvelle image, puis le panel redémarre en quelques secondes ; tes projets continuent de tourner." data-tone="neutral" data-confirm-ok="Mettre à jour" {
             button.btn.primary.lg { @if failed { (icon("refresh")) "Réessayer" } @else { "Mettre à jour" } }
         }
     };
@@ -100,7 +106,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                                 div.upd-title { (u.pending.len()) " nouveauté" @if u.pending.len() > 1 { "s" } " à installer" }
                                 div.upd-sub {
                                     "De " b.mono { (short(&local)) } " vers " b.mono.accent { (short(&target)) } " · "
-                                    "compilation sur le serveur, environ 1 min"
+                                    "image GitHub, redémarrage en quelques secondes"
                                     " · tes projets continuent de tourner"
                                 }
                             }
@@ -172,6 +178,26 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                 }
             }
 
+            @if let Some(dir) = &compose_dir {
+                section.card.upd-move {
+                    div.card-h { h3 { "Passer entièrement dans Docker" } }
+                    div.card-b {
+                        p { "DevHub a été installé avec docker compose dans " code { (dir) } ". Il peut passer dans des volumes Docker : sa base et ses certificats sont copiés, ses réglages repris, et le dossier ne sert plus. En cas d'échec, l'installation actuelle est remise en route." }
+                        form.inline method="post" action="/update/migrate" data-confirm="Passer DevHub entièrement dans Docker ?" data-confirm-body="Le panel redémarre en quelques secondes ; tes projets continuent de tourner." data-tone="neutral" data-confirm-ok="Passer dans Docker" {
+                            button.btn.primary { "Passer dans Docker" }
+                        }
+                    }
+                }
+            } @else if let Some(dir) = &former_dir {
+                section.card.upd-move {
+                    div.card-h { h3 { "DevHub tourne entièrement dans Docker" } }
+                    div.card-b {
+                        p { "Sa base est dans le volume " code { (crate::deploy::DATA_VOLUME) } ", ses certificats dans " code { (crate::deploy::CADDY_VOLUME) } ". L'ancien dossier " code { (dir) } " ne sert plus : vérifie que tout va bien, puis supprime-le sur le serveur." }
+                        div.wz-cmd { code { "sudo rm -rf " (dir) } button.btn.sm type="button" data-copy={"sudo rm -rf " (dir)} { "Copier" } }
+                        form.inline method="post" action="/update/former-dir" style="margin-top:10px" { button.btn.sm.ghost { "C'est fait, masquer" } }
+                    }
+                }
+            }
             @if !deploys.is_empty() {
                 section.card.upd-hist {
                     div.card-h { h3 { "Historique" } span.sub { "les derniers déploiements" } }

@@ -27,4 +27,9 @@ COPY caddy/Caddyfile caddy/Caddyfile.ip caddy/projects-ondemand.caddy caddy/proj
 # Caddy keeps its certificates in /caddy (the caddy_data volume of docker-compose.yml).
 ENV DEVHUB_DATA=/data DEVHUB_LISTEN=0.0.0.0:8080 XDG_DATA_HOME=/caddy XDG_CONFIG_HOME=/caddy/config
 VOLUME /data
+# The commit this image was built from and its GitHub repository (passed by GitHub Actions):
+# DevHub compares it with GitHub to offer updates, and pulls ghcr.io/<repository>:<commit>.
+ARG REVISION=""
+ARG REPOSITORY="Tweastly/DevHub"
+ENV DEVHUB_REVISION=$REVISION DEVHUB_GITHUB_REPO=$REPOSITORY
 CMD ["devhub"]

@@ -67,7 +67,7 @@ fn github_card(st: &AppState) -> Markup {
                             p.help {
                                 "Pour un bouton « Se connecter avec GitHub » : crée une OAuth App sur GitHub (Settings → Developer settings) avec l'URL de retour "
                                 code { (crate::github::callback_url(st)) }
-                                ", puis mets " code { "DEVHUB_GITHUB_CLIENT_ID" } " et " code { "DEVHUB_GITHUB_CLIENT_SECRET" } " dans le .env."
+                                ", puis relance l'installateur sur le serveur avec " code { "--env DEVHUB_GITHUB_CLIENT_ID=… --env DEVHUB_GITHUB_CLIENT_SECRET=…" } "."
                             }
                         }
                     }

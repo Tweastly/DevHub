@@ -8,7 +8,7 @@ Claude ──https://dev.example.com/mcp (OAuth)─┘                          
                                                                                                   └─ devhub-projet-b (+ volume)
 ```
 
-DevHub tient dans **un seul conteneur**, `devhub` : le panel et son Caddy (HTTPS), que DevHub lance lui-même. Il est sur le réseau du serveur, et chaque projet a son propre conteneur.
+DevHub tient **entièrement dans Docker** : un seul conteneur, `devhub` (le panel et son Caddy pour le HTTPS, que DevHub lance lui-même), sa base dans le volume `devhub-data`, ses certificats dans `devhub-caddy`, ses réglages dans le conteneur. Rien n'est écrit sur le serveur en dehors de Docker. Chaque projet a son propre conteneur.
 
 Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son domaine parent : remplace-les par les tiens.
 
@@ -54,18 +54,17 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Mises à jour
 - **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 4 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, résultat).
-- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » (`git pull`, nouvelle image de DevHub depuis un conteneur temporaire, puis recréation du conteneur `devhub`). Le panel et les sites des projets sont coupés quelques secondes pendant ce redémarrage ; les projets eux-mêmes continuent de tourner.
+- DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » : il télécharge l'image que GitHub a construite pour le nouveau commit, puis un conteneur temporaire de cette image remplace le conteneur `devhub` (mêmes volumes, mêmes réglages ; l'ancien est remis en route si le nouveau ne démarre pas). Le panel et les sites des projets sont coupés quelques secondes ; les projets eux-mêmes continuent de tourner.
 - La page de mise à jour suit le redémarrage et reprend toute seule dès que le panel répond.
 - **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
-- **Compilation sur le serveur** avec un cache : seul le code de DevHub est recompilé, le panel redémarre en environ une minute.
 
 ## Déploiement sur le VPS
 
 1. **Sur le VPS**, une seule commande (root ou sudo), qui ne pose aucune question :
    ```bash
-   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v /opt/devhub:/opt/devhub ghcr.io/tweastly/devhub:install
+   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub:install
    ```
-   L'image `ghcr.io/tweastly/devhub:install` passe par le Docker du serveur : elle clone DevHub dans `/opt/devhub` (monté au même chemin), écrit le `.env`, télécharge les images construites par GitHub (ou les compile), démarre DevHub sur l'**adresse IP du serveur** et affiche l'adresse du guide et le **code d'installation**. Relancée sur un serveur déjà installé, elle met DevHub à jour en gardant le `.env`.
+   L'installateur n'utilise que le Docker du serveur : il télécharge l'image de DevHub, crée les volumes `devhub-data` et `devhub-caddy` et le conteneur `devhub`, démarre DevHub sur l'**adresse IP du serveur** et affiche l'adresse du guide et le **code d'installation**. Aucun fichier n'est écrit sur le serveur. Relancé, il met DevHub à jour en gardant ses données et ses réglages.
    Sans Docker sur le serveur, le même script l'installe d'abord : `curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh`.
 2. **Dans ton navigateur**, ouvre `https://<IP du serveur>/setup` (le navigateur peut avertir du certificat la première fois : continue) et tape le code. L'**assistant d'installation** fait tout le reste :
    - **Nom de domaine** : si tu en as un, il affiche les deux enregistrements DNS à créer (`dev.example.com` et `*.dev.example.com` vers l'IP du serveur) — ou les crée lui-même chez Cloudflare avec un jeton « Zone › DNS › Modifier » collé une fois et jamais gardé —, les vérifie, puis fait redémarrer DevHub sur le domaine et t'y emmène avec ton code. Sinon, DevHub reste sur l'adresse IP (voir plus bas).
@@ -75,19 +74,13 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
    Le code ne sert qu'une fois, et il survit au redémarrage sur le domaine (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
 3. **Pare-feu** : 80 et 443 doivent être ouverts (plus 20000-20099 sans domaine, et les ports des jeux si tu en héberges). DevHub ne touche pas au pare-feu du serveur.
 
-Pour une installation sans navigateur, les options s'ajoutent à la fin de la commande : `--domain dev.example.com` démarre directement sur le domaine, `--cloudflare-token` active le certificat joker, `--yes` installe Docker sans demander (voir `install.sh --help`).
+Les options s'ajoutent à la fin de la commande, à l'installation comme plus tard pour changer un réglage : `--domain dev.example.com` démarre directement sur le domaine, `--ip` revient à l'adresse IP, `--cloudflare-token` active le certificat joker, `--env CLÉ=VALEUR` règle n'importe quelle variable de la table plus bas, `--yes` installe Docker sans demander (voir `install.sh --help`).
 
-<details><summary>Installation à la main</summary>
+**Installé avant, avec docker compose dans `/opt/devhub` ?** La mise à jour suivante fait passer DevHub dans les volumes Docker tout seul (sa base et ses certificats sont copiés, ses réglages repris du conteneur), ou la page Mise à jour propose « Passer dans Docker ». Relancer l'installateur fait de même. Le dossier reste en place : supprime-le une fois que tout va bien.
 
-```bash
-git clone https://github.com/Tweastly/DevHub devhub && cd devhub
-cp .env.example .env    # puis mets ton domaine dans DEVHUB_DOMAIN
-docker compose up -d --build
-docker logs devhub | grep CODE
-```
-</details>
+**Sauvegarde** de la base : `docker run --rm -v devhub-data:/d -v "$PWD":/b debian tar czf /b/devhub-data.tgz -C /d .`
 
-L'image de DevHub (`ghcr.io/tweastly/devhub:latest`, Caddy compris) et celle de l'installateur (`:install`), dans le même paquet, sont construites par GitHub à chaque push. Pour qu'un serveur les télécharge sans compte, rends le paquet public (GitHub › Packages › devhub › Package settings › Change visibility). Sinon le script compile DevHub sur le serveur.
+L'image de DevHub (`ghcr.io/tweastly/devhub:latest`, Caddy compris, une étiquette par commit) et celle de l'installateur (`:install`), dans le même paquet, sont construites par GitHub à chaque push. Le paquet doit être public pour qu'un serveur les télécharge sans compte (GitHub › Packages › devhub › Package settings › Change visibility).
 
 ### Sans nom de domaine
 
@@ -102,22 +95,16 @@ C'est le choix « Non » de la première étape du guide, et le mode de départ 
 | Ports à ouvrir | 80, 443 | 80, 443 et 20000-20099 |
 
 - Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. DevHub le reconnaît à l'IP dans `DEVHUB_DOMAIN` et lance Caddy avec `caddy/Caddyfile.ip`.
-- **Passer plus tard à un domaine** (une fois le compte créé) : relance l'installation avec `--domain dev.example.com`. Le `.env` est mis à jour, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey. `--ip` fait le chemin inverse.
-
-### Dépôt privé
-Les mises à jour ont besoin d'un jeton GitHub *fine-grained* limité au dépôt, avec la seule permission **Contents : Read-only**. Mets-le dans `.env` (`DEVHUB_GITHUB_TOKEN=…`) puis `docker compose up -d`. Il n'est jamais écrit ailleurs sur le disque.
+- **Passer plus tard à un domaine** (une fois le compte créé) : relance l'installateur avec `--domain dev.example.com`. Le réglage du conteneur change, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey. `--ip` fait le chemin inverse.
 
 ### Certificat wildcard (recommandé)
 Par défaut, chaque projet reçoit son certificat à la première visite, et un nom inconnu provoque une erreur TLS dans le navigateur. Avec un certificat `*.dev.example.com`, tout sous-domaine a un HTTPS valide : les noms inconnus affichent la page 404 de DevHub et les nouveaux projets n'attendent plus.
 1. Cloudflare → Mon profil → Jetons d'API → Créer un jeton : **Zone → DNS → Modifier**, zone `example.com`.
-2. Dans `.env` sur le VPS :
-   ```bash
-   DEVHUB_TLS=wildcard
-   CLOUDFLARE_API_TOKEN=...
-   ```
-3. `docker compose up -d` (DevHub redémarre avec son Caddy). L'état est visible par MCP (`server_resources` → `https`, sans jamais montrer le jeton).
+2. Colle-le dans l'assistant d'installation (étape « Adresse et HTTPS › Passer au certificat joker »), ou relance l'installateur avec `--cloudflare-token …`. DevHub redémarre avec son Caddy en quelques secondes. L'état est visible par MCP (`server_resources` → `https`, sans jamais montrer le jeton).
 
 ## Configuration
+
+Les réglages sont les variables du conteneur `devhub` : l'installateur les pose (`--env CLÉ=VALEUR`, `--domain`, `--cloudflare-token`) et les garde d'une mise à jour à l'autre.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
@@ -126,32 +113,32 @@ Par défaut, chaque projet reçoit son certificat à la première visite, et un 
 | `DEVHUB_PORT_RANGE` | `20000-20999` (`20000-20099` sans domaine) | plage des ports hôte des projets |
 | `DEVHUB_MEMORY_MB` / `DEVHUB_CPUS` | `4096` / `2` | limites par défaut des projets (modifiables dans Ressources) |
 | `DEVHUB_TLS` / `CLOUDFLARE_API_TOKEN` | `ondemand` / — | `wildcard` + un jeton Cloudflare : un certificat pour `*.DEVHUB_DOMAIN` |
-| `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` en compose) | IP où les ports web des projets sont publiés |
-| `DEVHUB_SELF_CONTAINER` | — (`devhub` en compose) | nom du conteneur DevHub ; active le proxy vers les conteneurs des projets |
-| `DEVHUB_LISTEN` | `0.0.0.0:8080` (`127.0.0.1:8080` en compose) | adresse de DevHub derrière Caddy |
-| `DEVHUB_CADDY` | — (`on` en compose) | DevHub lance Caddy dans son conteneur |
-| `DEVHUB_DATA` | `./data` | base SQLite |
+| `DEVHUB_BIND_IP` | `0.0.0.0` (`127.0.0.1` installé) | IP où les ports web des projets sont publiés |
+| `DEVHUB_SELF_CONTAINER` | — (`devhub` installé) | nom du conteneur DevHub ; active le proxy vers les conteneurs des projets |
+| `DEVHUB_LISTEN` | `0.0.0.0:8080` (`127.0.0.1:8080` installé) | adresse de DevHub derrière Caddy |
+| `DEVHUB_CADDY` | — (`on` installé) | DevHub lance Caddy dans son conteneur |
+| `DEVHUB_DATA` | `./data` (`/data`, le volume `devhub-data`, dans l'image) | base SQLite |
 | `DEVHUB_APPS_DOMAIN` | parent de `DEVHUB_DOMAIN` | domaine des sous-domaines personnalisés |
 | `DEVHUB_GITHUB_TOKEN` | — | jeton lecture seule pour les mises à jour (dépôt privé) ; sinon le compte GitHub de Mon profil |
 | `DEVHUB_GITHUB_CLIENT_ID` / `DEVHUB_GITHUB_CLIENT_SECRET` | — | OAuth App GitHub pour « Se connecter avec GitHub » (retour : `https://$DOMAIN/github/callback`) |
-| `DEVHUB_REPO` | `/repo` | où le dépôt est monté dans le conteneur |
+| `DEVHUB_REVISION` / `DEVHUB_GITHUB_REPO` | posés par GitHub dans l'image | commit de l'image et dépôt suivi pour les mises à jour |
 | `DEVHUB_PUBLIC_HOST` | `DEVHUB_DOMAIN` | nom affiché pour rejoindre les ports de jeu (ex. `mc.example.com`) |
 | `HTTP_PORT` | `80` | port HTTP de Caddy s'il est déjà pris |
 
 ## Sécurité et secrets
 
-Le dépôt ne contient aucun secret : tout ce qui est sensible vit **uniquement sur le serveur** et est exclu par `.gitignore`.
+Le dépôt ne contient aucun secret : tout ce qui est sensible vit **uniquement dans le Docker du serveur**.
 
 | Où | Contenu | Publié ? |
 |---|---|---|
-| `.env` | domaine, jeton GitHub, jeton Cloudflare, secret de l'OAuth App | non (`.gitignore`) |
-| `data/devhub.sqlite` | jeton du compte GitHub connecté, passkeys (clés publiques), sessions, profils, jetons OAuth (hachés), URL MCP des projets, journal, variables d'environnement des projets | non (`/data` ignoré) |
-| volumes Docker | code et données des projets | non (hors du dépôt) |
-| `.env.example` | modèle sans valeurs | oui |
+| variables du conteneur `devhub` | domaine, jeton GitHub, jeton Cloudflare, secret de l'OAuth App | non |
+| volume `devhub-data` (`devhub.sqlite`) | jeton du compte GitHub connecté, passkeys (clés publiques), sessions, profils, jetons OAuth (hachés), URL MCP des projets, journal, variables d'environnement des projets | non |
+| autres volumes Docker | code et données des projets, certificats | non |
+| `.env.example` | modèle sans valeurs (anciennes installations par compose) | oui |
 
 Avant de publier ou de pousser :
 - ne mets jamais de vraie valeur dans `.env.example`, le README ou le code ;
-- `git status` ne doit jamais lister `.env` ni `data/` ;
+- `git status` ne doit jamais lister `.env` ni `data/` (dev local, anciennes installations) ;
 - si un jeton a été partagé ailleurs (chat, capture, ticket), révoque-le et recrée-le.
 
 Les URL MCP par projet contiennent un jeton de 256 bits : traite-les comme des mots de passe et régénère-les si elles fuient.

@@ -1,8 +1,8 @@
-//! Self-update: compares the deployed commit (read from the repo mounted at DEVHUB_REPO)
-//! with the GitHub branch, and on request runs `git pull`, takes the image GitHub Actions
-//! built for that commit (or builds it) and `docker compose up -d`
-//! from a short-lived helper container, since DevHub cannot rebuild itself in place.
-//! Without that image (still building on GitHub, no access) it compiles on the server.
+//! Self-update: compares the deployed commit (DEVHUB_REVISION, set in the image by GitHub
+//! Actions) with the GitHub branch, and on request downloads the image GitHub built for the
+//! new commit, then has a short-lived container of that image run `devhub deploy`, which
+//! replaces DevHub's container (DevHub cannot replace itself while it runs). No code, git or
+//! compose on the server: everything is in Docker (see deploy.rs).
 
 use crate::{auth, db, AppError, AppState};
 use anyhow::Context;
@@ -16,10 +16,17 @@ use serde::Deserialize;
 use std::time::Duration;
 
 pub(crate) const UPDATER: &str = "devhub-updater";
-const UPDATER_IMAGE: &str = "docker:27-cli";
-/// docker:27-cli with git already installed, made once in the background (saves the
-/// `apk add git` of every update).
-const UPDATER_GIT_IMAGE: &str = "devhub-updater:git";
+/// Left by older versions (their helper image with git): removed at startup.
+const FORMER_HELPER_IMAGES: [&str; 2] = ["devhub-updater:git", "docker:27-cli"];
+/// The image download, before the helper container exists: running, and its log lines.
+static PREPARING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PRE_LOG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+fn pre_log(line: &str) {
+    let mut l = PRE_LOG.lock().unwrap();
+    l.push_str(line);
+    l.push('\n');
+}
 /// Setting: deploy every new commit of the branch as soon as it is pushed.
 pub const AUTO_SETTING: &str = "auto_deploy";
 /// How often the branch head is polled, so a new commit shows within seconds (and is
@@ -59,6 +66,7 @@ impl Info {
     }
 }
 
+/// A checkout mounted by installations made with docker compose (older versions).
 fn repo_dir() -> String {
     std::env::var("DEVHUB_REPO").unwrap_or_else(|_| "/repo".into())
 }
@@ -73,8 +81,22 @@ fn running_head() -> anyhow::Result<(String, String)> {
     if let Some(h) = RUNNING.get() {
         return Ok(h.clone());
     }
-    let h = local_head(&repo_dir())?;
+    let branch = std::env::var("DEVHUB_BRANCH").ok().filter(|b| !b.is_empty()).unwrap_or_else(|| "main".into());
+    let h = match std::env::var("DEVHUB_REVISION").ok().filter(|r| r.len() >= 7) {
+        Some(r) => (r, branch),
+        None => local_head(&repo_dir()).context("version inconnue : image construite sans DEVHUB_REVISION")?,
+    };
     Ok(RUNNING.get_or_init(|| h).clone())
+}
+
+/// "owner/repo" of DevHub on GitHub: set in the image, else the mounted checkout.
+fn slug() -> Option<String> {
+    github_slug(&repo_dir())
+}
+
+/// Where GitHub publishes DevHub's images ("ghcr.io/owner/repo").
+pub fn image_repo() -> Option<String> {
+    slug().map(|s| format!("ghcr.io/{}", s.to_ascii_lowercase()))
 }
 
 fn local_head(dir: &str) -> anyhow::Result<(String, String)> {
@@ -97,7 +119,7 @@ fn local_head(dir: &str) -> anyhow::Result<(String, String)> {
 
 /// "owner/repo" from the origin URL (https, with or without credentials, or ssh).
 fn github_slug(dir: &str) -> Option<String> {
-    if let Ok(s) = std::env::var("DEVHUB_GITHUB_REPO") {
+    if let Some(s) = std::env::var("DEVHUB_GITHUB_REPO").ok().map(|s| s.trim().to_string()).filter(|s| s.contains('/')) {
         return Some(s);
     }
     let cfg = std::fs::read_to_string(format!("{dir}/.git/config")).ok()?;
@@ -146,13 +168,12 @@ fn github(url: &str) -> reqwest::RequestBuilder {
 }
 
 pub async fn check(st: &AppState) {
-    let dir = repo_dir();
     let mut info = st.update.lock().unwrap().clone();
     info.checked_at = Some(db::now());
     info.error = None;
     let res: anyhow::Result<()> = async {
         let (local, branch) = running_head()?;
-        let slug = github_slug(&dir).context("dépôt GitHub introuvable dans .git/config")?;
+        let slug = slug().context("dépôt GitHub de DevHub inconnu (DEVHUB_GITHUB_REPO)")?;
         info.local = Some(local.clone());
         info.branch = branch.clone();
         info.repo = Some(slug.clone());
@@ -189,18 +210,19 @@ pub async fn check(st: &AppState) {
 
 async fn refresh_runner(st: &AppState, info: &mut Info) {
     let d = &st.docker;
+    let preparing = PREPARING.load(std::sync::atomic::Ordering::Relaxed);
+    let mut out = PRE_LOG.lock().unwrap().clone();
     match d.inspect_container(UPDATER, None::<InspectContainerOptions>).await {
         Ok(c) => {
-            info.running = c.state.and_then(|s| s.running).unwrap_or(false);
+            info.running = preparing || c.state.and_then(|s| s.running).unwrap_or(false);
             let mut s = d.logs::<String>(UPDATER, Some(LogsOptions { stdout: true, stderr: true, tail: "300".into(), ..Default::default() }));
-            let mut out = String::new();
             while let Some(Ok(l)) = s.next().await {
                 out.push_str(&l.to_string());
             }
-            info.last_log = out;
         }
-        Err(_) => info.running = false,
+        Err(_) => info.running = preparing,
     }
+    info.last_log = out;
 }
 
 pub fn auto_deploy(st: &AppState) -> bool {
@@ -212,6 +234,29 @@ pub fn auto_deploy(st: &AppState) -> bool {
 pub fn spawn_periodic(st: AppState) {
     let _ = running_head();
     tokio::spawn({
+        let d = st.docker.clone();
+        async move {
+            for image in FORMER_HELPER_IMAGES {
+                let _ = d.remove_image(image, None, None).await;
+            }
+            // A reconfiguration that worked: its container (and the settings in its
+            // arguments, a token maybe) has nothing more to tell. It ends a few seconds after
+            // this new DevHub started.
+            for _ in 0..24 {
+                match d.inspect_container(RECONFIGURE, None::<InspectContainerOptions>).await {
+                    Err(_) => break,
+                    Ok(c) if c.state.as_ref().is_some_and(|s| s.running != Some(true)) => {
+                        if c.state.and_then(|s| s.exit_code) == Some(0) {
+                            let _ = d.remove_container(RECONFIGURE, None).await;
+                        }
+                        break;
+                    }
+                    Ok(_) => tokio::time::sleep(Duration::from_secs(5)).await,
+                }
+            }
+        }
+    });
+    tokio::spawn({
         let st = st.clone();
         async move {
             // The update that restarted DevHub ends just after (or, from an older version,
@@ -222,7 +267,6 @@ pub fn spawn_periodic(st: AppState) {
             }
         }
     });
-    tokio::spawn(prepare_git_image(st.clone()));
     tokio::spawn(async move {
         let mut last_check = 0;
         let mut etag: Option<String> = None;
@@ -256,7 +300,7 @@ pub fn spawn_periodic(st: AppState) {
                     check(&st).await;
                     last_check = db::now();
                 }
-                if auto_deploy(&st) && r != l && attempted.as_ref() != Some(r) && !updater_running(&st).await {
+                if auto_deploy(&st) && can_deploy(&st) && r != l && attempted.as_ref() != Some(r) && !updater_running(&st).await {
                     attempted = Some(r.clone());
                     check(&st).await;
                     last_check = db::now();
@@ -285,9 +329,8 @@ impl<E: Into<anyhow::Error>> From<E> for Watch {
 }
 
 async fn branch_head(etag: Option<&str>) -> Result<Option<(String, String)>, Watch> {
-    let dir = repo_dir();
-    let (_, branch) = local_head(&dir)?;
-    let slug = github_slug(&dir).context("dépôt GitHub introuvable")?;
+    let (_, branch) = running_head()?;
+    let slug = slug().context("dépôt GitHub introuvable")?;
     let mut req = github(&format!("https://api.github.com/repos/{slug}/commits/{branch}"))
         .header("Accept", "application/vnd.github.sha")
         .timeout(Duration::from_secs(10));
@@ -309,55 +352,14 @@ async fn branch_head(etag: Option<&str>) -> Result<Option<(String, String)>, Wat
 }
 
 async fn updater_running(st: &AppState) -> bool {
-    st.docker
+    PREPARING.load(std::sync::atomic::Ordering::Relaxed)
+        || st.docker
         .inspect_container(UPDATER, None::<InspectContainerOptions>)
         .await
         .ok()
         .and_then(|c| c.state)
         .and_then(|s| s.running)
         .unwrap_or(false)
-}
-
-/// Builds `devhub-updater:git` once: docker:27-cli + git, committed from a throwaway container.
-async fn prepare_git_image(st: AppState) {
-    let d = &st.docker;
-    if st.cfg.self_container.is_none() || crate::docker::nested() || d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
-        return;
-    }
-    let res: anyhow::Result<()> = async {
-        if d.inspect_image(UPDATER_IMAGE).await.is_err() {
-            crate::docker::pull(d, UPDATER_IMAGE).await?;
-        }
-        let name = "devhub-updater-prep";
-        let _ = d.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
-        let cfg = Config {
-            image: Some(UPDATER_IMAGE.to_string()),
-            cmd: Some(vec!["apk".into(), "add".into(), "-q".into(), "--no-cache".into(), "git".into()]),
-            ..Default::default()
-        };
-        d.create_container(Some(CreateContainerOptions { name, platform: None }), cfg).await?;
-        d.start_container::<String>(name, None).await?;
-        let mut w = d.wait_container(name, None::<bollard::container::WaitContainerOptions<String>>);
-        let code = match w.next().await {
-            Some(Ok(r)) => r.status_code,
-            _ => -1,
-        };
-        if code == 0 {
-            let (repo, tag) = UPDATER_GIT_IMAGE.split_once(':').unwrap();
-            d.commit_container(
-                bollard::image::CommitContainerOptions { container: name, repo, tag, ..Default::default() },
-                Config::<String>::default(),
-            )
-            .await?;
-        }
-        let _ = d.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
-        anyhow::ensure!(code == 0, "apk add git a échoué ({code})");
-        Ok(())
-    }
-    .await;
-    if let Err(e) = res {
-        tracing::warn!("image de mise à jour avec git : {e:#}");
-    }
 }
 
 pub async fn set_auto(State(st): State<AppState>, jar: CookieJar, axum::Form(f): axum::Form<std::collections::HashMap<String, String>>) -> Result<Redirect, Response> {
@@ -375,8 +377,7 @@ pub async fn check_now(State(st): State<AppState>, jar: CookieJar) -> Result<Red
     Ok(Redirect::to("/update"))
 }
 
-/// Starts the helper container. It mounts the repo at its *host* path so that
-/// compose's relative bind mounts (./data, ./caddy) keep pointing at the right place.
+/// Downloads the new version's image, then replaces DevHub's container with it.
 pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Response, Response> {
     let who = auth::require_admin(&st, &jar)?;
     run_update(&st).await.map_err(|e| AppError(e).into_response())?;
@@ -384,157 +385,192 @@ pub async fn apply(State(st): State<AppState>, jar: CookieJar) -> Result<Respons
     Ok(Redirect::to("/update").into_response())
 }
 
+/// DevHub can replace its own container: the server's DevHub (Caddy inside), in Docker.
+/// Not a DevHub run as a project (its DevHub manages it), nor one started by hand.
+pub fn can_deploy(st: &AppState) -> bool {
+    st.cfg.self_container.is_some() && crate::caddy::enabled()
+}
+
 pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
     finalize(st).await;
-    let d = &st.docker;
-    let (host_dir, project) = compose_location(st).await?;
-    let branch = st.update.lock().unwrap().branch.clone();
-    let branch = if branch.is_empty() { "main".to_string() } else { branch };
-
-    // Never cut an update in progress (it would stop halfway through `docker compose up`).
+    anyhow::ensure!(can_deploy(st), "mise à jour possible seulement pour le DevHub du serveur, dans Docker");
+    // Never cut an update in progress.
     anyhow::ensure!(!updater_running(st).await, "une mise à jour est déjà en cours");
-    let image = helper_image(st).await?;
-    let _ = d.remove_container(UPDATER, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
-
-    // The token is passed as an env var and turned into an auth header, never written to disk.
-    let script = r#"set -e
-START=$(date +%s)
-step() { echo "== $1 ($(( $(date +%s) - START )) s)"; }
-command -v git >/dev/null || apk add -q --no-cache git
-git config --global --add safe.directory "$DIR"
-cd "$DIR"
-step "récupération du code"
-OLD=$(git rev-parse HEAD)
-if [ -n "$TOKEN" ]; then
-  AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
-  git -c http.extraHeader="Authorization: Basic $AUTH" pull --ff-only origin "$BRANCH"
-else
-  git pull --ff-only origin "$BRANCH"
-fi
-step "reconstruction de DevHub"
-# The image GitHub Actions built for this commit (.github/workflows/image.yml), else a
-# build here. It is waited for a few minutes when the push is recent.
-IMG=$(docker compose -p "$PROJECT" config --images devhub 2>/dev/null | head -n 1)
-[ -n "$IMG" ] || IMG="$PROJECT-devhub"
-SHA=$(git rev-parse HEAD)
-GOT=""
-if [ -n "$REMOTE" ]; then
-  [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | docker login ghcr.io -u x-access-token --password-stdin >/dev/null 2>&1 || true
-  i=0
-  while [ $i -lt 32 ]; do
-    if OUT=$(docker pull -q "$REMOTE:$SHA" 2>&1); then
-      docker tag "$REMOTE:$SHA" "$IMG"
-      GOT=1
-      echo "image GitHub récupérée : $REMOTE:$SHA"
-      break
-    fi
-    case "$OUT" in
-      *denied*|*unauthorized*|*forbidden*) echo "image GitHub inaccessible (droit read:packages ?) : compilation ici"; break ;;
-    esac
-    [ $i -eq 0 ] && echo "image GitHub pas encore prête, attente (8 min max)…"
-    i=$((i + 1))
-    sleep 15
-  done
-fi
-[ -n "$GOT" ] || docker compose -p "$PROJECT" build devhub
-# One container (Caddy inside): recreating it restarts the panel and its HTTPS front.
-# --remove-orphans: the Caddy container of older versions, if it is still there.
-step "redémarrage"
-docker compose -p "$PROJECT" up -d --remove-orphans
-step "terminé""#;
-    let mut env = vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("BRANCH={branch}")];
-    if let Some(slug) = github_slug(&repo_dir()) {
-        env.push(format!("REMOTE=ghcr.io/{}", slug.to_ascii_lowercase()));
+    let target = st.update.lock().unwrap().target.clone().context("version cible inconnue : vérifie les mises à jour")?;
+    let image = format!("{}:{target}", image_repo().context("dépôt GitHub de DevHub inconnu")?);
+    let _ = st.docker.remove_container(UPDATER, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+    PREPARING.store(true, std::sync::atomic::Ordering::Relaxed);
+    {
+        let mut l = PRE_LOG.lock().unwrap();
+        l.clear();
     }
-    let binds = vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")];
-    if let Some(t) = token() {
-        env.push(format!("TOKEN={t}"));
-    }
-    let cfg = Config {
-        image: Some(image.to_string()),
-        cmd: Some(vec!["sh".into(), "-c".into(), script.into()]),
-        env: Some(env),
-        host_config: Some(HostConfig {
-            binds: Some(binds),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-    d.create_container(Some(CreateContainerOptions { name: UPDATER, platform: None }), cfg).await?;
-    d.start_container::<String>(UPDATER, None).await?;
+    pre_log("== téléchargement de l'image (0 s)");
     let (sha, message) = {
         let mut i = st.update.lock().unwrap();
         i.running = true;
-        let sha = i.target.clone().map(|t| t[..7.min(t.len())].to_string()).unwrap_or_default();
-        (sha, i.pending.first().map(|p| p.message.clone()).unwrap_or_default())
+        (target[..7.min(target.len())].to_string(), i.pending.first().map(|p| p.message.clone()).unwrap_or_default())
     };
     let _ = db::deploy_start(&st.db.lock().unwrap(), &sha, &message);
+    let st = st.clone();
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let res = async {
+            pull_when_built(&st, &image).await?;
+            pre_log(&format!("image GitHub récupérée : {image} ({} s)", started.elapsed().as_secs()));
+            start_helper(&st, UPDATER, &image, Vec::new()).await
+        }
+        .await;
+        PREPARING.store(false, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = res {
+            pre_log(&format!("erreur : {e:#}"));
+            st.update.lock().unwrap().running = false;
+            if let Some(last) = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next() {
+                let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, db::now(), false, "image GitHub", &format!("{e:#}"));
+            }
+        }
+    });
     Ok(())
 }
 
-/// The server folder DevHub was started from by docker compose, and its compose project.
-async fn compose_location(st: &AppState) -> anyhow::Result<(String, String)> {
-    let me = st.cfg.self_container.as_deref().context("possible seulement quand DevHub tourne via docker compose")?;
-    let me_info = st.docker.inspect_container(me, None::<InspectContainerOptions>).await?;
-    let labels = me_info.config.and_then(|c| c.labels).unwrap_or_default();
-    let host_dir = labels.get("com.docker.compose.project.working_dir").context("label compose manquant")?.clone();
-    let project = labels.get("com.docker.compose.project").context("label compose manquant")?.clone();
-    Ok((host_dir, project))
+/// The image of a commit pushed a moment ago is still being built by GitHub: wait for it
+/// (8 minutes at most).
+async fn pull_when_built(st: &AppState, image: &str) -> anyhow::Result<()> {
+    for i in 0..32 {
+        match crate::docker::pull(&st.docker, image).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let m = format!("{e:#}").to_lowercase();
+                if m.contains("denied") || m.contains("unauthorized") || m.contains("forbidden") {
+                    anyhow::bail!("image {image} inaccessible : le paquet GitHub doit être public ({e:#})");
+                }
+                if i == 0 {
+                    pre_log("image GitHub pas encore prête, attente (8 min max)…");
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(15)).await;
+    }
+    anyhow::bail!("image {image} toujours absente de GitHub après 8 min")
 }
 
-/// docker CLI image for the helper containers (the one with git when it was built).
-async fn helper_image(st: &AppState) -> anyhow::Result<&'static str> {
+/// DevHub's own image, for a reconfiguration without new version: the GitHub image of the
+/// running commit when it is there, else whatever the container was created from.
+async fn own_image(st: &AppState) -> anyhow::Result<String> {
+    if let (Some(repo), Ok((rev, _))) = (image_repo(), running_head()) {
+        let tagged = format!("{repo}:{rev}");
+        if st.docker.inspect_image(&tagged).await.is_ok() {
+            return Ok(tagged);
+        }
+    }
+    let me = st.cfg.self_container.as_deref().context("DevHub ne tourne pas dans Docker")?;
+    let info = st.docker.inspect_container(me, None::<InspectContainerOptions>).await?;
+    info.config.and_then(|c| c.image).context("image de DevHub inconnue")
+}
+
+/// A short-lived container of `image` that runs `devhub deploy` on DevHub's container: it
+/// outlives DevHub, which it stops and replaces.
+async fn start_helper(st: &AppState, name: &str, image: &str, settings: Vec<String>) -> anyhow::Result<()> {
     let d = &st.docker;
-    if d.inspect_image(UPDATER_GIT_IMAGE).await.is_ok() {
-        return Ok(UPDATER_GIT_IMAGE);
-    }
-    if d.inspect_image(UPDATER_IMAGE).await.is_err() {
-        crate::docker::pull(d, UPDATER_IMAGE).await?;
-    }
-    Ok(UPDATER_IMAGE)
+    let me = st.cfg.self_container.clone().context("DevHub ne tourne pas dans Docker")?;
+    let info = d.inspect_container(&me, None::<InspectContainerOptions>).await?;
+    let socket = info
+        .mounts
+        .unwrap_or_default()
+        .into_iter()
+        .find(|m| m.destination.as_deref() == Some("/var/run/docker.sock"))
+        .and_then(|m| m.source)
+        .unwrap_or_else(|| "/var/run/docker.sock".into());
+    let _ = d.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+    let mut cmd = vec!["devhub".to_string(), "deploy".into(), "--container".into(), me, "--image".into(), image.to_string()];
+    cmd.extend(settings);
+    let cfg = Config {
+        image: Some(image.to_string()),
+        cmd: Some(cmd),
+        labels: Some(std::collections::HashMap::from([("devhub.role".to_string(), "helper".to_string())])),
+        host_config: Some(HostConfig { binds: Some(vec![format!("{socket}:/var/run/docker.sock")]), ..Default::default() }),
+        ..Default::default()
+    };
+    d.create_container(Some(CreateContainerOptions { name, platform: None }), cfg).await?;
+    d.start_container::<String>(name, None).await?;
+    Ok(())
 }
 
 pub(crate) const RECONFIGURE: &str = "devhub-reconfigure";
 
-/// From the server's IP to a domain name, during the installation guide: a short-lived
-/// container rewrites the mode lines of the server's .env (as `install.sh --domain` would)
-/// and recreates DevHub's container with docker compose. Nothing else is touched.
-/// Returns the installation folder on the server.
-pub async fn switch_domain(st: &AppState, domain: &str) -> anyhow::Result<String> {
+/// New settings for DevHub's container (`--env KEY=VALUE`, `--unset KEY`): the same image,
+/// recreated by a short-lived container, as an update does.
+pub async fn reconfigure(st: &AppState, settings: Vec<String>) -> anyhow::Result<()> {
+    anyhow::ensure!(can_deploy(st), "possible seulement pour le DevHub du serveur, dans Docker");
     let d = &st.docker;
-    let (host_dir, project) = compose_location(st).await?;
     if let Ok(c) = d.inspect_container(RECONFIGURE, None::<InspectContainerOptions>).await {
-        if c.state.and_then(|s| s.running).unwrap_or(false) {
-            return Ok(host_dir);
-        }
+        anyhow::ensure!(!c.state.and_then(|s| s.running).unwrap_or(false), "un changement de réglages est déjà en cours");
     }
     anyhow::ensure!(!updater_running(st).await, "une mise à jour est en cours : réessaie dans une minute");
-    let image = helper_image(st).await?;
-    let _ = d.remove_container(RECONFIGURE, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
-    // The pause lets DevHub answer the browser before compose replaces it.
-    let script = r#"set -e
-cd "$DIR"
-sleep 2
-[ -f .env ] || : > .env
-grep -vE '^(DEVHUB_DOMAIN|COMPOSE_FILE|DEVHUB_PORT_RANGE|DEVHUB_IP_SITES)=' .env > /tmp/env || true
-echo "DEVHUB_DOMAIN=$DOMAIN" >> /tmp/env
-cat /tmp/env > .env
-echo "== .env : DEVHUB_DOMAIN=$DOMAIN"
-docker compose -p "$PROJECT" up -d --remove-orphans
-echo "== terminé""#;
-    let cfg = Config {
-        image: Some(image.to_string()),
-        cmd: Some(vec!["sh".into(), "-c".into(), script.into()]),
-        env: Some(vec![format!("DIR={host_dir}"), format!("PROJECT={project}"), format!("DOMAIN={domain}")]),
-        host_config: Some(HostConfig {
-            binds: Some(vec!["/var/run/docker.sock:/var/run/docker.sock".to_string(), format!("{host_dir}:{host_dir}")]),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-    d.create_container(Some(CreateContainerOptions { name: RECONFIGURE, platform: None }), cfg).await?;
-    d.start_container::<String>(RECONFIGURE, None).await?;
-    Ok(host_dir)
+    let image = own_image(st).await?;
+    start_helper(st, RECONFIGURE, &image, settings).await
+}
+
+/// From the server's IP to a domain name, during the installation guide.
+pub async fn switch_domain(st: &AppState, domain: &str) -> anyhow::Result<()> {
+    reconfigure(st, vec!["--env".into(), format!("DEVHUB_DOMAIN={domain}"), "--unset".into(), "DEVHUB_PORT_RANGE".into()]).await
+}
+
+/// Installed by an older version with docker compose: its folder on the server ("/opt/devhub").
+pub async fn compose_dir(st: &AppState) -> Option<String> {
+    let me = st.cfg.self_container.as_deref()?;
+    let info = st.docker.inspect_container(me, None::<InspectContainerOptions>).await.ok()?;
+    info.config?.labels?.get("com.docker.compose.project.working_dir").cloned()
+}
+
+/// Setting: the folder of the compose installation DevHub moved out of (shown until dismissed).
+pub const FORMER_DIR: &str = "former_install_dir";
+const MIGRATION_TRIED: &str = "migration_tried";
+
+/// An installation made with docker compose moves into Docker volumes by itself, once, after
+/// the update that brought this version (a failure puts the old container back and shows a
+/// button on the update page instead).
+pub async fn migrate_once(st: AppState) {
+    let Some(dir) = compose_dir(&st).await else { return };
+    if !can_deploy(&st) || db::setting(&st.db.lock().unwrap(), MIGRATION_TRIED).is_some() {
+        return;
+    }
+    // The update that brought this version ends first (its helper still runs a few seconds).
+    for _ in 0..60 {
+        if !updater_running(&st).await {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    finalize(&st).await;
+    if let Err(e) = migrate(&st, &dir).await {
+        tracing::warn!("passage dans des volumes Docker : {e:#}");
+    }
+}
+
+pub async fn migrate(st: &AppState, dir: &str) -> anyhow::Result<()> {
+    {
+        let c = st.db.lock().unwrap();
+        let _ = db::set_setting(&c, MIGRATION_TRIED, Some(&db::now().to_string()));
+        let _ = db::set_setting(&c, FORMER_DIR, Some(dir));
+        db::audit(&c, "system", "devhub.migrate", dir);
+    }
+    tracing::info!("passage de DevHub dans des volumes Docker (ancien dossier : {dir})");
+    reconfigure(st, Vec::new()).await
+}
+
+/// Hides the note about the former installation folder.
+pub async fn forget_former_dir(State(st): State<AppState>, jar: CookieJar) -> Result<Redirect, Response> {
+    auth::require_admin(&st, &jar)?;
+    let _ = db::set_setting(&st.db.lock().unwrap(), FORMER_DIR, None);
+    Ok(Redirect::to("/update"))
+}
+
+/// "Passer entièrement dans Docker" on the update page, when the automatic move failed.
+pub async fn migrate_now(State(st): State<AppState>, jar: CookieJar) -> Result<Redirect, Response> {
+    auth::require_admin(&st, &jar)?;
+    let dir = compose_dir(&st).await.ok_or_else(|| AppError(anyhow::anyhow!("DevHub tourne déjà entièrement dans Docker")).into_response())?;
+    migrate(&st, &dir).await.map_err(|e| AppError(e).into_response())?;
+    Ok(Redirect::to("/update"))
 }
 
 /// Records how the last update ended, once its helper container has exited: success,
@@ -542,6 +578,9 @@ echo "== terminé""#;
 pub async fn finalize(st: &AppState) {
     let Some(last) = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next() else { return };
     if last.finished_at.is_some() {
+        return;
+    }
+    if PREPARING.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
     let d = &st.docker;
@@ -557,7 +596,7 @@ pub async fn finalize(st: &AppState) {
     }
     let log = full_log(st).await;
     let ok = state.exit_code == Some(0) && log.contains("== terminé");
-    let method = "compilé";
+    let method = if log.contains("Recreate") || log.contains("== reconstruction de DevHub") { "compose" } else { "image GitHub" };
     let finished = state.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339).unwrap_or_else(db::now);
     let error = if ok { String::new() } else { error_excerpt(&log) };
     let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, finished, ok, method, &error);
@@ -588,31 +627,35 @@ pub struct Step {
     pub state: &'static str,
 }
 
-/// The four steps of an update, read from the helper's log ("== step (N s)" lines and
-/// compose's output). `failed`: the update ended in error, at the step it reached.
+/// The four steps of an update, read from its log ("== step (N s)" lines). Also reads the
+/// logs of older versions (git pull, build, compose). `failed`: the update ended in error,
+/// at the step it reached.
 pub fn steps(log: &str, failed: bool) -> Vec<Step> {
     let mark = |needle: &str| log.lines().find(|l| l.contains(needle)).and_then(|l| l.rsplit_once('(')).and_then(|(_, r)| r.trim_end_matches(|c| c == ')' || c == ' ').trim_end_matches(" s").trim().parse::<i64>().ok());
+    let legacy = log.contains("== récupération du code");
     let reached = [
-        log.contains("== récupération du code"),
-        log.contains("== reconstruction de DevHub"),
-        log.contains("== redémarrage") || log.contains("Recreate") || log.contains("Recreated"),
+        log.contains("== téléchargement de l'image") || legacy,
+        log.contains("image GitHub récupérée") || log.contains("== reconstruction de DevHub"),
+        log.contains("== redémarrage") || log.contains("Recreate"),
         log.contains("== terminé"),
     ];
-    let t_build = mark("== reconstruction de DevHub");
+    let t_build = mark("== reconstruction de DevHub").or_else(|| mark("== téléchargement de l'image"));
+    let t_got = mark("image GitHub récupérée");
     // Older updates reloaded a separate Caddy after compose: the build ended there.
     let t_restart = mark("== redémarrage").or_else(|| mark("== rechargement de Caddy"));
     let t_end = mark("== terminé");
     let secs = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(a), Some(b)) if b >= a => format!("{} s", b - a), _ => String::new() };
-    let method = if log.contains("image GitHub récupérée") { "image GitHub" } else if log.contains("image GitHub pas encore prête") && !log.contains("Recreate") { "attente de l'image GitHub" } else if reached[1] { "compilation" } else { "" };
+    let join = |v: Vec<String>| v.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+    let method = if log.contains("image GitHub pas encore prête") && !reached[1] { "attente de l'image GitHub" } else if log.contains("image GitHub récupérée") { "image GitHub" } else if reached[1] { "compilation" } else { "" };
     let details = [
-        format!("git pull{}", t_build.map(|t| format!(" · {t} s")).unwrap_or_default()),
-        [method.to_string(), secs(t_build, t_restart)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
-        ["devhub".to_string(), secs(t_restart, t_end)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
+        if legacy { format!("git pull{}", t_build.map(|t| format!(" · {t} s")).unwrap_or_default()) } else { "image du commit".to_string() },
+        join(vec![method.to_string(), if legacy { secs(t_build, t_restart) } else { secs(t_build, t_got) }]),
+        join(vec!["devhub".to_string(), secs(t_restart, t_end)]),
         "nouvelle version".to_string(),
     ];
-    let labels = ["Code récupéré", "Construction", "Redémarrage", "En ligne"];
+    let labels = ["Nouvelle version", "Téléchargement", "Redémarrage", "En ligne"];
     // The current step is the last one reached that has no successor yet.
-    let current = reached.iter().rposition(|r| *r).map(|i| if reached[3] { 4 } else { i }).unwrap_or(0);
+    let current = reached.iter().rposition(|r| *r).map(|i| if reached[3] { 4 } else if i == 0 { 1 } else { i }).unwrap_or(0);
     labels
         .iter()
         .enumerate()
@@ -677,8 +720,9 @@ pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
 mod tests {
     use super::steps;
 
-    const LOG: &str = "== récupération du code (0 s)\nUpdating 6ee7269..bc49915\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n== redémarrage (49 s)\n Container devhub  Recreate\n Container devhub  Recreated\n Container devhub  Started\n== terminé (51 s)\n";
-    /// From a version that still had a separate Caddy container.
+    /// An update now: image download in DevHub, then `devhub deploy` in the helper.
+    const LOG: &str = "== téléchargement de l'image (0 s)\nimage GitHub pas encore prête, attente (8 min max)…\nimage GitHub récupérée : ghcr.io/x/devhub:abc (40 s)\n== redémarrage (0 s)\narrêt de l'ancien conteneur\n== terminé (9 s)\n";
+    /// From a version that pulled with git and recreated with compose.
     const OLD_LOG: &str = "== récupération du code (0 s)\n== reconstruction de DevHub (2 s)\n#27 DONE 2.4s\n Container devhub  Recreate\n Container devhub  Started\n== rechargement de Caddy (49 s)\n== terminé (50 s)\n";
 
     fn states(log: &str, failed: bool) -> Vec<&'static str> {
@@ -688,21 +732,28 @@ mod tests {
     #[test]
     fn finished_update_is_all_done() {
         assert_eq!(states(LOG, false), ["done"; 4]);
-        assert_eq!(steps(LOG, false)[1].detail, "compilation · 47 s");
-        assert_eq!(steps(LOG, false)[2].detail, "devhub · 2 s");
+        assert_eq!(steps(LOG, false)[1].detail, "image GitHub · 40 s");
+        assert_eq!(steps(LOG, false)[2].detail, "devhub · 9 s");
         assert_eq!(states(OLD_LOG, false), ["done"; 4]);
         assert_eq!(steps(OLD_LOG, false)[1].detail, "compilation · 47 s");
     }
 
     #[test]
-    fn running_build_is_the_current_step() {
-        let log = &LOG[..LOG.find("#27").unwrap()];
+    fn waiting_for_the_image_is_the_download_step() {
+        let log = &LOG[..LOG.find("image GitHub récupérée").unwrap()];
         assert_eq!(states(log, false), ["done", "now", "todo", "todo"]);
+        assert_eq!(steps(log, false)[1].detail, "attente de l'image GitHub");
     }
 
     #[test]
-    fn failed_build_marks_its_step() {
-        let log = &LOG[..LOG.find("#27").unwrap()];
+    fn failed_download_marks_its_step() {
+        let log = &LOG[..LOG.find("image GitHub récupérée").unwrap()];
         assert_eq!(states(log, true), ["done", "fail", "todo", "todo"]);
+    }
+
+    #[test]
+    fn after_the_restart_only_the_helper_log_is_left() {
+        let log = &LOG[LOG.find("== redémarrage").unwrap()..];
+        assert_eq!(states(log, false), ["done"; 4]);
     }
 }

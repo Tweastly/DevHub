@@ -511,7 +511,7 @@ async fn ip_address(st: &AppState, q: &HashMap<String, String>) -> Markup {
                     summary { "Passer à un nom de domaine" }
                     ol {
                         li { "DNS : deux enregistrements " b { "A" } " vers " b.mono { (ip) } ", " code { "dev.mondomaine.fr" } " et " code { "*.dev.mondomaine.fr" } "." }
-                        li { "Relance l'installation avec " code { "--domain dev.mondomaine.fr" } " : elle met le " code { ".env" } " à jour et garde tes projets." }
+                        li { "Sur le serveur, relance l'installateur avec " code { "--domain dev.mondomaine.fr" } " : il change ce réglage du conteneur et garde tes projets." }
                         li { "Au redémarrage, un nouveau code d'installation s'affiche : il sert à créer ton passkey sur le domaine." }
                     }
                 }
@@ -580,10 +580,10 @@ async fn domain(st: &AppState, q: &HashMap<String, String>) -> Markup {
                     p.muted { "Chaque projet reçoit son certificat à sa première visite (quelques secondes d'attente)." }
                     details.wz-more {
                         summary { "Passer au certificat joker (recommandé)" }
-                        ol {
-                            li { "Cloudflare › Mon profil › Jetons d'API : un jeton " b { "Zone › DNS › Modifier" } " pour ta zone." }
-                            li { "Dans le " code { ".env" } " de DevHub : " code { "DEVHUB_TLS=wildcard" } " et " code { "CLOUDFLARE_API_TOKEN=…" } }
-                            li { "Sur le serveur, dans le dossier de DevHub : " code { "docker compose up -d" } ", puis « Revérifier »." }
+                        p.muted { "Il faut que le domaine soit chez Cloudflare, et un jeton " b { "Zone › DNS › Modifier" } " : Caddy l'utilise pour prouver à Let's Encrypt que le domaine est à toi. DevHub le garde dans son conteneur et redémarre en quelques secondes. " a.link href=(crate::cloudflare::TOKEN_URL) target="_blank" rel="noopener" { "Créer le jeton ↗" } }
+                        form.wz-inline method="post" action="/setup/wildcard" data-reload {
+                            input.mono-input name="token" type="password" placeholder="Jeton Cloudflare" autocomplete="off" required;
+                            button.btn.primary { "Activer le joker" }
                         }
                     }
                 }
@@ -629,7 +629,7 @@ async fn resources(st: &AppState, q: &HashMap<String, String>) -> Markup {
                         label.field { span.lbl { "RAM réservée à DevHub (Mo)" } input.mono-input name="dh_memory_mb" type="number" min=(crate::web::resources::DEVHUB_MIN_MB) max=(mem_total) step="64" value=[dh_mb] placeholder="sans limite"; }
                         label.field { span.lbl { "CPU de DevHub" } input.mono-input name="dh_cpus" type="number" min="0.1" max=(ncpu) step="0.1" value=[dh_cpu] placeholder="sans limite"; }
                     }
-                    label.field { span.lbl { "Ports des projets" } input.mono-input value={(lo) " – " (hi)} disabled; span.help { code { "DEVHUB_PORT_RANGE" } " dans le .env" } }
+                    label.field { span.lbl { "Ports des projets" } input.mono-input value={(lo) " – " (hi)} disabled; span.help { "réglage " code { "DEVHUB_PORT_RANGE" } " de l'installateur" } }
                 }
             }
             script { (PreEscaped(r#"(() => {
@@ -928,9 +928,9 @@ async fn move_to_domain(st: &AppState, apply: bool, raw: &str) -> Response {
         return (StatusCode::BAD_REQUEST, format!("{domain} ne pointe pas encore vers ce serveur : revérifie le DNS")).into_response();
     }
     match updater::switch_domain(st, &domain).await {
-        Ok(dir) => {
+        Ok(()) => {
             db::audit(&st.db.lock().unwrap(), "installation", "devhub.domain", &domain);
-            let back = format!("docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v {dir}:{dir} ghcr.io/tweastly/devhub:install --dir {dir} --ip");
+            let back = format!("{} --ip", crate::deploy::INSTALL_CMD);
             Json(serde_json::json!({ "url": format!("https://{domain}"), "back": back })).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("passage sur le domaine impossible : {e}")).into_response(),
@@ -1002,6 +1002,18 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
                 db::audit(&c, &who.actor(), if on { "claude.enable" } else { "claude.disable" }, "");
                 next_url("ai")
             })
+        }
+        "wildcard" => {
+            let token = get("token");
+            if token.is_empty() || token.contains(char::is_whitespace) {
+                Err("colle le jeton Cloudflare".into())
+            } else {
+                let settings = vec!["--env".into(), "DEVHUB_TLS=wildcard".into(), "--env".into(), format!("CLOUDFLARE_API_TOKEN={token}")];
+                updater::reconfigure(&st, settings).await.map_err(|e| format!("{e:#}")).map(|_| {
+                    db::audit(&st.db.lock().unwrap(), &who.actor(), "devhub.tls.wildcard", "");
+                    crate::with_param("/setup?step=domain", "ok", "DevHub redémarre avec le certificat joker : revérifie dans une minute.")
+                })
+            }
         }
         "project" => {
             let (template, name) = (get("template"), get("name"));

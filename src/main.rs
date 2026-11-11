@@ -2,6 +2,7 @@ mod auth;
 mod caddy;
 mod cloudflare;
 mod db;
+mod deploy;
 mod docker;
 mod files;
 mod github;
@@ -144,6 +145,12 @@ fn env(k: &str, default: &str) -> String {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
+    // `devhub deploy …`: create or replace DevHub's own container (installer, updates).
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.get(1).map(String::as_str) == Some("deploy") {
+        let a = deploy::parse(&argv[2..]).map_err(anyhow::Error::msg)?;
+        return deploy::run(a).await;
+    }
     let domain = env("DEVHUB_DOMAIN", "localhost");
     let origin = env("DEVHUB_ORIGIN", &format!("https://{domain}"));
     let ip_mode = domain.parse::<std::net::IpAddr>().is_ok();
@@ -230,6 +237,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     updater::spawn_periodic(st.clone());
+    // Installed with docker compose by an older version: into Docker volumes, once.
+    tokio::spawn(updater::migrate_once(st.clone()));
     spawn_stats_collector(st.clone());
     web::images::spawn_refresh(st.clone());
     // Inside another DevHub's project, the server's images are that DevHub's business.
@@ -290,6 +299,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/update/check", post(updater::check_now))
         .route("/update/apply", post(updater::apply))
         .route("/update/auto", post(updater::set_auto))
+        .route("/update/migrate", post(updater::migrate_now))
+        .route("/update/former-dir", post(updater::forget_former_dir))
         .route("/update/stream", get(updater::stream))
         .route("/update/pill", get(web::update_pill_part))
         .route("/ia", get(web::claude::page))

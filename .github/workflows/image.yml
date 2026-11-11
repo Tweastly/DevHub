@@ -42,6 +42,7 @@ jobs:
             --cache-to "type=registry,ref=${IMG}:cache,mode=max" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --build-arg "REVISION=${GITHUB_SHA}" --build-arg "REPOSITORY=${GITHUB_REPOSITORY}" \
             -t "${IMG}:${GITHUB_SHA}" -t "${IMG}:latest" .
           # The installer (install.sh in an image with the Docker CLI): one docker run installs DevHub.
           docker buildx build --push \

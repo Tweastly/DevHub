@@ -1,5 +1,8 @@
-# DevHub in one container: the panel and its HTTPS front (Caddy, started by DevHub).
-# Projects run in their own containers, created by DevHub through the Docker socket.
+# Former installation (a folder on the server, docker compose). DevHub is now installed with
+# `docker run … ghcr.io/tweastly/devhub:install` and lives in Docker only (container
+# `devhub`, volumes `devhub-data` and `devhub-caddy`). This file stays for the servers
+# installed this way: their update still runs `docker compose up -d` once, then DevHub
+# moves itself into the volumes (src/deploy.rs). Not for new installations.
 services:
   devhub:
     build: .
