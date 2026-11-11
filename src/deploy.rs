@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// The installer: on a server with Docker, all it needs is the socket.
-pub const INSTALL_CMD: &str = "docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub:install";
+pub const INSTALL_CMD: &str = "docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub install";
 
 pub const DATA_VOLUME: &str = "devhub-data";
 pub const CADDY_VOLUME: &str = "devhub-caddy";

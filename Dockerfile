@@ -32,4 +32,6 @@ VOLUME /data
 ARG REVISION=""
 ARG REPOSITORY="Tweastly/DevHub"
 ENV DEVHUB_REVISION=$REVISION DEVHUB_GITHUB_REPO=$REPOSITORY
-CMD ["devhub"]
+# `devhub` runs the panel once installed; run bare with the Docker socket, it installs
+# itself (`devhub install`, see src/install.rs); `devhub deploy` replaces its container.
+ENTRYPOINT ["devhub"]

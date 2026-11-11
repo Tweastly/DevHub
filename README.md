@@ -62,9 +62,9 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 1. **Sur le VPS**, une seule commande (root ou sudo), qui ne pose aucune question :
    ```bash
-   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub:install
+   docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub
    ```
-   L'installateur n'utilise que le Docker du serveur : il télécharge l'image de DevHub, crée les volumes `devhub-data` et `devhub-caddy` et le conteneur `devhub`, démarre DevHub sur l'**adresse IP du serveur** et affiche l'adresse du guide et le **code d'installation**. Aucun fichier n'est écrit sur le serveur. Relancé, il met DevHub à jour en gardant ses données et ses réglages.
+   C'est l'image de DevHub elle-même : lancée ainsi, sans autre réglage, elle s'installe. Elle n'utilise que le Docker du serveur : elle télécharge l'image de DevHub, crée les volumes `devhub-data` et `devhub-caddy` et le conteneur `devhub`, démarre DevHub sur l'**adresse IP du serveur** et affiche l'adresse du guide et le **code d'installation**. Aucun fichier n'est écrit sur le serveur. Relancé, il met DevHub à jour en gardant ses données et ses réglages.
    Sans Docker sur le serveur, le même script l'installe d'abord : `curl -fsSL https://raw.githubusercontent.com/Tweastly/DevHub/main/install.sh | sh`.
 2. **Dans ton navigateur**, ouvre `https://<IP du serveur>/setup` (le navigateur peut avertir du certificat la première fois : continue) et tape le code. L'**assistant d'installation** fait tout le reste :
    - **Nom de domaine** : si tu en as un, il affiche les deux enregistrements DNS à créer (`dev.example.com` et `*.dev.example.com` vers l'IP du serveur) — ou les crée lui-même chez Cloudflare avec un jeton « Zone › DNS › Modifier » collé une fois et jamais gardé —, les vérifie, puis fait redémarrer DevHub sur le domaine et t'y emmène avec ton code. Sinon, DevHub reste sur l'adresse IP (voir plus bas).
@@ -74,13 +74,13 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
    Le code ne sert qu'une fois, et il survit au redémarrage sur le domaine (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
 3. **Pare-feu** : 80 et 443 doivent être ouverts (plus 20000-20099 sans domaine, et les ports des jeux si tu en héberges). DevHub ne touche pas au pare-feu du serveur.
 
-Les options s'ajoutent à la fin de la commande, à l'installation comme plus tard pour changer un réglage : `--domain dev.example.com` démarre directement sur le domaine, `--ip` revient à l'adresse IP, `--cloudflare-token` active le certificat joker, `--env CLÉ=VALEUR` règle n'importe quelle variable de la table plus bas, `--yes` installe Docker sans demander (voir `install.sh --help`).
+Les options s'ajoutent à la fin de la commande, à l'installation comme plus tard pour changer un réglage : `--domain dev.example.com` démarre directement sur le domaine, `--ip` revient à l'adresse IP, `--cloudflare-token` active le certificat joker, `--env CLÉ=VALEUR` règle n'importe quelle variable de la table plus bas (`--help` les liste). Exemple : `docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub --domain dev.example.com`.
 
 **Installé avant, avec docker compose dans `/opt/devhub` ?** La mise à jour suivante fait passer DevHub dans les volumes Docker tout seul (sa base et ses certificats sont copiés, ses réglages repris du conteneur), ou la page Mise à jour propose « Passer dans Docker ». Relancer l'installateur fait de même. Le dossier reste en place : supprime-le une fois que tout va bien.
 
 **Sauvegarde** de la base : `docker run --rm -v devhub-data:/d -v "$PWD":/b debian tar czf /b/devhub-data.tgz -C /d .`
 
-L'image de DevHub (`ghcr.io/tweastly/devhub:latest`, Caddy compris, une étiquette par commit) et celle de l'installateur (`:install`), dans le même paquet, sont construites par GitHub à chaque push. Le paquet doit être public pour qu'un serveur les télécharge sans compte (GitHub › Packages › devhub › Package settings › Change visibility).
+L'image de DevHub (`ghcr.io/tweastly/devhub:latest`, Caddy et l'installateur compris, une étiquette par commit) est construite par GitHub à chaque push ; `:install` en est un alias qui démarre directement sur l'installateur (anciennes commandes). Le paquet doit être public pour qu'un serveur les télécharge sans compte (GitHub › Packages › devhub › Package settings › Change visibility).
 
 ### Sans nom de domaine
 

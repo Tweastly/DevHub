@@ -7,6 +7,7 @@ mod docker;
 mod files;
 mod github;
 mod host;
+mod install;
 mod live;
 mod mcp;
 mod mcp_admin;
@@ -146,10 +147,29 @@ fn env(k: &str, default: &str) -> String {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
     // `devhub deploy …`: create or replace DevHub's own container (installer, updates).
-    let argv: Vec<String> = std::env::args().collect();
-    if argv.get(1).map(String::as_str) == Some("deploy") {
-        let a = deploy::parse(&argv[2..]).map_err(anyhow::Error::msg)?;
-        return deploy::run(a).await;
+    // `devhub install …`, or the bare image run with the Docker socket: the installer.
+    let mut argv: Vec<String> = std::env::args().skip(1).collect();
+    // The image's entrypoint is `devhub`; older versions still start helpers as `devhub deploy`.
+    if argv.first().map(String::as_str) == Some("devhub") {
+        argv.remove(0);
+    }
+    let installing = match argv.first().map(String::as_str) {
+        Some("deploy") => {
+            let a = deploy::parse(&argv[1..]).map_err(anyhow::Error::msg)?;
+            return deploy::run(a).await;
+        }
+        Some("install") => Some(&argv[1..]),
+        _ if install::bare_container() => Some(&argv[..]),
+        _ => None,
+    };
+    if let Some(args) = installing {
+        if let Err(e) = install::run(args).await {
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            eprintln!("  ✗ {e:#}");
+            std::process::exit(1);
+        }
+        return Ok(());
     }
     let domain = env("DEVHUB_DOMAIN", "localhost");
     let origin = env("DEVHUB_ORIGIN", &format!("https://{domain}"));
