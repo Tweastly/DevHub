@@ -151,7 +151,7 @@ fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
     if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//")).cloned().unwrap_or_else(|| "/".into());
+    let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//") && !n.contains('\\')).cloned().unwrap_or_else(|| "/".into());
     let secure = if st.cfg.origin.starts_with("https") { "; Secure" } else { "" };
     // Lax, not Strict: the cookie must survive the redirect chain that started on the dashboard.
     let cookie = format!("{}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800{secure}", auth::COOKIE);
@@ -172,7 +172,8 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         return handoff_finish(&st, &host, &req);
     }
     let Some(t) = custom.or_else(|| resolve(&st, &host)) else {
-        let label = host.split('.').next().unwrap_or("");
+        // The Host header comes from the client: escaped before going into the HTML message.
+        let label = maud::html! { (host.split('.').next().unwrap_or("")) }.into_string();
         return error_page(&st, StatusCode::NOT_FOUND, "Introuvable",
             &format!("Aucun projet ne correspond à « {label} »."), None, None);
     };

@@ -107,6 +107,39 @@ fn forbidden(st: &AppState, jar: &CookieJar) -> Response {
     crate::web::Oops::forbidden().response(st, jar)
 }
 
+/// Dashboard requests: refuses state-changing requests sent by another site with the
+/// session cookie, and adds the security headers. Project pages live on subdomains of
+/// the same site, so the SameSite cookie alone doesn't stop one of them from posting a
+/// form to the dashboard while its owner is signed in.
+pub async fn guard(State(st): State<AppState>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use axum::http::{header, HeaderValue, Method};
+    let changes = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let has_session = CookieJar::from_headers(req.headers()).get(COOKIE).is_some();
+    if changes && has_session && !same_origin(&st, req.headers()) {
+        db::audit(&st.db.lock().unwrap(), "?", "csrf.blocked", req.uri().path());
+        return (StatusCode::FORBIDDEN, "requête refusée : elle ne vient pas de DevHub").into_response();
+    }
+    let mut res = next.run(req).await;
+    let h = res.headers_mut();
+    // Nothing embeds the dashboard: no clickjacking from a project page.
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    h.entry(header::CONTENT_SECURITY_POLICY).or_insert(HeaderValue::from_static("frame-ancestors 'none'"));
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    h.insert(header::REFERRER_POLICY, HeaderValue::from_static("same-origin"));
+    res
+}
+
+/// The browser says the request comes from the dashboard itself (Sec-Fetch-Site, or Origin
+/// for older browsers). Without either header it isn't a browser's cross-site request.
+fn same_origin(st: &AppState, h: &HeaderMap) -> bool {
+    let get = |k: &str| h.get(k).and_then(|v| v.to_str().ok());
+    match (get("sec-fetch-site"), get("origin")) {
+        (Some(site), _) => matches!(site, "same-origin" | "none"),
+        (None, Some(origin)) => origin == st.cfg.origin,
+        (None, None) => true,
+    }
+}
+
 /// Guard for administrator pages and actions.
 pub fn require_admin(st: &AppState, jar: &CookieJar) -> Result<db::Profile, Response> {
     match current_profile(st, jar) {
@@ -299,7 +332,11 @@ pub async fn login_finish(State(st): State<AppState>, jar: CookieJar, headers: H
             .unwrap_or_else(|| "owner".into());
         db::audit(&c, &who, "login.ok", &format!("{device} · {ip}"));
     }
-    Ok((new_session(&st, jar, used.map(|u| u.0))?, Json(json!({"ok": true}))).into_response())
+    // The passkey was deleted during the ceremony: no session (it would have no profile).
+    let Some((id, _)) = used else {
+        return Ok((StatusCode::UNAUTHORIZED, "passkey supprimé").into_response());
+    };
+    Ok((new_session(&st, jar, Some(id))?, Json(json!({"ok": true}))).into_response())
 }
 
 fn new_session(st: &AppState, jar: CookieJar, passkey_id: Option<i64>) -> anyhow::Result<CookieJar> {

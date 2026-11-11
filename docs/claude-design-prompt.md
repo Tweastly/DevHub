@@ -161,7 +161,7 @@ C'est la page la plus riche. Elle doit rester **lisible et hiérarchisée** : pr
 
 ### 7.2 Connexion Claude Desktop (MCP)
 - Texte : « Dans Claude Desktop : **Réglages → Connecteurs → Ajouter un connecteur personnalisé**, colle cette URL : »
-- L'URL longue et secrète, en monospace, dans un bloc avec un bouton **Copier** : `https://dev.tweastly.com/mcp/4l1dZXFr3FyDT6n7lQ6ua6Xn6mQOONjDczYlpKNT6u4`.
+- L'URL longue et secrète, en monospace, dans un bloc avec un bouton **Copier** : `https://dev.example.com/mcp/<jeton-secret-du-projet>`.
 - Avertissement discret : « Cette URL est secrète et ne donne accès qu'à ce conteneur. Si elle fuite, régénère-la. »
 - Bouton secondaire « Régénérer l'URL » (avec confirmation).
 

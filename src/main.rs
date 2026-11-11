@@ -277,6 +277,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/oauth/token", post(oauth::token))
         .route("/ia/connections/{id}/revoke", post(oauth::revoke))
         .fallback(|State(st): State<AppState>, jar: CookieJar| async move { web::Oops::page().response(&st, &jar) })
+        // Inner layer: only dashboard requests reach it, project hosts are proxied before.
+        .layer(axum::middleware::from_fn_with_state(st.clone(), auth::guard))
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
         .with_state(st);
 
@@ -411,7 +413,8 @@ async fn create_project(State(st): State<AppState>, jar: CookieJar, Form(f): For
 /// Where a form action returns: its `back` field if it's a local path, else the project.
 fn back_to(form: &HashMap<String, String>, name: &str) -> String {
     form.get("back")
-        .filter(|b| b.starts_with('/') && !b.starts_with("//"))
+        // "/\\evil.example" is read as "//evil.example" by browsers.
+        .filter(|b| b.starts_with('/') && !b.starts_with("//") && !b.contains('\\'))
         .cloned()
         .unwrap_or_else(|| format!("/projects/{name}"))
 }

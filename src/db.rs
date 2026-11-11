@@ -301,14 +301,16 @@ pub fn delete_invite(c: &Connection, token: &str) {
 
 /// Profile behind a session. Sessions opened before profiles existed (no passkey recorded) are the owner's.
 pub fn session_profile(c: &Connection, token: &str) -> Option<Profile> {
-    let pid: Option<i64> = c
+    // A session belongs to the passkey that opened it: none (or a deleted one) means no session,
+    // never the owner by default.
+    let pid: i64 = c
         .query_row(
-            "SELECT p.profile_id FROM sessions s LEFT JOIN passkeys p ON p.id = s.passkey_id WHERE s.token=?1 AND s.expires > ?2",
+            "SELECT p.profile_id FROM sessions s JOIN passkeys p ON p.id = s.passkey_id WHERE s.token=?1 AND s.expires > ?2",
             params![token, now()],
             |r| r.get(0),
         )
         .ok()?;
-    profile(c, pid.unwrap_or(OWNER))
+    profile(c, pid)
 }
 
 pub fn now() -> i64 {
