@@ -744,6 +744,10 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
         v.push((Nav::Resources, "/resources", "Ressources", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
+        if ctx.st.cfg.ip_mode {
+            // Without a domain name: the move to one, from the guide's address step.
+            v.push((Nav::Setup, "/setup?step=domain#domaine", "Nom de domaine", None));
+        }
         v.push((Nav::Setup, "/setup", "Assistant d'installation", None));
     }
     v

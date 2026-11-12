@@ -109,7 +109,7 @@ C'est le choix « Non » de la première étape du guide, et le mode de départ 
 | Ports à ouvrir | 80, 443 | 80, 443 et 20000-20099 |
 
 - Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. DevHub le reconnaît à l'IP dans `DEVHUB_DOMAIN` et lance Caddy avec `caddy/Caddyfile.ip`.
-- **Passer plus tard à un domaine** (une fois le compte créé) : relance l'installateur avec `--domain dev.example.com`. Le réglage du conteneur change, les projets sont gardés, et un nouveau code d'installation permet de créer ton passkey. `--ip` fait le chemin inverse.
+- **Passer plus tard à un domaine** (une fois le compte créé) : Paramètres › **Nom de domaine**, dans le navigateur. Les mêmes enregistrements DNS à créer (ou à faire créer par Cloudflare), leur vérification, puis DevHub redémarre sur le domaine en gardant les projets, et la page t'y emmène créer ton passkey. Sur le serveur, l'installateur avec `--domain dev.example.com` fait de même, et `--ip` le chemin inverse.
 
 ### Certificat wildcard (recommandé)
 Par défaut, chaque projet reçoit son certificat à la première visite, et un nom inconnu provoque une erreur TLS dans le navigateur. Avec un certificat `*.dev.example.com`, tout sous-domaine a un HTTPS valide : les noms inconnus affichent la page 404 de DevHub et les nouveaux projets n'attendent plus.

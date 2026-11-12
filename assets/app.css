@@ -1507,13 +1507,24 @@ body.setup-page { min-height: 100vh; display: grid; place-items: center; padding
 .wz-srv { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 12px 14px; font-size: 13px; }
 .wz-slider { display: grid; gap: 8px; margin-bottom: 14px; }
 .wz-slider .h { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); }
-.wz-slider .h b { color: var(--text); font-weight: 500; }
+.wz-slider .h b, .wz-slider .h output { color: var(--text); font-weight: 500; }
 .wz-slider .f { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--faint); }
 .wz-slider .acc { color: var(--accent-ink); font-family: var(--sans); }
-.wz input[type="range"] { -webkit-appearance: none; appearance: none; min-height: 0; height: 6px; padding: 0; border: 0; border-radius: 99px; background: var(--hover); accent-color: var(--accent); }
-.wz input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 0 0 4px var(--accent-soft), 0 0 0 5px var(--accent); cursor: pointer; }
-.wz input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 0 0 4px var(--accent-soft), 0 0 0 5px var(--accent); cursor: pointer; }
+/* Sliders: the track fills up to the thumb (--p, set by the page), a white thumb with an
+   accent ring; the focus ring goes on the thumb, never around the track. */
+.wz input[type="range"] { --p: 50%; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+.wz input[type="range"]:focus { outline: none; }
+.wz input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 99px; background: linear-gradient(to right, var(--accent) 0 var(--p), var(--hover) var(--p) 100%); }
+.wz input[type="range"]::-moz-range-track { height: 6px; border-radius: 99px; background: var(--hover); }
 .wz input[type="range"]::-moz-range-progress { height: 6px; border-radius: 99px; background: var(--accent); }
+.wz input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgb(0 0 0 / .3); transition: box-shadow .15s, transform .15s; }
+.wz input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgb(0 0 0 / .3); transition: box-shadow .15s, transform .15s; }
+.wz input[type="range"]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 6px var(--accent-soft), 0 1px 4px rgb(0 0 0 / .3); }
+.wz input[type="range"]:hover::-moz-range-thumb { box-shadow: 0 0 0 6px var(--accent-soft), 0 1px 4px rgb(0 0 0 / .3); }
+.wz input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
+.wz input[type="range"]:active::-moz-range-thumb { transform: scale(1.12); }
+.wz input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--accent-soft), 0 0 0 6px var(--accent); }
+.wz input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px var(--accent-soft), 0 0 0 6px var(--accent); }
 .wz-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 /* GitHub */
 .wz-gh { display: flex; align-items: center; gap: 18px; padding: 16px; }
@@ -1526,7 +1537,11 @@ body.setup-page { min-height: 100vh; display: grid; place-items: center; padding
 .wz-inline { display: flex; gap: 8px; }
 .wz-inline input { min-height: 38px; padding: 8px 12px; }
 /* Updates */
-.wz-ver { display: grid; grid-template-columns: auto 1fr; }
+.wz-ver { display: grid; grid-template-columns: auto 1fr auto; }
+.wz-ver .st b.ok { color: var(--ok); }
+.wz-ver .st b.warn { color: var(--warn); }
+.wz-dom-go { display: flex; justify-content: flex-end; margin-top: 4px; }
+#dom-more .wz-dom { margin-top: 14px; }
 .wz-ver > div { padding: 12px 14px; border-left: 1px solid var(--line); font-size: 13px; min-width: 0; }
 .wz-ver > div:first-child { border-left: 0; }
 .wz-ver .muted { display: block; font-size: 11.5px; color: var(--faint); }
@@ -1578,6 +1593,8 @@ body.setup-page { min-height: 100vh; display: grid; place-items: center; padding
   .wz-progress { display: block; height: 4px; border-radius: 99px; background: var(--hover); margin: 8px 0 4px; overflow: hidden; }
   .wz-progress i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
   .wz-grid2, .wz-tpl { grid-template-columns: 1fr 1fr; }
+  .wz-ver { grid-template-columns: 1fr 1fr; }
+  .wz-ver > .st { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
   .wz-gh { flex-direction: column; align-items: flex-start; }
   .wz-check { grid-template-columns: 24px minmax(0, 1fr); }
   .wz-check .side { display: none; }

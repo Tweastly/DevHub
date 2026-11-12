@@ -118,7 +118,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         "account" => account(&me, &q, st.cfg.ip_mode),
         "resources" => resources(&st, &q).await,
         "github" => github_step(&q),
-        "updates" => updates(&st, &q),
+        "updates" => updates(&st, &q).await,
         "ai" => ai(&st, &q),
         "project" => project(&st, &q),
         "done" => return frame(th, None, done(&st, &me, &q).await).into_response(),
@@ -164,58 +164,10 @@ fn first_steps(st: &AppState) -> Markup {
                         label.wz-choice { input type="radio" name="has" value="ip" checked; span.rd {} div { b { "Non, utiliser l'adresse IP" } span.muted { "Connexion par mot de passe, et chaque projet web sur son port : " span.mono { "https://" (ip) ":" (lo) } "…" } } }
                         label.wz-choice { input type="radio" name="has" value="domain"; span.rd {} div { b { "Oui, j'ai un nom de domaine" } span.muted { "Passkeys, un sous-domaine par projet, certificat reconnu par tous les navigateurs." } } }
                     }
-                    div #dom.wz-dom hidden {
-                        label.field {
-                            span.lbl { "Domaine du panel" }
-                            input.mono-input #dname placeholder="dev.mondomaine.fr" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200";
-                            span.help { "Un domaine ou un sous-domaine à toi. Les projets seront sur " span.mono #dsub { "*.dev.mondomaine.fr" } "." }
-                        }
-                        div.wz-card.wz-dns {
-                            p { "Chez ton fournisseur de domaine, crée ces deux enregistrements :" }
-                            table {
-                                thead { tr { th { "Type" } th { "Nom" } th { "Valeur" } } }
-                                tbody {
-                                    tr { td { "A" } td.mono #dn1 { "dev.mondomaine.fr" } td.mono { (ip) } }
-                                    tr { td { "A" } td.mono #dn2 { "*.dev.mondomaine.fr" } td.mono { (ip) } }
-                                }
-                            }
-                            p.muted { "Chez Cloudflare, laisse-les en « DNS only » (nuage gris). Ils sont pris en compte en quelques secondes à quelques minutes." }
-                            div.wz-cf {
-                                button.btn.sm #cf-open type="button" aria-expanded="false" aria-controls="cf-box" { (icon("cloud")) "Ajouter dans Cloudflare" }
-                                a.btn.sm.ghost href=(crate::cloudflare::DNS_URL) target="_blank" rel="noopener" { "Ouvrir le DNS de Cloudflare ↗" }
-                            }
-                            div #cf-box.wz-cf-box hidden {
-                                p {
-                                    "Un jeton d'API Cloudflare avec la permission " b { "Zone › DNS › Modifier" } ". DevHub trouve la zone du domaine et crée (ou corrige) les deux enregistrements, en « DNS only ». Le jeton ne sert qu'à ça : il n'est gardé nulle part. "
-                                    a.link href=(crate::cloudflare::TOKEN_URL) target="_blank" rel="noopener" { "Créer le jeton ↗" }
-                                }
-                                div.wz-inline {
-                                    input.mono-input #cf-token type="password" placeholder="Jeton Cloudflare" autocomplete="off" spellcheck="false" aria-label="Jeton d'API Cloudflare";
-                                    button.btn.primary #cf-go type="button" { "Ajouter les 2 enregistrements" }
-                                }
-                                div #cf-res.wz-card.wz-checks hidden {}
-                            }
-                        }
-                        div #dns.wz-card.wz-checks hidden {}
-                    }
+                    div #dom.wz-dom hidden { (domain_fields(ip)) }
                 }
             }
-            section #s-move hidden {
-                (kicker(1))
-                h1 { "Passage sur ton domaine" }
-                p.wz-lead { "DevHub redémarre sur " b.mono #mv-host {} " et demande son certificat HTTPS. Cette page t'y emmène dès qu'il répond, avec ton code." }
-                div.wz-body {
-                    div.wz-card.wz-checks {
-                        div.wz-check { span.mk.ok { (PreEscaped(CHECK)) } span.t { "Domaine enregistré dans la configuration du serveur" } span.side {} }
-                        div.wz-check { span.mk.spin {} span.t #mv-state { "Redémarrage de DevHub, certificat HTTPS…" } span.side {} }
-                    }
-                    div.wz-hint #mv-slow hidden {
-                        b { "Ça prend du temps ?" }
-                        span { "Vérifie que les ports 80 et 443 du serveur sont ouverts, puis " a.link #mv-link href="#" { "ouvre l'adresse" } " toi-même. Pour revenir à l'adresse IP, sur le serveur :" }
-                        div.wz-cmd { code #mv-back {} button.btn.sm #mv-copy type="button" data-copy="" { "Copier" } }
-                    }
-                }
-            }
+            (move_pane(1))
         }
         section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) {
             (kicker(2))
@@ -250,9 +202,167 @@ fn first_steps(st: &AppState) -> Markup {
                 button.btn.primary #go-pk type="button" hidden { (icon("key")) @if ip_mode { "Créer mon compte" } @else { "Créer mon passkey" } }
             }
         }
-        script { (PreEscaped(crate::web::auth::WEBAUTHN_JS)) (PreEscaped(FIRST_JS)) }
+        script { (PreEscaped(crate::web::auth::WEBAUTHN_JS)) (PreEscaped(DOMAIN_JS)) (PreEscaped(FIRST_JS)) }
     }
 }
+
+/// The domain to move to: the records to create (or have Cloudflare create), their check.
+/// Shared by the guide's first steps and, once signed in, its "Adresse et HTTPS" step.
+fn domain_fields(ip: &str) -> Markup {
+    html! {
+        label.field {
+            span.lbl { "Domaine du panel" }
+            input.mono-input #dname placeholder="dev.mondomaine.fr" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200";
+            span.help { "Un domaine ou un sous-domaine à toi. Les projets seront sur " span.mono #dsub { "*.dev.mondomaine.fr" } "." }
+        }
+        div.wz-card.wz-dns {
+            p { "Chez ton fournisseur de domaine, crée ces deux enregistrements :" }
+            table {
+                thead { tr { th { "Type" } th { "Nom" } th { "Valeur" } } }
+                tbody {
+                    tr { td { "A" } td.mono #dn1 { "dev.mondomaine.fr" } td.mono { (ip) } }
+                    tr { td { "A" } td.mono #dn2 { "*.dev.mondomaine.fr" } td.mono { (ip) } }
+                }
+            }
+            p.muted { "Chez Cloudflare, laisse-les en « DNS only » (nuage gris). Ils sont pris en compte en quelques secondes à quelques minutes." }
+            div.wz-cf {
+                button.btn.sm #cf-open type="button" aria-expanded="false" aria-controls="cf-box" { (icon("cloud")) "Ajouter dans Cloudflare" }
+                a.btn.sm.ghost href=(crate::cloudflare::DNS_URL) target="_blank" rel="noopener" { "Ouvrir le DNS de Cloudflare ↗" }
+            }
+            div #cf-box.wz-cf-box hidden {
+                p {
+                    "Un jeton d'API Cloudflare avec la permission " b { "Zone › DNS › Modifier" } ". DevHub trouve la zone du domaine et crée (ou corrige) les deux enregistrements, en « DNS only ». Le jeton ne sert qu'à ça : il n'est gardé nulle part. "
+                    a.link href=(crate::cloudflare::TOKEN_URL) target="_blank" rel="noopener" { "Créer le jeton ↗" }
+                }
+                div.wz-inline {
+                    input.mono-input #cf-token type="password" placeholder="Jeton Cloudflare" autocomplete="off" spellcheck="false" aria-label="Jeton d'API Cloudflare";
+                    button.btn.primary #cf-go type="button" { "Ajouter les 2 enregistrements" }
+                }
+                div #cf-res.wz-card.wz-checks hidden {}
+            }
+        }
+        div #dns.wz-card.wz-checks hidden {}
+    }
+}
+
+/// While DevHub restarts on the domain: the page waits for it, then goes there.
+fn move_pane(i: usize) -> Markup {
+    html! {
+        section #s-move hidden {
+            (kicker(i))
+            h1 { "Passage sur ton domaine" }
+            p.wz-lead { "DevHub redémarre sur " b.mono #mv-host {} " et demande son certificat HTTPS. Cette page t'y emmène dès qu'il répond, avec ton code." }
+            div.wz-body {
+                div.wz-card.wz-checks {
+                    div.wz-check { span.mk.ok { (PreEscaped(CHECK)) } span.t { "Domaine enregistré dans la configuration du serveur" } span.side {} }
+                    div.wz-check { span.mk.spin {} span.t #mv-state { "Redémarrage de DevHub, certificat HTTPS…" } span.side {} }
+                }
+                div.wz-hint #mv-slow hidden {
+                    b { "Ça prend du temps ?" }
+                    span { "Vérifie que les ports 80 et 443 du serveur sont ouverts, puis " a.link #mv-link href="#" { "ouvre l'adresse" } " toi-même. Pour revenir à l'adresse IP, sur le serveur :" }
+                    div.wz-cmd { code #mv-back {} button.btn.sm #mv-copy type="button" data-copy="" { "Copier" } }
+                }
+            }
+        }
+    }
+}
+
+/// The domain step's behaviour, for the guide's first steps (with the installation code) and
+/// for its "Adresse et HTTPS" step once signed in: `env` says how to skip, wait and fail.
+const DOMAIN_JS: &str = r#"
+function domainStep(env) {
+  const $ = s => document.querySelector(s);
+  const dom = () => $('#dname').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/\.$/, '');
+  let verified = '';
+  function refresh() {
+    $('#dom').hidden = !env.yes();
+    const d = dom() || 'dev.mondomaine.fr';
+    $('#dn1').textContent = d; $('#dn2').textContent = '*.' + d; $('#dsub').textContent = '*.' + d;
+    if (verified && verified !== dom()) { verified = ''; $('#dns').hidden = true; }
+    $('#go-choice').textContent = !env.yes() ? env.skipLabel : verified ? 'Passer sur ce domaine' : 'Vérifier le DNS';
+  }
+  async function post(path, d, extra = {}) {
+    const r = await fetch(path, { method: 'POST', body: new URLSearchParams({ code: env.code(), domain: d, ...extra }) });
+    if (r.status === 409) { location.reload(); return null; }
+    if (r.status === 403) { env.expired(); return null; }
+    if (!r.ok) { env.msg(await r.text()); return null; }
+    return r.json();
+  }
+  async function go() {
+    if (!env.yes()) { env.skip(); return; }
+    const d = dom(), btn = $('#go-choice');
+    if (!d) { env.msg('Indique ton domaine.'); $('#dname').focus(); return; }
+    if (btn.disabled) return;
+    btn.disabled = true; env.msg('');
+    try {
+      if (verified === d) {
+        const j = await post('/setup/domain-apply', d);
+        if (j) move(j);
+        return;
+      }
+      const j = await post('/setup/domain-check', d);
+      if (!j) return;
+      $('#dname').value = j.domain;
+      $('#dns').innerHTML = j.html; $('#dns').hidden = false;
+      verified = j.ok ? j.domain : '';
+      refresh();
+    } catch { env.msg('Connexion perdue : réessaie.'); }
+    finally { btn.disabled = false; }
+  }
+  function move(j) {
+    env.moving();
+    const start = Date.now(), to = j.go || (j.url + '/setup#code=' + env.code());
+    $('#mv-host').textContent = j.url.replace('https://', '');
+    $('#mv-link').href = to;
+    $('#mv-back').textContent = j.back; $('#mv-copy').dataset.copy = j.back;
+    const tick = async () => {
+      try {
+        // Answers once Caddy has a valid certificate for the domain: before, TLS fails.
+        await fetch(j.url + '/login', { mode: 'no-cors', cache: 'no-store' });
+        $('#mv-state').textContent = 'DevHub répond sur ' + j.url + ' : on y va…';
+        setTimeout(() => { location.href = to; }, 1200);
+        return;
+      } catch {}
+      if (Date.now() - start > 120000) $('#mv-slow').hidden = false;
+      setTimeout(tick, 3000);
+    };
+    setTimeout(tick, 5000);
+  }
+  // Cloudflare: the records created through its API with a token used once, then the check.
+  async function cloudflare() {
+    const d = dom(), t = $('#cf-token').value.trim(), btn = $('#cf-go');
+    if (!d) { env.msg('Indique ton domaine.'); $('#dname').focus(); return; }
+    if (!t) { env.msg('Colle le jeton Cloudflare.'); $('#cf-token').focus(); return; }
+    if (btn.disabled) return;
+    btn.disabled = true; env.msg('');
+    const label = btn.textContent;
+    btn.textContent = 'Ajout dans Cloudflare…';
+    try {
+      const j = await post('/setup/cloudflare', d, { token: t });
+      if (!j) return;
+      $('#cf-res').innerHTML = j.html; $('#cf-res').hidden = false;
+      $('#cf-token').value = '';
+      $('#dname').value = j.domain;
+      verified = '';
+      btn.disabled = false;
+      await go();
+    } catch { env.msg('Connexion perdue : réessaie.'); }
+    finally { btn.disabled = false; btn.textContent = label; }
+  }
+  $('#cf-open').onclick = () => {
+    const box = $('#cf-box');
+    box.hidden = !box.hidden;
+    $('#cf-open').setAttribute('aria-expanded', String(!box.hidden));
+    if (!box.hidden) $('#cf-token').focus();
+  };
+  $('#cf-go').onclick = cloudflare;
+  $('#cf-token').addEventListener('keydown', e => { if (e.key === 'Enter') cloudflare(); });
+  $('#dname').addEventListener('input', refresh);
+  $('#dname').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  $('#go-choice').onclick = go;
+  return { refresh };
+}
+"#;
 
 const FIRST_JS: &str = r#"
 (() => {
@@ -323,100 +433,16 @@ const FIRST_JS: &str = r#"
       location.href = '/setup?step=domain';
     } catch { btn.disabled = false; }
   }
-  // Domain name: the DNS records to create, their check, then the move.
+  // Domain name (only without one): DOMAIN_JS, the records, their check, the move.
   const yes = () => !!$('input[name=has][value=domain]')?.checked;
-  const dom = () => $('#dname').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/\.$/, '');
-  let verified = '';
-  function choice() {
-    if (!ipMode) return;
-    $('#dom').hidden = !yes();
-    const d = dom() || 'dev.mondomaine.fr';
-    $('#dn1').textContent = d; $('#dn2').textContent = '*.' + d; $('#dsub').textContent = '*.' + d;
-    if (verified && verified !== dom()) { verified = ''; $('#dns').hidden = true; }
-    $('#go-choice').textContent = !yes() ? 'Continuer' : verified ? 'Passer sur ce domaine' : 'Vérifier le DNS';
-  }
-  async function post(path, d, extra = {}) {
-    const r = await fetch(path, { method: 'POST', body: new URLSearchParams({ code: code(), domain: d, ...extra }) });
-    if (r.status === 409) { location.reload(); return null; }
-    if (r.status === 403) { show(0); msg('Code expiré : tape le nouveau code affiché dans les journaux.'); return null; }
-    if (!r.ok) { msg(await r.text()); return null; }
-    return r.json();
-  }
-  async function goChoice() {
-    if (!yes()) { show(2); $('#oname').focus(); return; }
-    const d = dom(), btn = $('#go-choice');
-    if (!d) { msg('Indique ton domaine.'); $('#dname').focus(); return; }
-    if (btn.disabled) return;
-    btn.disabled = true; msg('');
-    try {
-      if (verified === d) {
-        const j = await post('/setup/domain-apply', d);
-        if (j) move(j);
-        return;
-      }
-      const j = await post('/setup/domain-check', d);
-      if (!j) return;
-      $('#dname').value = j.domain;
-      $('#dns').innerHTML = j.html; $('#dns').hidden = false;
-      verified = j.ok ? j.domain : '';
-      choice();
-    } catch { msg('Connexion perdue : réessaie.'); }
-    finally { btn.disabled = false; }
-  }
-  function move(j) {
-    show(3);
-    const start = Date.now(), to = j.url + '/setup#code=' + code();
-    $('#mv-host').textContent = j.url.replace('https://', '');
-    $('#mv-link').href = to;
-    $('#mv-back').textContent = j.back; $('#mv-copy').dataset.copy = j.back;
-    const tick = async () => {
-      try {
-        // Answers once Caddy has a valid certificate for the domain: before, TLS fails.
-        await fetch(j.url + '/login', { mode: 'no-cors', cache: 'no-store' });
-        $('#mv-state').textContent = 'DevHub répond sur ' + j.url + ' : on y va…';
-        setTimeout(() => { location.href = to; }, 1200);
-        return;
-      } catch {}
-      if (Date.now() - start > 120000) $('#mv-slow').hidden = false;
-      setTimeout(tick, 3000);
-    };
-    setTimeout(tick, 5000);
-  }
-  // Cloudflare: the records created through its API with a token used once, then the check.
-  async function cloudflare() {
-    const d = dom(), t = $('#cf-token').value.trim(), btn = $('#cf-go');
-    if (!d) { msg('Indique ton domaine.'); $('#dname').focus(); return; }
-    if (!t) { msg('Colle le jeton Cloudflare.'); $('#cf-token').focus(); return; }
-    if (btn.disabled) return;
-    btn.disabled = true; msg('');
-    const label = btn.textContent;
-    btn.textContent = 'Ajout dans Cloudflare…';
-    try {
-      const j = await post('/setup/cloudflare', d, { token: t });
-      if (!j) return;
-      $('#cf-res').innerHTML = j.html; $('#cf-res').hidden = false;
-      $('#cf-token').value = '';
-      $('#dname').value = j.domain;
-      verified = '';
-      btn.disabled = false;
-      await goChoice();
-    } catch { msg('Connexion perdue : réessaie.'); }
-    finally { btn.disabled = false; btn.textContent = label; }
-  }
-  if (ipMode) {
-    $('#cf-open').onclick = () => {
-      const box = $('#cf-box');
-      box.hidden = !box.hidden;
-      $('#cf-open').setAttribute('aria-expanded', String(!box.hidden));
-      if (!box.hidden) $('#cf-token').focus();
-    };
-    $('#cf-go').onclick = cloudflare;
-    $('#cf-token').addEventListener('keydown', e => { if (e.key === 'Enter') cloudflare(); });
-    document.querySelectorAll('input[name=has]').forEach(r => r.addEventListener('change', () => { choice(); if (yes()) $('#dname').focus(); }));
-    $('#dname').addEventListener('input', choice);
-    $('#dname').addEventListener('keydown', e => { if (e.key === 'Enter') goChoice(); });
-    $('#go-choice').onclick = goChoice;
-  }
+  const ds = ipMode ? domainStep({
+    code, yes, msg, skipLabel: 'Continuer',
+    skip: () => { show(2); $('#oname').focus(); },
+    moving: () => show(3),
+    expired: () => { show(0); msg('Code expiré : tape le nouveau code affiché dans les journaux.'); },
+  }) : null;
+  const choice = () => ds?.refresh();
+  if (ipMode) document.querySelectorAll('input[name=has]').forEach(r => r.addEventListener('change', () => { choice(); if (yes()) $('#dname').focus(); }));
   $('#go-code').onclick = check;
   $('#go-pk').onclick = create;
   $('#back').onclick = () => { if (pane === 2 && ipMode) { show(1); } else { show(0); boxes[7].focus(); } };
@@ -505,21 +531,31 @@ async fn ip_address(st: &AppState, q: &HashMap<String, String>) -> Markup {
                 (check_row(Check::Warn, html! { "Projets web sur " b.mono { "https://" (ip) ":" (lo) } " à " b.mono { ":" (hi) } " : ouvre ces ports dans le pare-feu du serveur" }, ""))
                 (check_row(Check::Ok, html! { "Connexion par " b { "mot de passe" } " (les passkeys exigent un nom de domaine)" }, ""))
             }
-            div.wz-card.wz-cert {
-                p.muted { "Pour passer plus tard à un nom de domaine : passkeys, sous-domaines des projets et certificat sans avertissement." }
-                details.wz-more {
+            div.wz-card.wz-cert #domaine {
+                p.muted { "Avec un nom de domaine : passkeys, une adresse par projet (" code { "projet.ton-domaine" } ") et un certificat sans avertissement. Tes projets et tes réglages sont gardés : DevHub redémarre en quelques secondes, puis tu crées ton passkey sur le domaine." }
+                details.wz-more #dom-more {
                     summary { "Passer à un nom de domaine" }
-                    ol {
-                        li { "DNS : deux enregistrements " b { "A" } " vers " b.mono { (ip) } ", " code { "dev.mondomaine.fr" } " et " code { "*.dev.mondomaine.fr" } "." }
-                        li { "Sur le serveur, relance l'installateur avec " code { "--domain dev.mondomaine.fr" } " : il change ce réglage du conteneur et garde tes projets." }
-                        li { "Au redémarrage, un nouveau code d'installation s'affiche : il sert à créer ton passkey sur le domaine." }
-                    }
+                    div #dom.wz-dom { (domain_fields(&st.cfg.domain)) }
+                    p #msg.wz-flash.err {}
+                    div.wz-dom-go { button.btn.primary #go-choice type="button" { "Vérifier le DNS" } }
                 }
             }
         }, html! {
             a.btn href="/setup?step=domain" data-reload { (icon("refresh")) "Revérifier" }
             a.btn.primary href=(next_url("domain")) data-reload { "Continuer" }
         }))
+        (move_pane(index("domain")))
+        script { (PreEscaped(DOMAIN_JS)) (PreEscaped(r#"(() => {
+  const $ = id => document.getElementById(id);
+  const ds = domainStep({
+    code: () => '', yes: () => true, skipLabel: '', skip() {},
+    msg: t => { $('msg').textContent = t; },
+    moving: () => document.querySelectorAll('.wz-main > *').forEach(el => { el.hidden = el.id !== 's-move'; }),
+    expired: () => location.reload(),
+  });
+  ds.refresh();
+  if (location.hash === '#domaine') { $('dom-more').open = true; $('dname').focus(); }
+})();"#)) }
     }
 }
 
@@ -614,15 +650,16 @@ async fn resources(st: &AppState, q: &HashMap<String, String>) -> Markup {
                 b.mono { (gb(mem_total)) " Go RAM" }
                 @if disk_total > 0 { b.mono { (size(disk_total.saturating_sub(disk_used))) " libres" } }
             }
-            form #f-res method="post" action="/setup/resources" data-reload data-mem=(mem_total) {
+            form #f-res method="post" action="/setup/resources" data-reload data-mem=(mem_total) data-ncpu=(ncpu) {
                 div.wz-slider {
-                    div.h { span { "RAM par projet" } b.mono { output #o-mb { (def_mb) } " Mo" } }
-                    input #i-mb type="range" name="memory_mb" min="256" max=(max_mb) step="256" value=(def_mb);
+                    div.h { span { "RAM par projet" } output.mono #o-mb { (mem_text(def_mb)) } }
+                    input #i-mb type="range" name="memory_mb" min="256" max=(max_mb) step="256" value=(def_mb) style={ "--p:" (fill(def_mb as f64, 256.0, max_mb as f64)) "%" };
                     div.f { span.mono { "256 Mo" } span.acc #o-fit {} span.mono { (gb(max_mb)) " Go" } }
                 }
                 div.wz-slider {
-                    div.h { span { "CPU par projet" } b.mono { output #o-cpu { (def_cpu) } " " span #o-cpu-u { "cœur" } } }
-                    input #i-cpu type="range" name="cpus" min="0.25" max=(max_cpu) step="0.25" value=(def_cpu);
+                    div.h { span { "CPU par projet" } output.mono #o-cpu { (cpu_text(def_cpu)) } }
+                    input #i-cpu type="range" name="cpus" min="0.25" max=(max_cpu) step="0.25" value=(def_cpu) style={ "--p:" (fill(def_cpu, 0.25, max_cpu)) "%" };
+                    div.f { span.mono { "0,25" } span.acc #o-cpu-fit {} span.mono { (cpu_text(max_cpu)) } }
                 }
                 div.wz-grid2 {
                     @if st.cfg.self_container.is_some() {
@@ -633,18 +670,44 @@ async fn resources(st: &AppState, q: &HashMap<String, String>) -> Markup {
                 }
             }
             script { (PreEscaped(r#"(() => {
-  const f = document.getElementById('f-res'), mem = +f.dataset.mem, mb = document.getElementById('i-mb'), cpu = document.getElementById('i-cpu');
+  const f = document.getElementById('f-res'), mem = +f.dataset.mem, ncpu = +f.dataset.ncpu, mb = document.getElementById('i-mb'), cpu = document.getElementById('i-cpu');
+  const $ = id => document.getElementById(id), num = v => (Math.round(v * 100) / 100).toString().replace('.', ',');
+  // The track fills up to the thumb (--p), in every browser.
+  const fill = el => el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%');
+  const fit = n => n ? '≈ ' + n + ' projet' + (n > 1 ? 's' : '') + ' à pleine charge' : '';
   const up = () => {
-    document.getElementById('o-mb').textContent = mb.value;
-    document.getElementById('o-cpu').textContent = (+cpu.value).toString().replace('.', ',');
-    document.getElementById('o-cpu-u').textContent = +cpu.value > 1 ? 'cœurs' : 'cœur';
-    const n = mem ? Math.floor(mem / mb.value) : 0;
-    document.getElementById('o-fit').textContent = n ? '≈ ' + n + ' projet' + (n > 1 ? 's' : '') + ' à pleine charge' : '';
+    $('o-mb').textContent = +mb.value >= 1024 ? num(mb.value / 1024) + ' Go' : mb.value + ' Mo';
+    $('o-cpu').textContent = num(+cpu.value) + (+cpu.value > 1 ? ' cœurs' : ' cœur');
+    $('o-fit').textContent = fit(mem ? Math.floor(mem / mb.value) : 0);
+    $('o-cpu-fit').textContent = fit(ncpu ? Math.floor(ncpu / cpu.value) : 0);
+    fill(mb); fill(cpu);
   };
   mb.oninput = cpu.oninput = up; up();
 })();"#)) }
         }, html! { button.btn.primary form="f-res" { "Continuer" } }))
     }
+}
+
+/// "2,75 Go", or "512 Mo" below one gigabyte (as the page's script writes it).
+fn mem_text(mb: i64) -> String {
+    if mb >= 1024 { format!("{} Go", decimal(mb as f64 / 1024.0)) } else { format!("{mb} Mo") }
+}
+
+fn cpu_text(c: f64) -> String {
+    format!("{} {}", decimal(c), if c > 1.0 { "cœurs" } else { "cœur" })
+}
+
+/// "2,75", "3": two decimals at most, French comma.
+fn decimal(v: f64) -> String {
+    ((v * 100.0).round() / 100.0).to_string().replace('.', ",")
+}
+
+/// Where the thumb stands, in percent of the track.
+fn fill(v: f64, min: f64, max: f64) -> String {
+    if max <= min {
+        return "0".into();
+    }
+    format!("{:.1}", ((v - min) / (max - min) * 100.0).clamp(0.0, 100.0))
 }
 
 // ---------- 5: GitHub ----------
@@ -653,14 +716,14 @@ fn github_step(q: &HashMap<String, String>) -> Markup {
     let cred = github::cred();
     let here: String = url::form_urlencoded::byte_serialize(b"/setup?step=github").collect();
     html! {
-        (step("github", q, "Connecter GitHub", html! { "Facultatif, mais pratique : DevHub peut alors travailler avec tes dépôts et images privés." }, html! {
+        (step("github", q, "Connecter GitHub", html! { "Pour accéder à tes " b { "dépôts privés" } " (et à tes images privées). Facultatif : les dépôts et les images publics marchent sans." }, html! {
             div.wz-card.wz-gh {
                 span.wz-ic.xl { (icon("github")) }
                 ul {
                     li { (PreEscaped(CHECK)) "Cloner tes dépôts privés dans un projet" }
                     li { (PreEscaped(CHECK)) "Télécharger tes images privées ghcr.io" }
                     li { (PreEscaped(CHECK)) "Proposer tes dépôts à la création d'un projet" }
-                    li { (PreEscaped(CHECK)) "Suivre les mises à jour de DevHub" }
+                    li { (PreEscaped(CHECK)) "Vérifier les mises à jour de DevHub plus souvent" }
                 }
             }
             @if let Some(c) = &cred {
@@ -671,7 +734,7 @@ fn github_step(q: &HashMap<String, String>) -> Markup {
                 }
                 details.wz-more open[!github::oauth_ready()] {
                     summary { "Coller un jeton à la place" }
-                    p.muted { "Un jeton classique avec " code { "repo" } " et " code { "read:packages" } ", créé dans GitHub › Settings › Developer settings." }
+                    p.muted { "Un jeton classique avec " code { "repo" } " (tes dépôts privés) et " code { "read:packages" } " (tes images privées), créé dans GitHub › Settings › Developer settings. " a.link href="https://github.com/settings/tokens/new?scopes=repo,read:packages&description=DevHub" target="_blank" rel="noopener" { "Créer le jeton ↗" } }
                     form.wz-inline method="post" action="/github/token" data-reload {
                         input type="hidden" name="next" value="/setup?step=github";
                         input.mono-input name="token" type="password" placeholder="ghp_…" autocomplete="off" required;
@@ -688,15 +751,32 @@ fn github_step(q: &HashMap<String, String>) -> Markup {
 
 // ---------- 6: updates ----------
 
-fn updates(st: &AppState, q: &HashMap<String, String>) -> Markup {
-    let info = st.update.lock().unwrap();
+async fn updates(st: &AppState, q: &HashMap<String, String>) -> Markup {
+    // Checked in the background all the time; a fresh look for this page if the last one is old.
+    let stale = st.update.lock().unwrap().checked_at.is_none_or(|t| db::now() - t > 120);
+    if stale {
+        let _ = tokio::time::timeout(Duration::from_secs(6), updater::check(st)).await;
+    }
+    let info = st.update.lock().unwrap().clone();
     let auto = db::setting(&st.db.lock().unwrap(), updater::AUTO_SETTING).is_some();
     let version = info.local.as_deref().map(|v| v.chars().take(7).collect::<String>());
     html! {
-        (step("updates", q, "Mises à jour", html! { "DevHub suit son dépôt sur GitHub et se met à jour sans couper tes projets." }, html! {
+        (step("updates", q, "Mises à jour", html! { "DevHub surveille son dépôt sur GitHub en continu (un nouveau commit est vu en quelques secondes) et se met à jour sans couper tes projets." }, html! {
             div.wz-card.wz-ver {
                 div { span.muted { "Installée" } b.mono { (version.as_deref().unwrap_or("inconnue")) } }
                 div { span.muted { "Source" } b.mono { (info.repo.as_deref().unwrap_or("non trouvée")) " · " (if info.branch.is_empty() { "main" } else { info.branch.as_str() }) } }
+                div.st {
+                    span.muted { "État" @if let Some(t) = info.checked_at { " · vérifié à " (crate::timefmt::hm(t)) } }
+                    @if info.error.is_some() {
+                        b.warn { "GitHub injoignable" }
+                    } @else if info.available() {
+                        a.link href="/update" data-reload { b { (info.pending.len()) " nouveauté" @if info.pending.len() > 1 { "s" } " · voir" } }
+                    } @else if info.checked_at.is_some() {
+                        b.ok { "À jour" }
+                    } @else {
+                        b.muted { "pas encore vérifié" }
+                    }
+                }
             }
             form #f-upd.wz-choices method="post" action="/setup/updates" data-reload {
                 label.wz-choice { input type="radio" name="auto" value="0" checked[!auto]; span.rd {} div { b { "Me prévenir" } span.muted { "Un badge apparaît dès qu'une version est prête, tu installes quand tu veux." } } }
@@ -927,11 +1007,26 @@ async fn move_to_domain(st: &AppState, apply: bool, raw: &str) -> Response {
     if !ok {
         return (StatusCode::BAD_REQUEST, format!("{domain} ne pointe pas encore vers ce serveur : revérifie le DNS")).into_response();
     }
+    // Installed already, with a password: on the domain the owner signs in with a passkey,
+    // created with an installation code that this page carries there.
+    let go = if st.setup_token.lock().unwrap().is_some() {
+        None
+    } else {
+        let c = st.db.lock().unwrap();
+        let has_passkey = db::passkey_rows(&c).iter().any(|k| k.profile_id == db::OWNER);
+        Some(if has_passkey {
+            format!("https://{domain}/login")
+        } else {
+            let code = db::setting(&c, auth::SETUP_CODE).unwrap_or_else(auth::new_setup_code);
+            let _ = db::set_setting(&c, auth::SETUP_CODE, Some(&code));
+            format!("https://{domain}/setup#code={}", code.replace('-', ""))
+        })
+    };
     match updater::switch_domain(st, &domain).await {
         Ok(()) => {
-            db::audit(&st.db.lock().unwrap(), "installation", "devhub.domain", &domain);
+            db::audit(&st.db.lock().unwrap(), if go.is_some() { "owner" } else { "installation" }, "devhub.domain", &domain);
             let back = format!("{} --ip", crate::deploy::INSTALL_CMD);
-            Json(serde_json::json!({ "url": format!("https://{domain}"), "back": back })).into_response()
+            Json(serde_json::json!({ "url": format!("https://{domain}"), "back": back, "go": go })).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("passage sur le domaine impossible : {e}")).into_response(),
     }
@@ -942,11 +1037,15 @@ async fn move_to_domain(st: &AppState, apply: bool, raw: &str) -> Response {
 pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<String>, Form(f): Form<HashMap<String, String>>) -> Response {
     // The code is checked before anyone exists to sign in, and guards the domain step.
     if matches!(which.as_str(), "code" | "domain-check" | "domain-apply" | "cloudflare") {
-        if st.setup_token.lock().unwrap().is_none() {
+        if st.setup_token.lock().unwrap().is_some() {
+            if !auth::setup_code_ok(&st, f.get("code").map(String::as_str).unwrap_or("")) {
+                return (StatusCode::FORBIDDEN, "code incorrect").into_response();
+            }
+        } else if which == "code" {
             return (StatusCode::CONFLICT, "déjà installé").into_response();
-        }
-        if !auth::setup_code_ok(&st, f.get("code").map(String::as_str).unwrap_or("")) {
-            return (StatusCode::FORBIDDEN, "code incorrect").into_response();
+        } else if let Err(r) = auth::require_admin(&st, &jar) {
+            // Installed: the move to a domain from the guide replayed later (settings).
+            return r;
         }
         if which == "code" {
             return StatusCode::NO_CONTENT.into_response();
