@@ -71,7 +71,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
    - **Ton compte** : un passkey avec un domaine, un mot de passe sans.
    - Puis le HTTPS, les ressources, GitHub, les mises à jour, les assistants IA et ton premier projet.
 
-   Le code ne sert qu'une fois, et il survit au redémarrage sur le domaine (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). L'assistant se relance à tout moment depuis Paramètres › Assistant d'installation.
+   Le code ne sert qu'une fois, et il survit au redémarrage sur le domaine (après 20 essais faux, un nouveau s'affiche dans `docker logs devhub`). Une fois l'installation finie, le guide ne revient plus : tout ce qu'il a réglé se change dans **Paramètres** (adresse et HTTPS, nom de domaine, ressources, mises à jour, assistants IA, GitHub).
 3. **Pare-feu** : 80 et 443 doivent être ouverts (plus 20000-20099 sans domaine, et les ports des jeux si tu en héberges). DevHub ne touche pas au pare-feu du serveur.
 
 Les options s'ajoutent à la fin de la commande, à l'installation comme plus tard pour changer un réglage : `--domain dev.example.com` démarre directement sur le domaine, `--ip` revient à l'adresse IP, `--cloudflare-token` active le certificat joker, `--env CLÉ=VALEUR` règle n'importe quelle variable de la table plus bas (`--help` les liste). Exemple : `docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tweastly/devhub --domain dev.example.com`.
@@ -109,7 +109,7 @@ C'est le choix « Non » de la première étape du guide, et le mode de départ 
 | Ports à ouvrir | 80, 443 | 80, 443 et 20000-20099 |
 
 - Sans domaine, les passkeys sont impossibles (WebAuthn refuse une adresse IP), d'où le mot de passe, limité à 5 essais faux par adresse et par quart d'heure. Les projets privés restent protégés : il faut être connecté à DevHub pour les ouvrir. Pas de sous-domaines personnalisés dans ce mode. DevHub le reconnaît à l'IP dans `DEVHUB_DOMAIN` et lance Caddy avec `caddy/Caddyfile.ip`.
-- **Passer plus tard à un domaine** (une fois le compte créé) : Paramètres › **Nom de domaine**, dans le navigateur. Les mêmes enregistrements DNS à créer (ou à faire créer par Cloudflare), leur vérification, puis DevHub redémarre sur le domaine en gardant les projets, et la page t'y emmène créer ton passkey. Sur le serveur, l'installateur avec `--domain dev.example.com` fait de même, et `--ip` le chemin inverse.
+- **Passer plus tard à un domaine** (une fois le compte créé) : **Paramètres › Adresse et HTTPS › Passer à un nom de domaine**, dans le navigateur. Les mêmes enregistrements DNS à créer (ou à faire créer par Cloudflare), leur vérification, puis DevHub redémarre sur le domaine en gardant les projets, et la page t'y emmène créer ton passkey. Sur le serveur, l'installateur avec `--domain dev.example.com` fait de même, et `--ip` le chemin inverse.
 
 ### Certificat wildcard (recommandé)
 Par défaut, chaque projet reçoit son certificat à la première visite, et un nom inconnu provoque une erreur TLS dans le navigateur. Avec un certificat `*.dev.example.com`, tout sous-domaine a un HTTPS valide : les noms inconnus affichent la page 404 de DevHub et les nouveaux projets n'attendent plus.

@@ -13,6 +13,7 @@ pub mod project;
 pub mod projects;
 pub mod resources;
 pub mod security;
+pub mod settings;
 pub mod setup;
 pub mod update;
 pub mod volumes;
@@ -621,8 +622,8 @@ pub enum Nav<'a> {
     Images,
     Update,
     Menu,
-    /// The installation guide (its own page, listed with the settings).
-    Setup,
+    /// DevHub's own settings (the installation guide's, once installed).
+    Settings,
 }
 
 pub struct Shell<'a> {
@@ -737,6 +738,7 @@ pub fn update_pill(ctx: &Ctx) -> Markup {
 fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, Option<(String, bool)>)> {
     let mut v = Vec::new();
     if ctx.profile.admin {
+        v.push((Nav::Settings, "/settings", "Paramètres", None));
         v.push((Nav::Claude, "/ia", "Assistants IA", ctx.admin.then(|| ("admin".to_string(), false))));
     }
     v.push((Nav::Passkeys, "/security", "Mon profil", Some((ctx.passkey_count.to_string(), false))));
@@ -744,17 +746,12 @@ fn settings_links(ctx: &Ctx) -> Vec<(Nav<'static>, &'static str, &'static str, O
         v.push((Nav::Resources, "/resources", "Ressources", None));
         v.push((Nav::Audit, "/audit", "Journal", None));
         v.push((Nav::Update, "/update", "Mise à jour", ctx.update.available().then(|| (ctx.update.pending.len().to_string(), true))));
-        if ctx.st.cfg.ip_mode {
-            // Without a domain name: the move to one, from the guide's address step.
-            v.push((Nav::Setup, "/setup?step=domain#domaine", "Nom de domaine", None));
-        }
-        v.push((Nav::Setup, "/setup", "Assistant d'installation", None));
     }
     v
 }
 
 fn is_settings(nav: Nav) -> bool {
-    matches!(nav, Nav::Claude | Nav::Passkeys | Nav::Resources | Nav::Audit | Nav::Update)
+    matches!(nav, Nav::Settings | Nav::Claude | Nav::Passkeys | Nav::Resources | Nav::Audit | Nav::Update)
 }
 
 /// The menu: a rail of icons that unfolds over the page (labels, pinned projects) while

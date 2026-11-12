@@ -20,6 +20,10 @@ pub fn period_seg(base: &str, current: &str) -> Markup {
 
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx(&st, &jar)?;
+    // The owner is on the dashboard: the installation guide is over for good.
+    if ctx.profile.admin {
+        super::setup::finish(&st);
+    }
     let mut all = rows(&ctx).await;
     sort_by_activity(&ctx, &mut all);
     let per = period(&q);

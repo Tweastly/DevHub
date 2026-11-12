@@ -280,6 +280,13 @@ async fn main() -> anyhow::Result<()> {
         let d = st.docker.clone();
         tokio::spawn(async move { docker::prune_template_tags(&d).await });
     }
+    // Installed before the guide could be ended: an owner with projects is past it.
+    if !needs_setup && db::setting(&st.db.lock().unwrap(), web::setup::SETUP_DONE).is_none() {
+        let c = st.db.lock().unwrap();
+        if db::list_projects(&c).map(|p| !p.is_empty()).unwrap_or(false) {
+            let _ = db::set_setting(&c, web::setup::SETUP_DONE, Some(&db::now().to_string()));
+        }
+    }
     if needs_setup {
         // Kept until used: moving to a domain restarts DevHub in the middle of the guide.
         let saved = db::setting(&st.db.lock().unwrap(), auth::SETUP_CODE);
@@ -298,7 +305,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/password/login", post(auth::password_login))
         .route("/auth/password/setup", post(auth::password_setup))
         .route("/auth/password/change", post(auth::password_change))
+        .route("/settings", get(web::settings::page))
         .route("/setup", get(web::setup::page))
+        .route("/setup/later", get(web::setup::later))
         .route("/setup/{step}", post(web::setup::save))
         .route("/logout", post(auth::logout))
         .route("/auth/register/start", post(auth::register_start))

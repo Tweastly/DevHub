@@ -31,6 +31,29 @@ fn index(step: &str) -> usize {
 /// "domain": the first step once signed in (the ones before run in the browser alone).
 const FIRST_SIGNED_IN: usize = 3;
 
+/// Setting: the guide is over (finished, put off, or left for the dashboard). From then
+/// on /setup leads to the settings page, where everything it set can be changed.
+pub const SETUP_DONE: &str = "setup_done";
+
+pub fn finished(st: &AppState) -> bool {
+    db::setting(&st.db.lock().unwrap(), SETUP_DONE).is_some()
+}
+
+/// The guide ends for good once the owner exists and leaves it.
+pub fn finish(st: &AppState) {
+    if st.setup_token.lock().unwrap().is_none() && !finished(st) {
+        let _ = db::set_setting(&st.db.lock().unwrap(), SETUP_DONE, Some(&db::now().to_string()));
+    }
+}
+
+/// "Configurer plus tard": straight to the dashboard, the guide won't come back.
+pub async fn later(State(st): State<AppState>, jar: CookieJar) -> Response {
+    if auth::current_profile(&st, &jar).is_some_and(|p| p.admin) {
+        finish(&st);
+    }
+    Redirect::to("/").into_response()
+}
+
 fn next_url(step: &str) -> String {
     match STEPS.get(index(step) + 1) {
         Some((s, _)) => format!("/setup?step={s}"),
@@ -41,7 +64,9 @@ fn next_url(step: &str) -> String {
 const CHECK: &str = r#"<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg>"#;
 
 /// The page: steps on the left (or a progress bar on a phone), the step on the right.
-fn frame(theme: Option<&'static str>, cur: Option<usize>, main: Markup) -> Markup {
+/// `signed_in`: past the account step, the steps after it are links and the guide can be
+/// put off; before, there is nowhere else to go.
+fn frame(theme: Option<&'static str>, cur: Option<usize>, signed_in: bool, main: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="fr" data-theme=[theme] {
@@ -51,12 +76,18 @@ fn frame(theme: Option<&'static str>, cur: Option<usize>, main: Markup) -> Marku
                     @if let Some(cur) = cur {
                         nav.wz-steps aria-label="Étapes" {
                             div.wz-brand { (logo(20)) "DevHub" }
-                            @for (i, (_, label)) in STEPS.iter().enumerate() {
-                                div class={ "wz-st" @if i < cur { " done" } @if i == cur { " cur" } } {
-                                    span.n { span.num { (i + 1) } (PreEscaped(CHECK)) } (label)
+                            @for (i, (key, label)) in STEPS.iter().enumerate() {
+                                @if signed_in && i >= FIRST_SIGNED_IN {
+                                    a class={ "wz-st link" @if i < cur { " done" } @if i == cur { " cur" } } href={ "/setup?step=" (key) } data-reload aria-current=[(i == cur).then_some("step")] {
+                                        span.n { span.num { (i + 1) } (PreEscaped(CHECK)) } (label)
+                                    }
+                                } @else {
+                                    div class={ "wz-st" @if i < cur { " done" } @if i == cur { " cur" } } {
+                                        span.n { span.num { (i + 1) } (PreEscaped(CHECK)) } (label)
+                                    }
                                 }
                             }
-                            a.wz-later href="/" data-reload { "Configurer plus tard" }
+                            @if signed_in { a.wz-later href="/setup/later" data-reload { "Configurer plus tard" } }
                         }
                     }
                     main.wz-main { (main) }
@@ -104,7 +135,7 @@ fn skip(st: &str, label: &str) -> Markup {
 pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Response {
     let th = theme(&jar);
     if st.setup_token.lock().unwrap().is_some() {
-        return frame(th, Some(0), first_steps(&st)).into_response();
+        return frame(th, Some(0), false, first_steps(&st)).into_response();
     }
     let Some(me) = auth::current_profile(&st, &jar) else {
         let next: String = url::form_urlencoded::byte_serialize(format!("{}/setup", st.cfg.origin).as_bytes()).collect();
@@ -112,6 +143,10 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     };
     if !me.admin {
         return Oops::forbidden().response(&st, &jar);
+    }
+    // Installed: the guide never comes back, its settings are on the settings page.
+    if finished(&st) {
+        return Redirect::to("/settings").into_response();
     }
     let which = q.get("step").map(String::as_str).unwrap_or("domain");
     let main = match which {
@@ -121,10 +156,13 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
         "updates" => updates(&st, &q).await,
         "ai" => ai(&st, &q),
         "project" => project(&st, &q),
-        "done" => return frame(th, None, done(&st, &me, &q).await).into_response(),
+        "done" => {
+            finish(&st);
+            return frame(th, None, true, done(&st, &me, &q).await).into_response();
+        }
         _ => domain(&st, &q).await,
     };
-    frame(th, Some(index(which)), main).into_response()
+    frame(th, Some(index(which)), true, main).into_response()
 }
 
 // ---------- 1 to 3: installation code, domain name, owner account (nobody signed in yet) ----------
@@ -167,9 +205,11 @@ fn first_steps(st: &AppState) -> Markup {
                     div #dom.wz-dom hidden { (domain_fields(ip)) }
                 }
             }
-            (move_pane(1))
+            (move_pane(Some(1)))
         }
-        section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) {
+        // After the account: the rest of the guide, or the settings when DevHub was installed
+        // already (a move to a domain asks for a passkey there).
+        section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) data-after=(if finished(st) { "/settings" } else { "/setup?step=domain" }) {
             (kicker(2))
             h1 { "Crée ton compte propriétaire" }
             @if ip_mode {
@@ -246,10 +286,10 @@ fn domain_fields(ip: &str) -> Markup {
 }
 
 /// While DevHub restarts on the domain: the page waits for it, then goes there.
-fn move_pane(i: usize) -> Markup {
+pub(crate) fn move_pane(i: Option<usize>) -> Markup {
     html! {
         section #s-move hidden {
-            (kicker(i))
+            @if let Some(i) = i { (kicker(i)) }
             h1 { "Passage sur ton domaine" }
             p.wz-lead { "DevHub redémarre sur " b.mono #mv-host {} " et demande son certificat HTTPS. Cette page t'y emmène dès qu'il répond, avec ton code." }
             div.wz-body {
@@ -368,6 +408,7 @@ const FIRST_JS: &str = r#"
 (() => {
   const $ = s => document.querySelector(s), boxes = [...document.querySelectorAll('.otp input')];
   const code = () => boxes.map(b => b.value).join('');
+  const KEPT = 'devhub-setup-code', forget = () => { try { sessionStorage.removeItem(KEPT); } catch {} };
   const clean = t => (t || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const fill = (t, from) => { [...clean(t)].slice(0, 8 - from).forEach((c, j) => { boxes[from + j].value = c; }); };
   boxes.forEach((b, i) => {
@@ -405,8 +446,9 @@ const FIRST_JS: &str = r#"
     busy = true;
     try {
       const r = await fetch('/setup/code', { method: 'POST', body: new URLSearchParams({ code: code() }) });
-      if (r.status === 409) { location.reload(); return; }
-      if (!r.ok) { msg('Code incorrect : vérifie-le dans les journaux du serveur.'); boxes.forEach(x => x.classList.add('bad')); return; }
+      if (r.status === 409) { forget(); location.reload(); return; }
+      if (!r.ok) { forget(); msg('Code incorrect : vérifie-le dans les journaux du serveur.'); boxes.forEach(x => x.classList.add('bad')); return; }
+      try { sessionStorage.setItem(KEPT, code()); } catch {}
       if (ipMode) { show(1); } else { show(2); $('#oname').focus(); }
     } catch { msg('Connexion perdue : réessaie.'); }
     finally { busy = false; }
@@ -420,7 +462,7 @@ const FIRST_JS: &str = r#"
       btn.disabled = true;
       try {
         const r = await fetch('/auth/password/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code(), name, password: pw }) });
-        if (r.ok) { location.href = '/setup?step=domain'; return; }
+        if (r.ok) { forget(); location.href = $('#s-account').dataset.after; return; }
         msg(await r.text());
       } catch { msg('Connexion perdue : réessaie.'); }
       btn.disabled = false;
@@ -430,7 +472,8 @@ const FIRST_JS: &str = r#"
     try {
       await register('Passkey principal', code());
       await fetch('/setup/account', { method: 'POST', body: new URLSearchParams({ name }) });
-      location.href = '/setup?step=domain';
+      forget();
+      location.href = $('#s-account').dataset.after;
     } catch { btn.disabled = false; }
   }
   // Domain name (only without one): DOMAIN_JS, the records, their check, the move.
@@ -447,9 +490,12 @@ const FIRST_JS: &str = r#"
   $('#go-pk').onclick = create;
   $('#back').onclick = () => { if (pane === 2 && ipMode) { show(1); } else { show(0); boxes[7].focus(); } };
   document.querySelectorAll('#s-account input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') create(); }));
-  // From the move to a domain: the code comes along in the address, never sent to a server.
-  const carried = new URLSearchParams(location.hash.slice(1)).get('code');
-  if (carried) { history.replaceState(null, '', location.pathname + location.search); fill(carried, 0); check(); }
+  // From the move to a domain, the code comes along in the address (never sent to a server);
+  // after a reload, it is kept for this tab until the account exists.
+  let carried = new URLSearchParams(location.hash.slice(1)).get('code');
+  if (carried) history.replaceState(null, '', location.pathname + location.search);
+  else try { carried = sessionStorage.getItem(KEPT); } catch {}
+  if (carried) { fill(carried, 0); check(); }
 })();
 "#;
 
@@ -462,9 +508,9 @@ fn account(me: &db::Profile, q: &HashMap<String, String>, ip_mode: bool) -> Mark
         div.wz-card.wz-pk {
             span.wz-ic.lg { (icon("key")) }
             @if ip_mode {
-                div { b { "Ton mot de passe" } span.muted { "Il se change dans Mon profil. " a.link href="/security#password" data-reload { "Mon profil →" } } }
+                div { b { "Ton mot de passe" } span.muted { "Il se change dans Mon profil. " a.link href="/security#password" target="_blank" rel="noopener" { "Mon profil ↗" } } }
             } @else {
-                div { b { "Tes passkeys" } span.muted { "Ajoute un passkey de secours (téléphone, clé USB) pour ne jamais perdre l'accès. " a.link href="/security" data-reload { "Mon profil →" } } }
+                div { b { "Tes passkeys" } span.muted { "Ajoute un passkey de secours (téléphone, clé USB) pour ne jamais perdre l'accès. " a.link href="/security" target="_blank" rel="noopener" { "Mon profil ↗" } } }
             }
         }
     }, html! { button.btn.primary form="f-account" { "Continuer" } })
@@ -511,6 +557,21 @@ fn check_row(c: Check, text: Markup, side: &str) -> Markup {
 /// Without a domain name: the address, its certificate, the ports to open, and how to move
 /// to a domain later.
 async fn ip_address(st: &AppState, q: &HashMap<String, String>) -> Markup {
+    html! {
+        (step("domain", q, "Adresse et HTTPS", html! { "DevHub n'a pas de nom de domaine : il répond sur l'adresse IP du serveur, et chaque projet web sur son propre port." }, html! {
+            (ip_cards(st).await)
+            (domain_move(st))
+        }, html! {
+            a.btn href="/setup?step=domain" data-reload { (icon("refresh")) "Revérifier" }
+            a.btn.primary href=(next_url("domain")) data-reload { "Continuer" }
+        }))
+        (move_pane(Some(index("domain"))))
+        (domain_move_script(".wz-main > *"))
+    }
+}
+
+/// Without a domain: the address, its certificate, the ports to open.
+pub(crate) async fn ip_cards(st: &AppState) -> Markup {
     let base = proxy::base_host(st).to_string();
     let ip = base.rsplit_once(':').map_or(base.as_str(), |x| x.0).to_string();
     let https = st.cfg.origin.starts_with("https://");
@@ -518,51 +579,69 @@ async fn ip_address(st: &AppState, q: &HashMap<String, String>) -> Markup {
     let trusted = https && https_ok(&st.cfg.origin).await;
     let (lo, hi) = st.cfg.port_range;
     html! {
-        (step("domain", q, "Adresse et HTTPS", html! { "DevHub n'a pas de nom de domaine : il répond sur l'adresse IP du serveur, et chaque projet web sur son propre port." }, html! {
-            div.wz-card.wz-checks {
-                (check_row(Check::Ok, html! { "Panel sur " b.mono { (st.cfg.origin) } }, ""))
-                @if trusted {
-                    (check_row(Check::Ok, html! { "Certificat HTTPS " b { "reconnu par les navigateurs" } " (Let's Encrypt, renouvelé tout seul)" }, ""))
-                } @else if https {
-                    (check_row(Check::Warn, html! { "Certificat interne de Caddy : le navigateur affiche un avertissement à la première visite (Let's Encrypt n'a pas délivré de certificat pour " b.mono { (ip) } ")" }, ""))
-                } @else {
-                    (check_row(Check::Warn, html! { "DevHub est servi en " b { "HTTP" } " : le mot de passe circule en clair" }, ""))
-                }
-                (check_row(Check::Warn, html! { "Projets web sur " b.mono { "https://" (ip) ":" (lo) } " à " b.mono { ":" (hi) } " : ouvre ces ports dans le pare-feu du serveur" }, ""))
-                (check_row(Check::Ok, html! { "Connexion par " b { "mot de passe" } " (les passkeys exigent un nom de domaine)" }, ""))
+        div.wz-card.wz-checks {
+            (check_row(Check::Ok, html! { "Panel sur " b.mono { (st.cfg.origin) } }, ""))
+            @if trusted {
+                (check_row(Check::Ok, html! { "Certificat HTTPS " b { "reconnu par les navigateurs" } " (Let's Encrypt, renouvelé tout seul)" }, ""))
+            } @else if https {
+                (check_row(Check::Warn, html! { "Certificat interne de Caddy : le navigateur affiche un avertissement à la première visite (Let's Encrypt n'a pas délivré de certificat pour " b.mono { (ip) } ")" }, ""))
+            } @else {
+                (check_row(Check::Warn, html! { "DevHub est servi en " b { "HTTP" } " : le mot de passe circule en clair" }, ""))
             }
-            div.wz-card.wz-cert #domaine {
-                p.muted { "Avec un nom de domaine : passkeys, une adresse par projet (" code { "projet.ton-domaine" } ") et un certificat sans avertissement. Tes projets et tes réglages sont gardés : DevHub redémarre en quelques secondes, puis tu crées ton passkey sur le domaine." }
-                details.wz-more #dom-more {
-                    summary { "Passer à un nom de domaine" }
-                    div #dom.wz-dom { (domain_fields(&st.cfg.domain)) }
-                    p #msg.wz-flash.err {}
-                    div.wz-dom-go { button.btn.primary #go-choice type="button" { "Vérifier le DNS" } }
-                }
+            (check_row(Check::Warn, html! { "Projets web sur " b.mono { "https://" (ip) ":" (lo) } " à " b.mono { ":" (hi) } " : ouvre ces ports dans le pare-feu du serveur" }, ""))
+            (check_row(Check::Ok, html! { "Connexion par " b { "mot de passe" } " (les passkeys exigent un nom de domaine)" }, ""))
+        }
+    }
+}
+
+/// Without a domain: the move to one (records, Cloudflare, check, restart).
+pub(crate) fn domain_move(st: &AppState) -> Markup {
+    html! {
+        div.wz-card.wz-cert #domaine {
+            p.muted { "Avec un nom de domaine : passkeys, une adresse par projet (" code { "projet.ton-domaine" } ") et un certificat sans avertissement. Tes projets et tes réglages sont gardés : DevHub redémarre en quelques secondes, puis tu crées ton passkey sur le domaine." }
+            details.wz-more #dom-more {
+                summary { "Passer à un nom de domaine" }
+                div #dom.wz-dom { (domain_fields(&st.cfg.domain)) }
+                p #msg.wz-flash.err {}
+                div.wz-dom-go { button.btn.primary #go-choice type="button" { "Vérifier le DNS" } }
             }
-        }, html! {
-            a.btn href="/setup?step=domain" data-reload { (icon("refresh")) "Revérifier" }
-            a.btn.primary href=(next_url("domain")) data-reload { "Continuer" }
-        }))
-        (move_pane(index("domain")))
-        script { (PreEscaped(DOMAIN_JS)) (PreEscaped(r#"(() => {
+        }
+    }
+}
+
+/// Its behaviour: `wrap` selects what the page hides while DevHub restarts on the domain.
+pub(crate) fn domain_move_script(wrap: &str) -> Markup {
+    let js = r#"(() => {
   const $ = id => document.getElementById(id);
   const ds = domainStep({
     code: () => '', yes: () => true, skipLabel: '', skip() {},
     msg: t => { $('msg').textContent = t; },
-    moving: () => document.querySelectorAll('.wz-main > *').forEach(el => { el.hidden = el.id !== 's-move'; }),
+    moving: () => document.querySelectorAll(__WRAP__).forEach(el => { el.hidden = el.id !== 's-move'; }),
     expired: () => location.reload(),
   });
   ds.refresh();
   if (location.hash === '#domaine') { $('dom-more').open = true; $('dname').focus(); }
-})();"#)) }
-    }
+})();"#
+    .replace("__WRAP__", &format!("'{wrap}'"));
+    html! { script { (PreEscaped(DOMAIN_JS)) (PreEscaped(js)) } }
 }
 
 async fn domain(st: &AppState, q: &HashMap<String, String>) -> Markup {
     if st.cfg.ip_mode {
         return ip_address(st, q).await;
     }
+    let host = proxy::base_host(st).split(':').next().unwrap_or_default().to_string();
+    html! {
+        (step("domain", q, "Domaine et HTTPS", html! { "Tes projets seront servis sur " code { "projet." (host) } ". Voici ce que DevHub a vérifié." }, address_cards(st, "/setup?step=domain").await, html! {
+            a.btn href="/setup?step=domain" data-reload { (icon("refresh")) "Revérifier" }
+            a.btn.primary href=(next_url("domain")) data-reload { "Continuer" }
+        }))
+    }
+}
+
+/// With a domain: what DevHub checked (DNS, HTTPS) and the certificate, with the wildcard
+/// one to switch to. `back`: where the wildcard form returns (guide or settings).
+pub(crate) async fn address_cards(st: &AppState, back: &str) -> Markup {
     let base = proxy::base_host(st).to_string();
     let host = base.split(':').next().unwrap_or(&base).to_string();
     let probe = format!("devhub-setup-check.{host}");
@@ -578,56 +657,52 @@ async fn domain(st: &AppState, q: &HashMap<String, String>) -> Markup {
     // A name nobody asked for only has a valid certificate with the wildcard one.
     let joker = https && wild_ok && https_ok(&format!("https://{probe}/")).await;
     html! {
-        (step("domain", q, "Domaine et HTTPS", html! { "Tes projets seront servis sur " code { "projet." (host) } ". Voici ce que DevHub a vérifié." }, html! {
-            div.wz-card.wz-checks {
-                @if main.is_empty() {
-                    (check_row(Check::Bad, html! { b.mono { (host) } " ne se résout pas : ajoute un enregistrement A vers l'IP du serveur" }, ""))
+        div.wz-card.wz-checks {
+            @if main.is_empty() {
+                (check_row(Check::Bad, html! { b.mono { (host) } " ne se résout pas : ajoute un enregistrement A vers l'IP du serveur" }, ""))
+            } @else {
+                (check_row(Check::Ok, html! { b.mono { (host) } " pointe vers ce serveur" }, &ips_text(&main)))
+            }
+            @if wild_ok {
+                (check_row(Check::Ok, html! { b.mono { "*." (host) } " pointe vers ce serveur" }, "joker"))
+            } @else if wild.is_empty() {
+                (check_row(Check::Bad, html! { b.mono { "*." (host) } " absent : sans lui, les projets n'ont pas d'adresse" }, ""))
+            } @else {
+                (check_row(Check::Warn, html! { b.mono { "*." (host) } " pointe ailleurs que " b.mono { (host) } }, &ips_text(&wild)))
+            }
+            @if https {
+                (check_row(Check::Ok, html! { "Tu lis cette page en " b { "HTTPS" } " : ports 80 et 443 ouverts, certificat valide" }, ""))
+            } @else {
+                (check_row(Check::Warn, html! { "DevHub est servi en " b { "HTTP" } " (" code { "DEVHUB_ORIGIN" } ") : les passkeys exigent HTTPS hors de localhost" }, ""))
+            }
+            @if let (Some(a), Some(ips)) = (&custom, &apps) {
+                @if ips.is_empty() {
+                    (check_row(Check::Warn, html! { b.mono { "*." (a) } " absent · facultatif, pour les domaines perso" }, ""))
                 } @else {
-                    (check_row(Check::Ok, html! { b.mono { (host) } " pointe vers ce serveur" }, &ips_text(&main)))
+                    (check_row(Check::Ok, html! { b.mono { "*." (a) } " pointe vers un serveur · domaines perso" }, &ips_text(ips)))
                 }
-                @if wild_ok {
-                    (check_row(Check::Ok, html! { b.mono { "*." (host) } " pointe vers ce serveur" }, "joker"))
-                } @else if wild.is_empty() {
-                    (check_row(Check::Bad, html! { b.mono { "*." (host) } " absent : sans lui, les projets n'ont pas d'adresse" }, ""))
-                } @else {
-                    (check_row(Check::Warn, html! { b.mono { "*." (host) } " pointe ailleurs que " b.mono { (host) } }, &ips_text(&wild)))
-                }
-                @if https {
-                    (check_row(Check::Ok, html! { "Tu lis cette page en " b { "HTTPS" } " : ports 80 et 443 ouverts, certificat valide" }, ""))
-                } @else {
-                    (check_row(Check::Warn, html! { "DevHub est servi en " b { "HTTP" } " (" code { "DEVHUB_ORIGIN" } ") : les passkeys exigent HTTPS hors de localhost" }, ""))
-                }
-                @if let (Some(a), Some(ips)) = (&custom, &apps) {
-                    @if ips.is_empty() {
-                        (check_row(Check::Warn, html! { b.mono { "*." (a) } " absent · facultatif, pour les domaines perso" }, ""))
-                    } @else {
-                        (check_row(Check::Ok, html! { b.mono { "*." (a) } " pointe vers un serveur · domaines perso" }, &ips_text(ips)))
+            }
+        }
+        div.wz-card.wz-cert {
+            div.wz-cert-h {
+                span { "Certificat" }
+                div.seg { span class={ @if !joker { "on" } } { "Un par projet" } span class={ @if joker { "on" } } { "Joker" } }
+            }
+            @if joker {
+                p.muted { "Le certificat " code { "*." (host) } " est actif : chaque nouveau projet est en HTTPS tout de suite, et un nom inconnu affiche la page 404 de DevHub." }
+            } @else {
+                p.muted { "Chaque projet reçoit son certificat à sa première visite (quelques secondes d'attente)." }
+                details.wz-more {
+                    summary { "Passer au certificat joker (recommandé)" }
+                    p.muted { "Il faut que le domaine soit chez Cloudflare, et un jeton " b { "Zone › DNS › Modifier" } " : Caddy l'utilise pour prouver à Let's Encrypt que le domaine est à toi. DevHub le garde dans son conteneur et redémarre en quelques secondes. " a.link href=(crate::cloudflare::TOKEN_URL) target="_blank" rel="noopener" { "Créer le jeton ↗" } }
+                    form.wz-inline method="post" action="/setup/wildcard" data-reload {
+                        input type="hidden" name="back" value=(back);
+                        input.mono-input name="token" type="password" placeholder="Jeton Cloudflare" autocomplete="off" required;
+                        button.btn.primary { "Activer le joker" }
                     }
                 }
             }
-            div.wz-card.wz-cert {
-                div.wz-cert-h {
-                    span { "Certificat" }
-                    div.seg { span class={ @if !joker { "on" } } { "Un par projet" } span class={ @if joker { "on" } } { "Joker" } }
-                }
-                @if joker {
-                    p.muted { "Le certificat " code { "*." (host) } " est actif : chaque nouveau projet est en HTTPS tout de suite, et un nom inconnu affiche la page 404 de DevHub." }
-                } @else {
-                    p.muted { "Chaque projet reçoit son certificat à sa première visite (quelques secondes d'attente)." }
-                    details.wz-more {
-                        summary { "Passer au certificat joker (recommandé)" }
-                        p.muted { "Il faut que le domaine soit chez Cloudflare, et un jeton " b { "Zone › DNS › Modifier" } " : Caddy l'utilise pour prouver à Let's Encrypt que le domaine est à toi. DevHub le garde dans son conteneur et redémarre en quelques secondes. " a.link href=(crate::cloudflare::TOKEN_URL) target="_blank" rel="noopener" { "Créer le jeton ↗" } }
-                        form.wz-inline method="post" action="/setup/wildcard" data-reload {
-                            input.mono-input name="token" type="password" placeholder="Jeton Cloudflare" autocomplete="off" required;
-                            button.btn.primary { "Activer le joker" }
-                        }
-                    }
-                }
-            }
-        }, html! {
-            a.btn href="/setup?step=domain" data-reload { (icon("refresh")) "Revérifier" }
-            a.btn.primary href=(next_url("domain")) data-reload { "Continuer" }
-        }))
+        }
     }
 }
 
@@ -1060,7 +1135,9 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
         Err(r) => return r,
     };
     let get = |k: &str| f.get(k).map(|v| v.trim().to_string()).unwrap_or_default();
-    let here = format!("/setup?step={which}");
+    // Forms of the settings page come back there (a local path only).
+    let back = f.get("back").filter(|b| b.starts_with('/') && !b.starts_with("//") && !b.contains('\\')).cloned();
+    let here = back.clone().unwrap_or_else(|| format!("/setup?step={which}"));
     let res: Result<String, String> = match which.as_str() {
         "account" => {
             let name: String = get("name").chars().take(40).collect();
@@ -1110,7 +1187,7 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
                 let settings = vec!["--env".into(), "DEVHUB_TLS=wildcard".into(), "--env".into(), format!("CLOUDFLARE_API_TOKEN={token}")];
                 updater::reconfigure(&st, settings).await.map_err(|e| format!("{e:#}")).map(|_| {
                     db::audit(&st.db.lock().unwrap(), &who.actor(), "devhub.tls.wildcard", "");
-                    crate::with_param("/setup?step=domain", "ok", "DevHub redémarre avec le certificat joker : revérifie dans une minute.")
+                    crate::with_param(back.as_deref().unwrap_or("/setup?step=domain"), "ok", "DevHub redémarre avec le certificat joker : revérifie dans une minute.")
                 })
             }
         }
@@ -1126,7 +1203,10 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
         _ => Err("étape inconnue".into()),
     };
     match res {
-        Ok(to) => Redirect::to(&to).into_response(),
+        Ok(to) => match (&back, which.as_str()) {
+            (Some(b), "updates" | "ai" | "resources") => Redirect::to(&crate::with_param(b, "ok", "Réglage enregistré.")).into_response(),
+            _ => Redirect::to(&to).into_response(),
+        },
         Err(e) => {
             let mut back = crate::with_param(&here, "err", &e);
             if which == "project" {
