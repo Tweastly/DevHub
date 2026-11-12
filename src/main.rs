@@ -65,8 +65,9 @@ pub struct AppState {
     pub update: Arc<Mutex<updater::Info>>,
     /// CPU/memory per project, refreshed in the background so pages never wait on `docker stats`.
     pub stats: Arc<Mutex<HashMap<String, docker::Status>>>,
-    /// One-time session handoff codes for custom domains: code → (host, expiry, passkey of the session).
-    pub handoffs: Arc<Mutex<HashMap<String, (String, i64, Option<i64>)>>>,
+    /// One-time codes of the session handoff to a project's own domain (proxy.rs):
+    /// code → (host, expiry, passkey of the session, or its profile for a password one).
+    pub handoffs: Arc<Mutex<HashMap<String, (String, i64, Option<i64>, Option<i64>)>>>,
     /// The VPS itself (CPU, RAM, disk), refreshed by the collector.
     pub host: Arc<Mutex<host::Host>>,
     /// Background builds (image download + container creation) in progress or failed, by project.

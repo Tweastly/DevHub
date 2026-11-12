@@ -146,6 +146,19 @@ pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query
     if profile.as_ref().is_some_and(|p| !p.sees(&target.project.name)) {
         return error_page(&st, StatusCode::FORBIDDEN, "Accès refusé", "Ton profil n'a pas accès à ce projet.", None, None);
     }
+    if profile.is_none() && !q.contains_key("again") {
+        // Coming from the project's domain is a cross-site navigation: the browser holds back
+        // the dashboard's SameSite=Strict cookie, and a signed-in profile looked signed out
+        // (sign-in asked again and again). One hop started by this page brings it along.
+        let again = url::Url::parse_with_params(&format!("{}/auth/handoff", st.cfg.origin), [("next", next.as_str()), ("again", "1")])
+            .map(|u| u.to_string())
+            .unwrap_or_default();
+        let page = maud::html! {
+            (maud::DOCTYPE)
+            html { head { meta charset="utf-8"; meta name="robots" content="noindex"; meta http-equiv="refresh" content={"0;url=" (again)}; title { "DevHub" } } body {} }
+        };
+        return (StatusCode::OK, [(header::CACHE_CONTROL, "no-store")], page).into_response();
+    }
     if profile.is_none() {
         let me = format!("{}/auth/handoff", st.cfg.origin);
         let back = url::Url::parse_with_params(&me, [("next", &next)]).map(|u| u.to_string()).unwrap_or(me);
@@ -153,9 +166,13 @@ pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query
         return axum::response::Redirect::to(&login.unwrap_or_default()).into_response();
     }
     let code = crate::random_token(32);
-    // The custom-domain session is opened for the same passkey, hence the same profile.
+    // The custom-domain session is opened for the same passkey, hence the same profile. A
+    // password sign-in (DevHub without a domain name) has none: it carries the profile, as
+    // its own session does. Without it the project's domain got a session of nobody, and
+    // the private page sent the browser back here endlessly.
     let passkey = auth::current_passkey(&st, &jar).map(|p| p.0);
-    st.handoffs.lock().unwrap().insert(code.clone(), (host.clone(), db::now() + HANDOFF_TTL, passkey));
+    let profile_id = if passkey.is_none() { profile.map(|p| p.id) } else { None };
+    st.handoffs.lock().unwrap().insert(code.clone(), (host.clone(), db::now() + HANDOFF_TTL, passkey, profile_id));
     let path = match u.query() {
         Some(q) => format!("{}?{q}", u.path()),
         None => u.path().to_string(),
@@ -168,16 +185,16 @@ pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query
 fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
     let q: HashMap<String, String> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
     let code = q.get("code").cloned().unwrap_or_default();
-    let passkey = {
+    let who = {
         let mut h = st.handoffs.lock().unwrap();
-        h.retain(|_, (_, exp, _)| *exp > db::now());
-        h.remove(&code).filter(|(bound, _, _)| bound == host).map(|x| x.2)
+        h.retain(|_, (_, exp, _, _)| *exp > db::now());
+        h.remove(&code).filter(|(bound, _, _, _)| bound == host).map(|x| (x.2, x.3))
     };
-    let Some(passkey) = passkey else {
+    let Some((passkey, profile_id)) = who else {
         return error_page(st, StatusCode::FORBIDDEN, "Lien expiré", "Ce lien de connexion n'est plus valable. Recharge la page du projet.", None, None);
     };
     let token = crate::random_token(32);
-    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey, None).is_err() {
+    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey, profile_id).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//") && !n.contains('\\')).cloned().unwrap_or_else(|| "/".into());
