@@ -528,7 +528,7 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                         }
                         table.tbl style="border:1px solid var(--border);border-radius:12px;border-collapse:separate;overflow:hidden" {
                             tr { td.muted { "Adresse" } td.num.mono style="font-size:12px" { span data-recap="host" data-suffix=(suffix) { "mon-projet" (suffix) } } }
-                            tr { td.muted { "Accès" } td.num { span.pill.private { (icon_c("lock", "sm")) "privé (passkey)" } } }
+                            tr { td.muted { "Accès" } td.num { span.pill.private { (icon_c("lock", "sm")) "privé (connexion requise)" } } }
                             tr { td.muted { "RAM max" } td.num.mono { (ctx.default_mb()) " Mo" } }
                             tr { td.muted { "CPU max" } td.num.mono { (ctx.default_cpus()) " cœurs" } }
                             tr { td.muted { "HTTPS" } td.num { "automatique" } }

@@ -100,11 +100,13 @@ pub async fn to_ip(State(st): State<AppState>, jar: CookieJar, Form(f): Form<Has
             }
             p style="margin-top:16px" { a.btn.primary #ip-go href=(go) hidden { "Ouvrir https://" (ip) } }
         }
-        script { (PreEscaped(r#"setTimeout(() => {
+        script { (PreEscaped(format!(r#"setTimeout(() => {{
   document.getElementById('ip-go').hidden = false;
   document.getElementById('ip-state').textContent = 'DevHub devrait répondre maintenant';
-  document.getElementById('ip-spin').className = 'mk ok';
-}, 9000);"#)) }
+  const mk = document.getElementById('ip-spin');
+  mk.className = 'mk ok';
+  mk.innerHTML = '{CHECK_SVG}';
+}}, 9000);"#))) }
     };
     Ok(render(&ctx, Shell { title: "Passage sur l'adresse IP", nav: Nav::Address, crumbs: vec![("DevHub".into(), Some("/".into())), ("Adresse et domaine".into(), Some("/address".into())), ("Passage sur l'IP".into(), None)], actions: html! {} }, body))
 }

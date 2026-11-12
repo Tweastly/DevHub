@@ -369,7 +369,7 @@ pub async fn overview(State(st): State<AppState>, jar: CookieJar, Path(name): Pa
                         @if !addrs.is_empty() {
                             p.help.row.tight style="margin-top:14px" {
                                 (icon_c("shield", "sm"))
-                                @if x.p.public { "HTTPS automatique · public, visible sans passkey" } @else { "HTTPS automatique · privé, passkey requis" }
+                                @if x.p.public { "HTTPS automatique · public, visible sans connexion" } @else { "HTTPS automatique · privé, connexion à DevHub requise" }
                             }
                         }
                     }
@@ -529,7 +529,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             "minecraft" => "Dans Minecraft : Multijoueur → Ajouter un serveur (le port 25565 est implicite). ",
                             _ => "",
                         }
-                        "Ouvert à tous sur Internet, sans passkey : "
+                        "Ouvert à tous sur Internet, sans connexion : "
                         @if x.p.is_game() { "la whitelist du jeu décide qui entre." } @else { "c'est l'application qui gère l'accès." }
                     }
                 }
@@ -541,7 +541,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                     div.card-b.muted { "Aucun port exposé : rien n'est joignable de l'extérieur pour l'instant." }
                 } @else {
                     div.ntable role="table" aria-label="Ports" {
-                        div.nrow.nhead role="row" { span role="columnheader" { "Port" } span role="columnheader" { "Type" } span role="columnheader" { "Adresse" } span.hide-m role="columnheader" { "État" } span {} }
+                        div.nrow.nhead role="row" { span role="columnheader" title="Le port où ton application écoute, dans son conteneur" { "Port de l'app" } span role="columnheader" { "Type" } span role="columnheader" { "Adresse" } span.hide-m role="columnheader" { "État" } span {} }
                         @for (m, o) in x.p.ports.iter().zip(&open) {
                             div.nrow role="row" {
                                 b.mono role="cell" { (m.container) }
@@ -565,18 +565,21 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                             }
                         }
                     }
+                    @if st.cfg.ip_mode && first_http.is_some() {
+                        p.help style="margin:0;padding:10px 16px" { "L'app écoute sur son port dans le conteneur ; sans nom de domaine, DevHub la sert en HTTPS sur un port de l'IP, à partir de " span.mono { (st.cfg.port_range.0) } "." }
+                    }
                 }
                 @if manages {
                     details.nadd open[err.is_some() && q.contains_key("port")] {
                         summary { (icon_c("plus", "sm")) "Ajouter un port" }
-                        form.row method="post" action={(base) "/port-add"} data-confirm="Ajouter ce port ?" data-confirm-body="Un port TCP ou UDP est ouvert à tout Internet, sans passkey. Le conteneur est recréé, les fichiers sont gardés." data-tone="warn" data-confirm-ok="Ajouter le port" {
+                        form.row method="post" action={(base) "/port-add"} data-confirm="Ajouter ce port ?" data-confirm-body="Un port TCP ou UDP est ouvert à tout Internet, sans connexion à DevHub. Le conteneur est recréé, les fichiers sont gardés." data-tone="warn" data-confirm-ok="Ajouter le port" {
                             (back_field(&here))
                             div.seg.radio role="radiogroup" aria-label="Type de port" {
                                 @for (v, l) in [("web", "Site web"), ("tcp", "TCP"), ("udp", "UDP")] {
                                     label { input type="radio" name="kind" value=(v) checked[v == if x.p.is_game() { if x.p.template == "pocketmine" { "udp" } else { "tcp" } } else { "web" }]; span { (l) } }
                                 }
                             }
-                            label.row.tight style="font-size:13px" { span.muted { "Port" } input.mono-input name="port" type="number" min="1" max="65535" required placeholder="3000" style="width:110px" value=[q.get("port")]; }
+                            label.row.tight style="font-size:13px" { span.muted { "Port de l'app" } input.mono-input name="port" type="number" min="1" max="65535" required placeholder="3000" style="width:110px" value=[q.get("port")]; }
                             button.btn { "Ajouter" }
                             span.help.end { "Site web = adresse HTTPS · TCP / UDP = port ouvert à tous (jeux)" }
                         }

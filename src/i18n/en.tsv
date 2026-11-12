@@ -1,0 +1,1380 @@
+# Français → English, used when the "lang" cookie says en (src/i18n.rs). One entry per
+# line: the French text as it appears in the code, a tab, its English. Longest match wins.
+# ">" before a short word: only a whole text node.
+ % de la limite · 	% of the limit · 
+ % vers 	% at 
+ (/tcp ou /udp)	 (/tcp or /udp)
+ (60 s max). Pour un éditeur ou une commande interactive, ouvre le shell ci-dessous. 	 (60 s max). For an editor or an interactive command, open the shell below. 
+ (Let's Encrypt, renouvelé tout seul)	 (Let's Encrypt, renewed by itself)
+ (RAM déjà utilisée plus haute ?). Arrête-les ou choisis plus haut.	 (RAM already used is higher?). Stop them or choose higher.
+ (avant : 	 (before: 
+ (dépôt privé ? définis DEVHUB_GITHUB_TOKEN)	 (private repository? set DEVHUB_GITHUB_TOKEN)
+ (et à tes images privées). Facultatif : les dépôts et les images publics marchent sans.	 (and your private images). Optional: public repositories and images work without it.
+ (les passkeys exigent un nom de domaine)	 (passkeys need a domain name)
+ (nouvelle tentative)	 (new attempt)
+ (proxy Cloudflare ? mets-le en « DNS only »)	 (Cloudflare proxy? set it to “DNS only”)
+ (retiré)	 (removed)
+ (tes dépôts privés) et 	 (your private repositories) and 
+ (tes images privées), créé dans GitHub › Settings › Developer settings. 	 (your private images), created in GitHub › Settings › Developer settings. 
+ : Caddy l'utilise pour prouver à Let's Encrypt que le domaine est à toi. DevHub le garde dans son conteneur et redémarre en quelques secondes. 	: Caddy uses it to prove to Let's Encrypt that the domain is yours. DevHub keeps it in its container and restarts in a few seconds. 
+ : RAM 	: RAM 
+ : Réglages → Connecteurs → Ajouter un connecteur personnalisé.	: Settings → Connectors → Add custom connector.
+ : active le mode développeur, puis crée un connecteur avec cette URL (authentification OAuth).	: turn on developer mode, then create a connector with this URL (OAuth authentication).
+ : ajoute-le d'abord dans ses ports	: add it to its ports first
+ : image non retéléchargée, version locale gardée : 	: image not downloaded again, local version kept: 
+ : le domaine est-il sur ce compte, et le jeton a-t-il Zone › DNS › Modifier sur ce domaine ?	: is the domain on this account, and does the token have Zone › DNS › Edit on this domain?
+ : le mot de passe circule en clair	: the password travels in clear text
+ : les images ghcr.io privées ne pourront pas être téléchargées.	: private ghcr.io images can't be downloaded.
+ : ouvre ces ports dans le pare-feu du serveur	: open these ports in the server's firewall
+ : pas de certificat HTTPS. 	: no HTTPS certificate. 
+ : pas le droit	: not allowed
+ : ports 80 et 443 ouverts, certificat valide	: ports 80 and 443 open, valid certificate
+ : s'il ne mène pas à ce serveur, supprime-le.	: if it doesn't lead to this server, delete it.
+ : seul le premier a été corrigé, supprime les autres.	: only the first one was fixed, delete the others.
+ : supprime-le dans Cloudflare, puis réessaie.	: delete it in Cloudflare, then try again.
+ = port TCP ou UDP public (jeux). « Page web » utilise 8000, « Minecraft Java » 25565/tcp, « Minecraft Bedrock » 19132/udp par défaut.	 = public TCP or UDP port (games). “Web page” uses 8000, “Minecraft Java” 25565/tcp, “Minecraft Bedrock” 19132/udp by default.
+ = site web via sous-domaine HTTPS, 	 = website via HTTPS subdomain, 
+ Ajoute le port 	 Add port 
+ Ce qui est dans 	 What's in 
+ Dernière action : 	 Last action: 
+ DevHub et 	 DevHub and 
+ Dépôt privé : définis 	 Private repository: set 
+ Go	 GB
+ Go RAM	 GB RAM
+ Go de RAM	 GB of RAM
+ Go de marge avant saturation	 GB of headroom before saturation
+ Le navigateur peut avertir du certificat de l'IP la première fois.	 The browser may warn about the IP's certificate the first time.
+ Le noyau tuera un conteneur si tous atteignent leur limite en même temps.	 The kernel will kill a container if they all reach their limit at the same time.
+ Mo	 MB
+ Mo (docker-compose)	 MB (docker-compose)
+ Mo / 	 MB / 
+ Mo : choisis au moins 	 MB: choose at least 
+ Mo réservables	 MB reservable
+ Mo réservés pour 	 MB reserved for 
+ Mo) dépassera la RAM du serveur. Le noyau tuera un conteneur en cas de saturation.	 MB) will exceed the server's RAM. The kernel will kill a container if it runs out.
+ Mo, 	 MB, 
+ Mo, CPU 	 MB, CPU 
+ Mo. 512 Mo suffisent en général.	 MB. 512 MB is usually enough.
+ Mo. Tous les projets réunis peuvent utiliser jusqu'à 	 MB. All projects together can use up to 
+ Sans risque tant que les projets ne pointent pas en même temps.	 No risk as long as projects don't peak at the same time.
+ Son contenu survit quand le conteneur est recréé.	 Its content survives when the container is recreated.
+ Sur le serveur :	 On the server:
+ a aussi un enregistrement 	 also has a record 
+ a plusieurs enregistrements 	 has several records 
+ a échoué	 failed
+ absent : les projets n'auront pas d'adresse tant qu'il manque (tu peux l'ajouter après)	 missing: projects won't have an address while it's missing (you can add it afterwards)
+ absent : sans lui, les projets n'ont pas d'adresse	 missing: without it, projects have no address
+ absent · facultatif, pour les domaines perso	 missing · optional, for custom domains
+ arrêté.	 stopped.
+ au premier démarrage.	 on first start.
+ aujourd'hui	 today
+ aujourd'hui, toutes dans le journal. Tu peux révoquer l'URL à tout moment.	 today, all in the log. You can revoke the URL at any time.
+ autre(s)	 more
+ avec 	 with 
+ bloqué depuis 5 min (réseau ou registre)	 stuck for 5 min (network or registry)
+ caractères minimum	 characters minimum
+ caractères minimum. Les autres appareils connectés par mot de passe seront déconnectés.	 characters minimum. Other devices signed in by password will be signed out.
+ connexions ?	 connections?
+ conteneur	 container
+ conteneurs sur 	 containers out of 
+ couches	 layers
+ couches · 	 layers · 
+ cœur	 core
+ cœurs	 cores
+ cœurs alloués pour 	 cores allocated for 
+ cœurs · 	 cores · 
+ cœurs, 	 cores, 
+ dans 	 in 
+ dans Réseau.	 in Network.
+ dans le dossier 	 in the folder 
+ dans « Nom », elle se découpe toute seule. Chaque changement recrée le conteneur (	 into “Name”, it splits by itself. Each change recreates the container (
+ de données (	 of data (
+ de l'installateur	 from the installer
+ disparaît si le conteneur est recréé.	 goes away if the container is recreated.
+ du catalogue ?	 from the catalog?
+ du serveur ?	 from the server?
+ démarré.	 started.
+ en cours de création… 	 being created… 
+ en ligne sur 	 online out of 
+ en moyenne	 on average
+ en tout	 in total
+ est actif : chaque nouveau projet est en HTTPS tout de suite, et un nom inconnu affiche la page 404 de DevHub.	 is active: each new project is on HTTPS right away, and an unknown name shows DevHub's 404 page.
+ est conservé).	 is kept).
+ est déjà gardé.	 is already kept.
+ est déjà géré automatiquement (sous-domaine de 	 is already handled automatically (subdomain of 
+ est déjà monté	 is already mounted
+ est déjà utilisé par le projet 	 is already used by project 
+ est en ligne environ 1 min après.	 is online about 1 min later.
+ est encore utilisée par un conteneur	 is still used by a container
+ est indiqué deux fois	 is given twice
+ est maintenant gardé.	 is now kept.
+ est privé.	 is private.
+ est public.	 is public.
+ est réservé aux profils autorisés. Connecte-toi pour continuer.	 is for allowed profiles only. Sign in to continue.
+ est un CNAME vers 	 is a CNAME to 
+ est un port TCP public (jeu) : un sous-domaine HTTPS ne peut pas pointer dessus	 is a public TCP port (game): an HTTPS subdomain can't point to it
+ et demande son certificat HTTPS. Cette page t'y emmène dès qu'il répond, avec ton code.	 and requests its HTTPS certificate. This page takes you there as soon as it responds, with your code.
+ et peut piloter tout le serveur.	 and can control the whole server.
+ et ports à part, sans toucher aux projets d'ici. Le code d'installation s'affiche dans les Journaux.	 and separate ports, without touching the projects here. The installation code shows in the Logs.
+ existe déjà	 already exists
+ h sur les 24 dernières heures	 h over the last 24 hours
+ hors de DevHub.	 outside DevHub.
+ impossible : 	 impossible: 
+ inaccessible : le paquet GitHub doit être public (	 unreachable: the GitHub package must be public (
+ l'accès à Docker du serveur ?	 access to the server's Docker?
+ les utilise	 uses them
+ les utilisent	 use them
+ libres sur 	 free out of 
+ libérés.	 freed.
+ n'est pas encore active chez Cloudflare : ses serveurs de noms doivent être ceux que Cloudflare indique, chez le registraire du domaine.	 is not active at Cloudflare yet: its name servers must be the ones Cloudflare gives, at the domain's registrar.
+ n'est pas exposé par 	 is not exposed by 
+ n'est pas un domaine de 	 is not a domain of 
+ ne pointe pas encore vers ce serveur : revérifie le DNS	 doesn't point to this server yet: check the DNS again
+ ne se résout pas : ajoute un enregistrement A vers l'IP du serveur	 doesn't resolve: add an A record to the server's IP
+ ne se résout pas encore : crée l'enregistrement A vers 	 doesn't resolve yet: create the A record to 
+ ne sert plus : vérifie que tout va bien, puis supprime-le sur le serveur.	 isn't used anymore: check that everything is fine, then delete it on the server.
+ non détecté	 not detected
+ nouveauté	 new feature
+ ou clique pour parcourir	 or click to browse
+ pointe ailleurs que 	 points somewhere other than 
+ pointe vers ce serveur	 points to this server
+ pointe vers ce serveur dans Cloudflare (le serveur le verra d'ici quelques minutes)	 points to this server in Cloudflare (the server will see it within a few minutes)
+ pointe vers un autre serveur : les projets n'y seront pas joignables	 points to another server: projects won't be reachable there
+ pointe vers un autre serveur que 	 points to a server other than 
+ pointe vers un serveur · domaines perso	 points to a server · custom domains
+ pour 	 for 
+ pour confirmer	 to confirm
+ pour un serveur de jeu), plus les volumes ajoutés à la création ou dans Paramètres. Elles survivent aux redémarrages et aux recréations du conteneur.	 for a game server), plus volumes added at creation or in Settings. They survive restarts and container recreations.
+ pour un serveur de jeu). Ajoute ceux dont l'image a besoin (base de données, config…) : un nouveau volume, ou un volume existant comme les données d'un projet supprimé.	 for a game server). Add the ones the image needs (database, config…): a new volume, or an existing volume such as a deleted project's data.
+ pourra agir dans DevHub avec les droits de ton profil 	 will be able to act in DevHub with the rights of your profile 
+ projet	 project
+ projet : 	 project: 
+ projet sur 	 project out of 
+ projets : 	 projects: 
+ projets sur 	 projects out of 
+ recréé.	 recreated.
+ redémarré.	 restarted.
+ retiré des épinglés.	 unpinned.
+ résultat(s) pour « 	 result(s) for “
+ sera ouvert sur Internet pour que les joueurs Bedrock (mobile, console, Windows) se connectent. Pense à l'autoriser dans le pare-feu du VPS : 	 will be opened on the Internet so Bedrock players (mobile, console, Windows) can connect. Remember to allow it in the VPS firewall: 
+ sera ouvert sur Internet pour que les joueurs se connectent. Pense à l'autoriser dans le pare-feu du VPS.	 will be opened on the Internet so players can connect. Remember to allow it in the VPS firewall.
+ supprimé.	 deleted.
+ supprimée (	 deleted (
+ sur 	 on 
+ survivent quand le conteneur est recréé ; le reste revient à l'état de l'image.	 folders survive when the container is recreated; the rest goes back to the image's state.
+ sélectionné	 selected
+ toi-même. Pour revenir à l'adresse IP, sur le serveur :	 yourself. To go back to the IP address, on the server:
+ toujours absente de GitHub après 8 min	 still missing from GitHub after 8 min
+ tourne depuis 	 running for 
+ tourne toujours, tes projets aussi.	 is still running, your projects too.
+ vers 	 to 
+ vers l'IP du serveur	 to the server's IP
+ volume(s) orphelin(s) ?	 orphan volume(s)?
+ volume(s) orphelin(s) supprimé(s).	 orphan volume(s) deleted.
+ · 200 Mo max par envoi · les fichiers existants sont remplacés	 · 200 MB max per upload · existing files are replaced
+ · DevHub : 	 · DevHub: 
+ · accès privé	 · private access
+ · autorisée 	 · allowed 
+ · code de sortie 	 · exit code 
+ · environ 1 min	 · about 1 min
+ · hébergé avec DevHub	 · hosted with DevHub
+ · images Docker : 	 · Docker images: 
+ · le conteneur redémarre (quelques secondes)	 · the container restarts (a few seconds)
+ · modifié 	 · changed 
+ · mémoire saturée	 · memory full
+ · principal	 · main
+ · privé	 · private
+ · proposées dans « Nouveau projet »	 · offered in “New project”
+ · tes projets continuent de tourner	 · your projects keep running
+ · voir	 · see
+ · vérifié à 	 · checked at 
+ · à changer dans Mon profil	 · change it in My profile
+ » (un chemin absolu, ex. /data)	” (an absolute path, e.g. /data)
+ » (un seul nom, sans espace, ex. nginx:latest)	” (a single name, no space, e.g. nginx:latest)
+ » ajouté. Tu peux maintenant te connecter depuis cet appareil.	” added. You can now sign in from this device.
+ » ajoutée au catalogue	” added to the catalog
+ » enregistrée.	” saved.
+ » est encore utilisé par un conteneur	” is still used by a container
+ » est monté par un projet : retire-le de ses Paramètres d'abord.	” is mounted by a project: remove it from its Settings first.
+ » est réservé, choisis un autre nom	” is reserved, choose another name
+ » n'est pas un nom de domaine valide (exemple : dev.mondomaine.fr)	” isn't a valid domain name (example: dev.mydomain.com)
+ » n'existe pas, a été renommé ou supprimé, ou ton profil ne peut pas le voir.	” doesn't exist, was renamed or deleted, or your profile can't see it.
+ » pour confirmer la suppression.	” to confirm the deletion.
+ » supprimé.	” deleted.
+ » · choisis le dossier	” · choose the folder
+ » · installée 	” · installed 
+ à installer	 to install
+ à pleine charge	 at full load
+ échecs	 failures
+ élément	 item
+ épinglé.	 pinned.
+ — Node, Rust, Python, Go, Debian, une page web prête à l'emploi ou ton image Docker	 — Node, Rust, Python, Go, Debian, a ready-to-use web page or your Docker image
+(commande exécutée, pas de réponse)	(command run, no answer)
+) : les passkeys exigent HTTPS hors de localhost	): passkeys need HTTPS outside localhost
+) : ses ressources ne peuvent pas être limitées depuis le panel.	): its resources can't be limited from the panel.
+) et un certificat sans avertissement. Tes projets et tes réglages sont gardés : DevHub redémarre en quelques secondes, puis tu crées ton passkey sur le domaine.	) and a certificate without warning. Your projects and settings are kept: DevHub restarts in a few seconds, then you create your passkey on the domain.
+) ou ChatGPT (connecteur personnalisé, mode développeur), colle cette URL :	) or ChatGPT (custom connector, developer mode), paste this URL:
+) sont proposés, privés compris.	) are offered, private ones included.
+), et la connexion par mot de passe (les passkeys exigent un domaine).	), and password sign-in (passkeys need a domain).
+), puis te ramène ici.	), then brings you back here.
+). La RAM utilisée dépasse peut-être la nouvelle limite : arrête le projet ou choisis plus haut.	). The RAM in use may be over the new limit: stop the project or choose higher.
++ /dossier	+ /folder
+, HTTPS créé à la première visite	, HTTPS created on first visit
+, avant de connecter 	, before connecting 
+, chaque projet sur son sous-domaine.	, each project on its subdomain.
+, chaque projet web sur son port (	, each web project on its port (
+, créé	, created
+, depuis 	, since 
+, et plugins 	, and plugins 
+, le total réservé (	, the total reserved (
+, noms 	, names 
+, proxy Cloudflare	, Cloudflare proxy
+, puis redémarre. 	, then restart. 
+, puis relance l'installateur sur le serveur avec 	, then run the installer again on the server with 
+, puis revérifie	, then check again
+, ses certificats dans 	, its certificates in 
+, sur 	, on 
+, téléchargement en cours	, downloading
+. Aucun projet ne l'utilise ; elle sera retéléchargée si un projet en a besoin.	. No project uses it; it will be downloaded again if a project needs it.
+. Chacun a son réseau, ses limites et son propre 	. Each has its own network, limits and its own 
+. Chaque action est notée dans le journal, et tu peux révoquer l'accès à tout moment.	. Every action is recorded in the log, and you can revoke access at any time.
+. DevHub trouve la zone du domaine et crée (ou corrige) les deux enregistrements, en « DNS only ». Le jeton ne sert qu'à ça : il n'est gardé nulle part. 	. DevHub finds the domain's zone and creates (or fixes) both records, as “DNS only”. The token is used only for that: it isn't kept anywhere. 
+. Il peut passer dans des volumes Docker : sa base et ses certificats sont copiés, ses réglages repris, et le dossier ne sert plus. En cas d'échec, l'installation actuelle est remise en route.	. It can move into Docker volumes: its database and certificates are copied, its settings kept, and the folder isn't used anymore. If it fails, the current installation is started again.
+. La console exécute des commandes bash.	. The console runs bash commands.
+. Les assistants IA n'ont aucun accès à cette page.	. AI assistants have no access to this page.
+. Les clés contenant SECRET, KEY, TOKEN ou PASSWORD sont masquées à l'affichage.	. Keys containing SECRET, KEY, TOKEN or PASSWORD are hidden on display.
+. Les jetons fine-grained marchent pour les dépôts, pas pour les images ghcr.io.	. Fine-grained tokens work for repositories, not for ghcr.io images.
+. Ouvre-le dans quelques secondes : le navigateur peut avertir du certificat la première fois, tu peux continuer.	. Open it in a few seconds: the browser may warn about the certificate the first time, you can go on.
+. Sans domaine, DevHub reste sur l'adresse IP du serveur. Tu pourras changer plus tard.	. Without a domain, DevHub stays on the server's IP address. You can change later.
+. Tout s'applique à chaud, sans redémarrage.	. Everything applies live, without a restart.
+. Tu pourras la rajouter plus tard.	 anymore. You can add it back later.
+. Voici ce que DevHub a vérifié.	. Here is what DevHub checked.
+/chemin/dans/le/conteneur	/path/in/the/container
+100 % = 1 cœur	100% = 1 core
+2,75 Go	2.75 GB
+256 Mo	256 MB
+30 derniers jours	Last 30 days
+400 dernières lignes · 	last 400 lines · 
+512 Mo	512 MB
+7 derniers jours	Last 7 days
+7/12 couches · 312 Mo	7/12 layers · 312 MB
+</b> a été interrompue.	</b> was cut.
+</b> dans <b>	</b> in <b>
+</b> n'est pas démarré pour le moment.	</b> is not started right now.
+</b>. Lance ton serveur en écoutant sur <code>0.0.0.0</code>.	</b>. Start your server listening on <code>0.0.0.0</code>.
+> de 	 of 
+> et 	 and 
+> ou 	 or 
+> à 	 to 
+>de 	from 
+Accueil	Home
+Accès	Access
+Accès MCP	MCP access
+Accès au site	Site access
+Accès des assistants	Assistants' access
+Accès des assistants IA	AI assistants' access
+Accès des assistants IA 	AI assistants' access 
+Accès refusé	Access denied
+Accès à Docker du serveur	Server's Docker access
+Acteur	Actor
+Action inconnue.	Unknown action.
+Action refusée (	Action refused (
+Activer le joker	Turn on the wildcard
+Activité de ce projet	Activity of this project
+Activité récente	Recent activity
+Activé	On
+Administrateur	Administrator
+Administrateur : créer, régler et supprimer des projets, travailler dans tous les conteneurs, mettre à jour DevHub	Administrator: create, set up and delete projects, work in every container, update DevHub
+Adresse	Address
+Adresse : 	Address: 
+Adresse IP publique du serveur	Server's public IP address
+Adresse automatique	Automatic address
+Adresse automatique désactivée.	Automatic address off.
+Adresse automatique réactivée.	Automatic address back on.
+Adresse de retour non enregistrée pour cette application.	Return address not registered for this application.
+Adresse du site	Site address
+Adresse enregistrée dans la configuration du serveur	Address saved in the server's settings
+Adresse et HTTPS	Address and HTTPS
+Adresse et domaine	Address and domain
+Adresses	Addresses
+Afficher	Show
+Affiché en haut de la barre latérale.	Shown at the top of the sidebar.
+Agrandir	Expand
+Ajout dans Cloudflare…	Adding in Cloudflare…
+Ajoute un enregistrement A *.	Add an A record *.
+Ajoute un passkey de secours (téléphone, clé USB) pour ne jamais perdre l'accès. 	Add a backup passkey (phone, USB key) so you never lose access. 
+Ajouter	Add
+Ajouter ce port ?	Add this port?
+Ajouter dans Cloudflare	Add in Cloudflare
+Ajouter le port	Add the port
+Ajouter les 2 enregistrements	Add the 2 records
+Ajouter maintenant	Add now
+Ajouter un dossier	Add a folder
+Ajouter un logo	Add a logo
+Ajouter un passkey	Add a passkey
+Ajouter un port	Add a port
+Ajouter une image	Add an image
+Ajouté le 	Added on 
+Allocation de la RAM	RAM allocation
+Annuler	Cancel
+Annuler la sélection	Clear the selection
+Aperçu	Overview
+Aperçu de 	Preview of 
+Application inconnue : reconnecte le connecteur depuis Claude Desktop.	Unknown application: reconnect the connector from Claude Desktop.
+Appliquer	Apply
+Appliquer (recrée le conteneur)	Apply (recreates the container)
+Appliquer (sans redémarrage)	Apply (no restart)
+Appliquer aux projets	Apply to projects
+Appliquer les variables ?	Apply the variables?
+Après création, il faudra rendre le projet public pour que les visiteurs le voient.	After creation, you'll have to make the project public for visitors to see it.
+Arrêter	Stop
+Arrêter 	Stop 
+Arrêté	Stopped
+Arrêtés	Stopped
+As-tu un nom de domaine ?	Do you have a domain name?
+Assistant IA	AI assistant
+Assistants IA	AI assistants
+Astuce : colle une ligne 	Tip: paste a line 
+Au catalogue	In the catalog
+Au démarrage	On start
+Aucun assistant ne pourra plus rien faire dans DevHub. Les connexions autorisées sont gardées et reprendront à la réactivation, avec la même URL.	No assistant can do anything in DevHub anymore. Allowed connections are kept and resume when it's turned back on, with the same URL.
+Aucun changement	No change
+Aucun conteneur : la construction a été interrompue (redémarrage de DevHub ?). Relance-la.	No container: the build was interrupted (DevHub restart?). Start it again.
+Aucun fichier ouvert	No file open
+Aucun nom de domaine.	No domain name.
+Aucun port exposé : rien n'est joignable de l'extérieur pour l'instant.	No exposed port: nothing can be reached from outside for now.
+Aucun port exposé.	No exposed port.
+Aucun port exposé. Ajoute-en un dans 	No exposed port. Add one in 
+Aucun port public : ajoute 	No public port: add 
+Aucun projet	No project
+Aucun projet ici	No project here
+Aucun projet ne correspond à « 	No project matches “
+Aucun projet sélectionné.	No project selected.
+Aucun sous-domaine.	No subdomain.
+Aucun volume	No volume
+Aucune action	No action
+Aucune adresse : l'adresse automatique est désactivée et le projet n'a pas de domaine personnalisé. Ajoute un sous-domaine plus bas, ou réactive l'adresse automatique.	No address: the automatic address is off and the project has no custom domain. Add a subdomain below, or turn the automatic address back on.
+Aucune connexion enregistrée.	No sign-in recorded.
+Aucune pour l'instant : elles apparaissent quand quelqu'un autorise un assistant.	None yet: they show up when someone allows an assistant.
+Aussi sur	Also on
+Autoriser	Allow
+Autoriser 	Allow 
+Autres conteneurs du serveur	Other containers on the server
+Autres profils : seulement leurs projets, selon leurs droits (terminal et fichiers compris ou non)	Other profiles: only their projects, according to their rights (terminal and files included or not)
+Avec les droits du profil qui l'autorise : tout le panel pour un administrateur, ses projets pour les autres.	With the rights of the profile that allows it: the whole panel for an administrator, their projects for others.
+Avec un domaine, tu te connectes par passkey et chaque projet a son adresse, 	With a domain, you sign in with a passkey and each project has its address, 
+Avec un nom de domaine : passkeys, une adresse par projet (	With a domain name: passkeys, one address per project (
+Bienvenue sur DevHub	Welcome to DevHub
+Binaire ou plus de 2 Mo.	Binary or over 2 MB.
+C'est fait, masquer	Done, hide
+C'est plus que la RAM du serveur : si tout le monde en demande en même temps, le noyau tuera un conteneur.	That's more than the server's RAM: if everyone asks for it at the same time, the kernel will kill a container.
+CLE=valeur	KEY=value
+CPU de DevHub	DevHub's CPU
+CPU invalide : entre 0.1 et 	Invalid CPU: between 0.1 and 
+CPU max (cœurs)	Max CPU (cores)
+CPU par projet	CPU per project
+CPU serveur	Server CPU
+CPU utilisé	CPU used
+Caddy ignore ce nom : sa configuration ne couvre pas les sous-domaines personnalisés. Mets à jour DevHub, ou redémarre-le (docker restart devhub).	Caddy ignores this name: its config doesn't cover custom subdomains. Update DevHub, or restart it (docker restart devhub).
+Caractère 	Character 
+Cartes	Cards
+Ce conteneur n'a pas été créé par DevHub : ce qui l'a lancé (compose, un script…) peut compter sur lui.	This container wasn't created by DevHub: whatever started it (compose, a script…) may rely on it.
+Ce conteneur n'a pas été créé par DevHub : il apparaît ici pour la vue d'ensemble du serveur. Ses fichiers, son terminal et ses réglages restent gérés par ce qui l'a lancé.	This container wasn't created by DevHub: it shows here for an overview of the server. Its files, terminal and settings stay with whatever started it.
+Ce fichier n'est pas modifiable ici	This file can't be edited here
+Ce jeton n'a pas la permission 	This token doesn't have the permission 
+Ce jeton n'a pas le droit de modifier le DNS de cette zone (Zone › DNS › Modifier).	This token may not edit the DNS of this zone (Zone › DNS › Edit).
+Ce lien de connexion n'est plus valable. Recharge la page du projet.	This sign-in link is no longer valid. Reload the project's page.
+Ce projet a accès à Docker du serveur	This project has access to the server's Docker
+Ce projet est introuvable	This project can't be found
+Ce projet n'existe pas, ou ton profil ne peut pas le voir.	This project doesn't exist, or your profile can't see it.
+Ce que DevHub et tes projets ont le droit d'utiliser sur 	What DevHub and your projects are allowed to use on 
+Ce que font les assistants	What the assistants do
+Ce que les assistants peuvent et ne peuvent pas faire	What assistants can and can't do
+Certificat	Certificate
+Certificat HTTPS 	HTTPS certificate 
+Certificat interne de Caddy : le navigateur affiche un avertissement à la première visite (Let's Encrypt n'a pas délivré de certificat pour 	Caddy's internal certificate: the browser shows a warning on the first visit (Let's Encrypt didn't issue a certificate for 
+Cet appareil ne pourra plus se connecter. Garde au moins un autre passkey sous la main.	This device won't be able to sign in anymore. Keep at least one other passkey at hand.
+Cette URL est secrète et ne donne accès qu'à ce conteneur. Si elle fuite, régénère-la.	This URL is secret and only gives access to this container. If it leaks, regenerate it.
+Cette adresse ne mènera plus à 	This address won't lead to 
+Cette connexion s'arrête tout de suite. Les autres continuent ; celle-ci pourra être réautorisée.	This connection stops right away. The others go on; this one can be allowed again.
+Cette page n'existe pas	This page doesn't exist
+Chacun est recréé depuis son image ; les volumes sont gardés. Ils seront indisponibles quelques secondes.	Each one is recreated from its image; volumes are kept. They'll be unavailable for a few seconds.
+Changements non appliqués · le conteneur redémarre pour les appliquer	Changes not applied · the container restarts to apply them
+Changer	Change
+Changer de thème	Change theme
+Changer le mode	Change the mode
+Changer le mode de lancement ?	Change the start mode?
+Changer le mot de passe	Change the password
+Chaque action est notée dans le journal.	Every action is recorded in the log.
+Chaque appel est vérifié avec les droits du profil qui a autorisé l'assistant, et noté dans le journal sous son nom. Les passkeys, profils et autorisations restent hors d'atteinte.	Every call is checked against the rights of the profile that allowed the assistant, and recorded in the log under its name. Passkeys, profiles and authorizations stay out of reach.
+Chaque assistant devra être réautorisé avec ton passkey.	Each assistant will have to be allowed again with your passkey.
+Chaque ligne s'exécute dans 	Each line runs in 
+Chaque nouvelle version est installée une vingtaine de secondes après sa publication.	Each new version is installed about twenty seconds after it's published.
+Chaque projet crée le sien à sa création.	Each project creates its own when it's created.
+Chaque projet reçoit ces limites, sauf si tu en choisis d'autres pour lui. Modifiable ensuite dans Ressources.	Each project gets these limits, unless you choose others for it. Can be changed later in Resources.
+Chaque projet reçoit son certificat à sa première visite (quelques secondes d'attente).	Each project gets its certificate on its first visit (a few seconds' wait).
+Chaque push sur 	Each push to 
+Chez Cloudflare, laisse-les en « DNS only » (nuage gris). Ils sont pris en compte en quelques secondes à quelques minutes.	At Cloudflare, leave them “DNS only” (grey cloud). They take effect within seconds to minutes.
+Chez ton fournisseur de domaine, crée ces deux enregistrements :	At your domain provider, create these two records:
+Choisir une image	Choose an image
+Choisis un point de départ. Tu pourras en créer d'autres depuis le tableau de bord, aussi depuis une image Docker ou un dépôt Git.	Choose a starting point. You can create more from the dashboard, also from a Docker image or a Git repository.
+Clique sur un fichier texte pour l'éditer ici.	Click a text file to edit it here.
+Clonage du dépôt Git	Cloning the Git repository
+Cloner tes dépôts privés dans un projet	Clone your private repositories into a project
+Cloné dans /workspace au premier démarrage. Dépôt privé : 	Cloned into /workspace on first start. Private repository: 
+Cloné dans /workspace au premier démarrage. Tes dépôts GitHub (@	Cloned into /workspace on first start. Your GitHub repositories (@
+Cloudflare injoignable : 	Cloudflare unreachable: 
+Cloudflare refuse ce jeton : vérifie-le, ou crée-en un nouveau.	Cloudflare refuses this token: check it, or create a new one.
+Code d'installation	Installation code
+Code expiré : tape le nouveau code affiché dans les journaux.	Code expired: type the new code shown in the logs.
+Code incorrect : vérifie-le dans les journaux du serveur.	Wrong code: check it in the server's logs.
+Code perdu ?	Lost the code?
+Colle cette URL, puis connecte-toi avec ton passkey et clique sur « Autoriser ». Chaque assistant apparaît sous son nom dans le journal.	Paste this URL, then sign in with your passkey and click “Allow”. Each assistant shows under its name in the log.
+Colle le code d'installation affiché dans les journaux du serveur, puis crée ton passkey.	Paste the installation code shown in the server's logs, then create your passkey.
+Colle le jeton Cloudflare.	Paste the Cloudflare token.
+Colle un jeton GitHub.	Paste a GitHub token.
+Coller un jeton d'accès	Paste an access token
+Coller un jeton à la place	Paste a token instead
+Commande	Command
+Commencée il y a 	Running for 
+Comparer ↗	Compare ↗
+Configurer plus tard	Set up later
+Confirmer	Confirm
+Connecte Claude, ChatGPT ou un autre assistant à DevHub par MCP. Tu choisis jusqu'où ils peuvent aller, et tu coupes tout en un clic.	Connect Claude, ChatGPT or another assistant to DevHub through MCP. You choose how far they can go, and cut everything in one click.
+Connecter	Connect
+Connecter GitHub	Connect GitHub
+Connecter un assistant	Connect an assistant
+Connecter un assistant IA	Connect an AI assistant
+Connecté en tant que 	Signed in as 
+Connexion	Sign-in
+Connexion GitHub annulée.	GitHub sign-in cancelled.
+Connexion GitHub expirée ou invalide : recommence.	GitHub sign-in expired or invalid: start again.
+Connexion GitHub non configurée : ajoute DEVHUB_GITHUB_CLIENT_ID et DEVHUB_GITHUB_CLIENT_SECRET dans le .env.	GitHub sign-in not set up: add DEVHUB_GITHUB_CLIENT_ID and DEVHUB_GITHUB_CLIENT_SECRET to DevHub's settings.
+Connexion impossible	Can't sign in
+Connexion impossible · DevHub	Can't sign in · DevHub
+Connexion par 	Sign-in by 
+Connexion par mot de passe, et chaque projet web sur son port : 	Password sign-in, and each web project on its port: 
+Connexion perdue : action non envoyée.	Connection lost: action not sent.
+Connexion perdue : réessaie.	Connection lost: try again.
+Connexion · DevHub	Sign in · DevHub
+Connexions autorisées	Allowed connections
+Conseil : 	Tip: 
+Construction	Building
+Construire	Build
+Conteneur	Container
+Conteneur créé hors de la liste des projets de DevHub	Container created outside DevHub's project list
+Contenu du fichier	File content
+Continuer	Continue
+Copier	Copy
+Copier 	Copy 
+Copier l'URL MCP	Copy the MCP URL
+Copier l'adresse	Copy the address
+Copié	Copied
+Couleur	Color
+Couleur du projet	Project color
+Couleur enregistrée.	Colour saved.
+Couper l'accès	Cut access
+Couper l'accès des assistants IA ?	Cut the AI assistants' access?
+Coupé	Off
+Coupé : tu choisis quand installer.	Off: you choose when to install.
+Création du conteneur	Creating the container
+Crée le premier : une page web prête en dix secondes, ou ton propre conteneur.	Create the first one: a web page ready in ten seconds, or your own container.
+Crée ton compte propriétaire	Create your owner account
+Créer et terminer	Create and finish
+Créer le jeton ↗	Create the token ↗
+Créer le premier projet	Create the first project
+Créer le projet	Create the project
+Créer mon compte	Create my account
+Créer mon passkey	Create my passkey
+Créer un jeton (classic) ↗	Create a token (classic) ↗
+Créer un projet	Create a project
+Créer, arrêter ou supprimer n'importe quel conteneur, DevHub compris	Create, stop or delete any container, DevHub included
+Créé	Created
+Créé le	Created on
+Créée	Created
+Créés hors de DevHub (compose, docker run, autres outils) : leur état, leur CPU et leur RAM, leurs journaux, et les démarrer ou les arrêter.	Created outside DevHub (compose, docker run, other tools): their status, CPU and RAM, their logs, and starting or stopping them.
+Ctrl+S pour enregistrer · Tab insère une tabulation · pas de retour à la ligne auto	Ctrl+S to save · Tab inserts a tab · no automatic line wrap
+Dans Claude Desktop (	In Claude Desktop (
+Dans Minecraft (mobile, console, Windows) : Jouer → Serveurs → Ajouter un serveur. 	In Minecraft (mobile, console, Windows): Play → Servers → Add Server. 
+Dans Minecraft : Jouer → Serveurs → Ajouter un serveur. 	In Minecraft: Play → Servers → Add Server. 
+Dans Minecraft : Multijoueur → Ajouter un serveur (le port 25565 est implicite). 	In Minecraft: Multiplayer → Add Server (port 25565 is implied). 
+Dans Minecraft : Multijoueur → Ajouter un serveur. 	In Minecraft: Multiplayer → Add Server. 
+Dans le conteneur	In the container
+De 	From 
+Debian + outils	Debian + tools
+Debian + outils de build (git, curl)	Debian + build tools (git, curl)
+Demande à l'administrateur de DevHub d'élargir les autorisations de ton profil.	Ask DevHub's administrator to widen your profile's permissions.
+Dernier (re)démarrage par 	Last (re)start by 
+Dernières 24 h	Last 24 h
+Dernières connexions	Latest sign-ins
+Description enregistrée.	Description saved.
+DevHub : RAM 	DevHub: RAM 
+DevHub a déjà un nom de domaine	DevHub already has a domain name
+DevHub a refusé ce nom à Caddy. 	DevHub refused this name to Caddy. 
+DevHub a été installé avec docker compose dans 	DevHub was installed with docker compose in 
+DevHub devrait répondre maintenant	DevHub should answer now
+DevHub est déjà sur l'adresse IP	DevHub is already on the IP address
+DevHub est prêt	DevHub is ready
+DevHub est servi en 	DevHub is served over 
+DevHub est à jour	DevHub is up to date
+DevHub lit son propre dépôt	DevHub reads its own repository
+DevHub n'a pas de mot de passe : on entre uniquement avec un passkey. Garde-en au moins deux, sur deux appareils différents.	DevHub has no password: you sign in only with a passkey. Keep at least two, on two different devices.
+DevHub n'a pas de nom de domaine : il répond sur l'adresse IP du serveur, et chaque projet web sur son propre port.	DevHub has no domain name: it answers on the server's IP address, and each web project on its own port.
+DevHub n'a pas de nom de domaine : la connexion se fait par mot de passe (les passkeys exigent un domaine). Choisis-en un long, gardé dans un gestionnaire de mots de passe.	DevHub has no domain name: you sign in with a password (passkeys need a domain). Choose a long one, kept in a password manager.
+DevHub ne pourra plus télécharger tes images privées ni cloner tes dépôts privés. Les projets déjà créés continuent de tourner.	DevHub won't be able to download your private images or clone your private repositories anymore. Projects already created keep running.
+DevHub ne tourne pas dans Docker	DevHub doesn't run in Docker
+DevHub ne tourne pas dans un conteneur Docker ici (pas de 	DevHub doesn't run in a Docker container here (no 
+DevHub redémarre avec le certificat joker : revérifie dans une minute.	DevHub is restarting with the wildcard certificate: check again in a minute.
+DevHub redémarre sur 	DevHub restarts on 
+DevHub redémarre… la page reprend toute seule.	DevHub is restarting… the page resumes by itself.
+DevHub répond sur 	DevHub answers on 
+DevHub répond sur l'adresse IP du serveur, chaque projet web sur son port. Un projet peut aussi avoir son propre nom de domaine (onglet Réseau du projet).	DevHub answers on the server's IP address, each web project on its port. A project can also have its own domain name (project's Network tab).
+DevHub surveille son dépôt sur GitHub en continu (un nouveau commit est vu en quelques secondes) et se met à jour sans couper tes projets.	DevHub watches its repository on GitHub continuously (a new commit is seen within seconds) and updates itself without stopping your projects.
+DevHub tourne déjà entièrement dans Docker	DevHub already runs entirely in Docker
+DevHub tourne entièrement dans Docker	DevHub runs entirely in Docker
+DevHub télécharge la nouvelle image, puis le panel redémarre en quelques secondes ; tes projets continuent de tourner.	DevHub downloads the new image, then the panel restarts in a few seconds; your projects keep running.
+DevHub utilise déjà 	DevHub already uses 
+DevHub · ce panel	DevHub · this panel
+Disponibilité	Availability
+Disque	Disk
+Docker Hub limite les téléchargements anonymes (trop de requêtes). Réessaie dans quelques heures, ou connecte le serveur à un compte Docker Hub (docker login).	Docker Hub limits anonymous downloads (too many requests). Try again in a few hours, or sign the server in to a Docker Hub account (docker login).
+Docker du serveur	Server's Docker
+Docker refuse ces limites (	Docker refuses these limits (
+Docker refuse ces limites : 	Docker refuses these limits: 
+Domaine du panel	Panel domain
+Domaine enregistré dans la configuration du serveur	Domain saved in the server's configuration
+Domaine et HTTPS	Domain and HTTPS
+Donner l'accès	Give access
+Donner à 	Give 
+Données de « 	Data of “
+Dossier	Folder
+Dossier dans le conteneur	Folder in the container
+Dossier gardé.	Folder kept.
+Dossier où monter 	Folder where to mount 
+Dossier vide.	Empty folder.
+Dossier à garder	Folder to keep
+Dossiers gardés	Kept folders
+Dossiers gardés enregistrés, conteneur redémarré.	Kept folders saved, container restarted.
+Dossiers à garder 	Folders to keep 
+Décimales possibles, ex. 0.5	Decimals allowed, e.g. 0.5
+Décimales possibles, ex. 1.5 · défaut : 	Decimals allowed, e.g. 1.5 · default: 
+Déconnecter	Disconnect
+Déconnecter GitHub ?	Disconnect GitHub?
+Déconnexion	Sign out
+Défaut : 	Default: 
+Défaut enregistré, mais Docker refuse la nouvelle limite pour 	Default saved, but Docker refuses the new limit for 
+Démarrage automatique	Automatic start
+Démarrage automatique activé.	Automatic start on.
+Démarrage automatique désactivé.	Automatic start off.
+Démarrer	Start
+Déploiement automatique	Automatic deployment
+Dépôt Git	Git repository
+Dépôts privés	Private repositories
+Désactivable à tout moment, et chaque connexion se révoque. Chaque action est notée dans le journal.	Can be turned off at any time, and each connection can be revoked. Every action is recorded in the log.
+Désactiver	Turn off
+Désactiver 	Turn off 
+Désactivée : seuls les domaines personnalisés répondent.	Off: only custom domains respond.
+Détail	Detail
+Détails	Details
+Détails de 	Details of 
+Développeur	Developer
+Elle est réglée toute seule : adresse du projet, données dans 	It's set up by itself: project address, data in 
+Elle et les adresses par port répondent.	It and the per-port addresses respond.
+Elle ne sera plus proposée dans « Nouveau projet ». L'image reste sur le serveur et les projets qui l'utilisent continuent de tourner.	It won't be offered in “New project” anymore. The image stays on the server and the projects using it keep running.
+En construction	Building
+En ligne	Online
+En ligne depuis	Online for
+En ligne depuis 	Online for 
+En marche 	Running 
+En marche sur les 24 dernières heures :	Running over the last 24 hours:
+En pause	Paused
+En échec	Failed
+Enregistrement 	Record 
+Enregistrer	Save
+Enregistrer 	Save 
+Entre ton mot de passe pour continuer.	Enter your password to continue.
+Environnement de dev	Dev environment
+Envoyer	Send
+Erreur : 	Error: 
+Erreur de connexion	Connection error
+Erreurs 	Errors 
+Exporter (CSV)	Export (CSV)
+Fichiers	Files
+Filtrer	Filter
+Filtrer les projets	Filter projects
+Filtrer les projets…	Filter projects…
+Garder	Keep
+Garder 	Keep 
+Garder ce dossier	Keep this folder
+Garder et redémarrer	Keep and restart
+Garder le contrôle	Stay in control
+Garder le volume	Keep the volume
+Gardé pour ce projet	Kept for this project
+GitHub a refusé : 	GitHub refused: 
+GitHub a répondu 	GitHub answered 
+GitHub connecté : @	GitHub connected: @
+GitHub connecté · 	GitHub connected · 
+GitHub déconnecté.	GitHub disconnected.
+GitHub injoignable	GitHub unreachable
+GitHub injoignable : 	GitHub unreachable: 
+GitHub n'a pas encore publié l'image de ce commit (sa construction a peut-être échoué) : regarde l'onglet Actions du dépôt, puis réessaie.	GitHub hasn't published this commit's image yet (its build may have failed): look at the repository's Actions tab, then try again.
+GitHub non connecté · 	GitHub not connected · 
+GitHub refuse ce jeton (expiré, révoqué ou mal copié).	GitHub refuses this token (expired, revoked or badly copied).
+GitHub te demande d'autoriser DevHub (accès 	GitHub asks you to allow DevHub (access 
+Glisse des fichiers ici	Drop files here
+Glisse des fichiers ici, ou crée un fichier avec le champ « Nom ».	Drop files here, or create a file with the “Name” field.
+Général	General
+Gérer	Manage
+HTTPS automatique · privé, connexion à DevHub requise	Automatic HTTPS · private, DevHub sign-in required
+HTTPS automatique · privé, passkey requis	Automatic HTTPS · private, passkey required
+HTTPS automatique · public, visible sans connexion	Automatic HTTPS · public, visible without signing in
+HTTPS automatique · public, visible sans passkey	Automatic HTTPS · public, visible without a passkey
+HTTPS créé à la première visite	HTTPS created on first visit
+HTTPS sur 	HTTPS on 
+Historique	History
+Hors DevHub	Outside DevHub
+Identifiant	ID
+Identité	Identity
+Il faut que le domaine soit chez Cloudflare, et un jeton 	The domain must be on Cloudflare, with a token 
+Il se change dans Mon profil. 	It can be changed in My profile. 
+Image DevHub détectée. 	DevHub image detected. 
+Image Docker personnalisée 	Custom Docker image 
+Image perso…	Custom image…
+Images privées	Private images
+Impossible de retirer ton dernier passkey : tu ne pourrais plus te connecter.	You can't remove your last passkey: you could no longer sign in.
+Indique ton domaine.	Enter your domain.
+Indique un chemin absolu, par ex. /data.	Enter an absolute path, e.g. /data.
+Installation de 	Installing 
+Installation · DevHub	Setup · DevHub
+Installer	Install
+Installer automatiquement	Install automatically
+Installée	Installed
+Introuvable	Not found
+Jamais : toucher aux passkeys, aux profils ou aux autorisations	Never: touch passkeys, profiles or authorizations
+Jamais utilisée	Never used
+Jeton Cloudflare	Cloudflare token
+Jeton GitHub	GitHub token
+Jeton d'API Cloudflare	Cloudflare API token
+Joignable · 	Reachable · 
+Joker	Wildcard
+Journal	Log
+Journal d'audit	Audit log
+Journal des assistants →	Assistants' log →
+Journal technique	Technical log
+Journal →	Log →
+Journaux	Logs
+Journaux du conteneur	Container logs
+L'URL ne change jamais : elle ne donne rien sans connexion. Couper puis réactiver l'accès la laisse identique.	The URL never changes: it gives nothing without signing in. Turning access off and on keeps it the same.
+L'accès des assistants IA est coupé	AI assistants' access is off
+L'adresse IP publique du serveur, telle qu'Internet la voit.	The server's public IP address, as the internet sees it.
+L'adresse est peut-être mal tapée, ou la page a été déplacée.	The address may be mistyped, or the page has moved.
+L'ancienne URL cesse de fonctionner tout de suite : il faudra coller la nouvelle dans l'assistant.	The old URL stops working right away: you'll have to paste the new one into the assistant.
+L'app écoute sur son port dans le conteneur ; sans nom de domaine, DevHub la sert en HTTPS sur un port de l'IP, à partir de 	The app listens on its port inside the container; without a domain name, DevHub serves it over HTTPS on a port of the IP, starting at 
+L'historique se remplit (un point par minute).	History fills up (one point per minute).
+L'image propose aussi :	The image also offers:
+La commande de l'image tourne. La console écrit sur son entrée standard.	The image's command runs. The console writes to its standard input.
+La connexion à <b>	The connection to <b>
+La construction a échoué : 	The build failed: 
+La dernière version de son image est téléchargée, puis il est recréé : les dossiers gardés (Volumes) restent, ce qui a été installé ailleurs est perdu. Quelques secondes d'interruption, plus le téléchargement si l'image a changé.	The latest version of its image is downloaded, then it's recreated: kept folders (Volumes) stay, anything installed elsewhere is lost. A few seconds of downtime, plus the download if the image changed.
+La mise à jour a été interrompue avant la fin.	The update was interrupted before the end.
+La mise à jour vers 	The update to 
+La nouvelle version n'a pas démarré : l'ancienne a été remise en route, rien n'a changé.	The new version didn't start: the old one was started again, nothing changed.
+La zone 	The zone 
+Laisse Claude ou ChatGPT créer, configurer et dépanner tes projets, avec les droits du profil qui les autorise.	Let Claude or ChatGPT create, set up and troubleshoot your projects, with the rights of the profile that allows them.
+Laisse vide pour ne pas limiter DevHub.	Leave empty not to limit DevHub.
+Laisse vide pour revenir au défaut.	Leave empty to go back to the default.
+Lancement	Startup
+Lancer la commande de l'image (service)	Run the image's command (service)
+Le DNS ne pointe pas (encore) vers le serveur. 	The DNS doesn't point to the server (yet). 
+Le certificat 	The certificate 
+Le code de ce commit ne compile pas. Corrige-le et pousse un nouveau commit.	This commit's code doesn't compile. Fix it and push a new commit.
+Le code fait 8 caractères.	The code has 8 characters.
+Le code ne sert qu'une fois. Après 20 essais faux, un nouveau code s'affiche dans les journaux.	The code works only once. After 20 wrong tries, a new code shows in the logs.
+Le conteneur	The container
+Le conteneur de DevHub lui-même : il se redémarre par une mise à jour, ou sur le serveur avec 	DevHub's own container: it restarts through an update, or on the server with 
+Le conteneur est recréé avec le nouveau mode. /workspace est gardé.	The container is recreated with the new mode. /workspace is kept.
+Le conteneur est recréé pour les prendre en compte, les fichiers sont gardés.	The container is recreated to take them into account, files are kept.
+Le conteneur est recréé sans cette variable. Si l'app en a besoin, elle peut ne plus démarrer.	The container is recreated without this variable. If the app needs it, it may not start anymore.
+Le conteneur est recréé sans le socket Docker. Les fichiers sont gardés.	The container is recreated without the Docker socket. Files are kept.
+Le conteneur est recréé sous le nouveau nom (quelques secondes d'interruption). Les fichiers, volumes et domaines personnalisés sont gardés ; l'adresse automatique change.	The container is recreated under the new name (a few seconds of downtime). Files, volumes and custom domains are kept; the automatic address changes.
+Le conteneur n'existe pas encore.	The container doesn't exist yet.
+Le conteneur ne tourne pas	The container isn't running
+Le conteneur reste allumé et lance 	The container stays on and runs 
+Le conteneur s'arrête, ses fichiers restent. Ses adresses affichent « Projet arrêté » jusqu'au redémarrage.	The container stops, its files stay. Its addresses show “Project stopped” until it restarts.
+Le conteneur, ses ports et ses sous-domaines sont supprimés. Cette action est définitive.	The container, its ports and its subdomains are deleted. This can't be undone.
+Le conteneur, son réseau, ses adresses et son URL MCP disparaissent. Les volumes suivent la case cochée ci-dessus (un volume encore monté par un autre projet est toujours gardé).	The container, its network, its addresses and its MCP URL go away. Volumes follow the box checked above (a volume still mounted by another project is always kept).
+Le contenu ne change pas.	The content doesn't change.
+Le disque du serveur est plein : le téléchargement de la nouvelle image a été coupé. Libère de la place (images inutilisées, volumes orphelins) puis réessaie.	The server's disk is full: downloading the new image was cut off. Free some space (unused images, orphan volumes) then try again.
+Le dossier et tout son contenu sont supprimés pour de bon : il n'y a pas de corbeille.	The folder and all its content are deleted for good: there is no trash.
+Le fichier est supprimé pour de bon : il n'y a pas de corbeille.	The file is deleted for good: there is no trash.
+Le modèle choisit l'image Docker de base (les outils déjà installés). Le dépôt Git, optionnel, est cloné dans 	The template picks the base Docker image (the tools already installed). The Git repository, optional, is cloned into 
+Le panel redémarre en quelques secondes ; tes projets continuent de tourner.	The panel restarts in a few seconds; your projects keep running.
+Le port 	Port 
+Le port doit être autorisé dans le pare-feu du VPS (	The port must be allowed in the VPS firewall (
+Le port où ton application écoute, dans son conteneur	The port your application listens on, inside its container
+Le projet a déjà son volume, monté sur 	The project already has its volume, mounted on 
+Le projet n'aura plus aucune adresse web tant que tu n'ajoutes pas de domaine personnalisé. Les adresses <nom>-<port> s'arrêtent aussi.	The project won't have any web address until you add a custom domain. The <name>-<port> addresses stop too.
+Le projet reçoit 	The project gets 
+Le serveur démarre : suis-le dans Terminal & journaux.	The server is starting: follow it in Terminal & logs.
+Le serveur n'a pas pu récupérer la nouvelle version sur GitHub : le paquet d'images doit être public.	The server couldn't get the new version from GitHub: the image package must be public.
+Le serveur ne répond pas	The server doesn't answer
+Le système a	The system
+Le volume principal ne se retire pas	The main volume can't be removed
+Lecture seule	Read only
+Lecture seule : ton profil ne peut pas envoyer de commandes à ce projet.	Read only: your profile can't send commands to this project.
+Les adresses des projets passent sur des ports de l'IP, et la connexion par mot de passe. Tu pourras revenir sur un domaine depuis cette page.	Project addresses move to ports of the IP, and sign-in to a password. You can come back to a domain from this page.
+Les assistants IA ont l'accès complet	AI assistants have full access
+Les assistants IA peuvent agir dans DevHub	AI assistants can act in DevHub
+Les commandes du serveur (	Server commands (
+Les commandes vont au serveur de jeu ; sa réponse s'affiche dans la console. 	Commands go to the game server; its answer shows in the console. 
+Les dernières lignes du journal :	The log's last lines:
+Les deux mots de passe ne sont pas identiques.	The two passwords don't match.
+Les données des projets : 	Projects' data: 
+Les dossiers gardés	Kept folders
+Les fichiers se lisent dans le conteneur : démarre le projet pour y accéder.	Files are read inside the container: start the project to reach them.
+Les images Docker de départ des projets. Celles de « Mes images » apparaissent à la création d'un projet, avec leurs ports et leur mode de lancement.	The Docker images projects start from. Those in “My images” are offered when creating a project, with their ports and start mode.
+Let's Encrypt limite les essais (trop d'échecs ou de certificats récents) : réessaie plus tard. 	Let's Encrypt limits attempts (too many failures or recent certificates): try again later. 
+Let's Encrypt n'arrive pas à joindre le serveur sur le port 80/443. 	Let's Encrypt can't reach the server on port 80/443. 
+Lettres, chiffres et _	Letters, digits and _
+Leurs conteneurs, réseaux, adresses et URL MCP disparaissent. Les volumes suivent la case « garder les données ».	Their containers, networks, addresses and MCP URLs go away. Volumes follow the “keep the data” box.
+Leurs données sont effacées pour de bon.	Their data is erased for good.
+Libère 	Frees 
+Lien expiré	Link expired
+Lire tous les volumes, donc les données des autres projets	Read every volume, so other projects' data
+Liste	List
+Logo enregistré.	Logo saved.
+Logo retiré.	Logo removed.
+Me prévenir	Notify me
+Mes images	My images
+Mes passkeys	My passkeys
+Mettre à jour	Update
+Mettre à jour DevHub vers 	Update DevHub to 
+Minuscules, chiffres et tirets.	Lowercase letters, digits and hyphens.
+Mise à jour	Update
+Mise à jour disponible	Update available
+Mise à jour · 	Update · 
+Mise à jour échouée	Update failed
+Mises à jour	Updates
+Mises à jour 	Updates 
+Mode de lancement changé, conteneur recréé.	Start mode changed, container recreated.
+Modifier	Edit
+Modifier en texte brut (coller un .env entier)	Edit as plain text (paste a whole .env)
+Modèle	Template
+Mon app	My app
+Mon appareil	My device
+Mon profil	My profile
+Mon profil ↗	My profile ↗
+Montages	Mounts
+Monté sur	Mounted on
+Mot de passe	Password
+Mot de passe actuel	Current password
+Mot de passe changé. Les autres appareils connectés par mot de passe sont déconnectés.	Password changed. Other devices signed in with the password are signed out.
+Mot de passe pour 	Password for 
+Mot de passe trop court : 	Password too short: 
+Mémoire	Memory
+Nettoyer	Clean up
+Nettoyer les images	Clean up images
+Nettoyer les images inutilisées ?	Clean up unused images?
+Nom	Name
+Nom affiché	Display name
+Nom d'hôte	Hostname
+Nom de domaine	Domain name
+Nom de l'appareil	Device name
+Nom de variable invalide : lettres, chiffres et _ (sans commencer par un chiffre).	Invalid variable name: letters, digits and _ (not starting with a digit).
+Nom du projet	Project name
+Nom du sous-domaine	Subdomain name
+Noms de domaine	Domain names
+Non, utiliser l'adresse IP	No, use the IP address
+Nouveau	New
+Nouveau dossier	New folder
+Nouveau fichier	New file
+Nouveau mot de passe	New password
+Nouveau nom	New name
+Nouveau projet	New project
+Nouveau volume	New volume
+Nouvel appareil	New device
+Nouvelle URL MCP générée.	New MCP URL generated.
+Nouvelle version	New version
+Opérateur	Operator
+Origine et ports	Origin and ports
+Ou colle un jeton d'accès	Or paste an access token
+Oui, j'ai un nom de domaine	Yes, I have a domain name
+Outils MCP	MCP tools
+Ouvert à tous sur Internet, sans connexion : 	Open to everyone on the Internet, no sign-in: 
+Ouvert à tous sur Internet, sans passkey : 	Open to everyone on the Internet, no passkey: 
+Ouvrir	Open
+Ouvrir DevHub	Open DevHub
+Ouvrir dans DevHub	Open in DevHub
+Ouvrir https://	Open https://
+Ouvrir le DNS de Cloudflare ↗	Open Cloudflare's DNS ↗
+Ouvrir le site	Open the site
+Ouvrir le tableau de bord	Open the dashboard
+Ouvrir le terminal	Open the terminal
+Ouvrir mon projet	Open my project
+PNG, JPEG, WebP ou GIF, 2 Mo max. Carré de préférence.	PNG, JPEG, WebP or GIF, 2 MB max. Square if possible.
+PNG, JPEG, WebP ou GIF, 2 Mo maximum. Elle s'affiche dans le menu et la liste des profils.	PNG, JPEG, WebP or GIF, 2 MB maximum. It shows in the menu and the profiles list.
+Page précédente	Previous page
+Page web	Web page
+Page web (modèle avec le nom du projet)	Web page (template with the project's name)
+Panel sur 	Panel on 
+Paramètres	Settings
+Paramètres › Connecteurs › Créer (mode développeur)	Settings › Connectors › Create (developer mode)
+Paramètres → Variables	Settings → Variables
+Pas de conteneur	No container
+Pas encore de HTTPS sur 	No HTTPS yet on 
+Passage sur l'IP	Moving to the IP
+Passage sur l'adresse IP	Moving to the IP address
+Passage sur ton domaine	Moving to your domain
+Passer DevHub entièrement dans Docker ?	Move DevHub entirely into Docker?
+Passer au certificat joker (recommandé)	Switch to the wildcard certificate (recommended)
+Passer cette étape	Skip this step
+Passer dans Docker	Move into Docker
+Passer entièrement dans Docker	Move entirely into Docker
+Passer sur ce domaine	Move to this domain
+Passer à un nom de domaine	Move to a domain name
+Passkey de cet appareil	This device's passkey
+Passkey principal	Main passkey
+Passkey « 	Passkey “
+Passkeys, un sous-domaine par projet, certificat reconnu par tous les navigateurs.	Passkeys, one subdomain per project, a certificate recognized by every browser.
+Photo de profil	Profile picture
+Pic à 	Peak of 
+Plus ancien →	Older →
+Plus d'actions	More actions
+Plus tard	Later
+Port de l'app	App port
+Ports des projets	Project ports
+Ports enregistrés, conteneur recréé.	Ports saved, container recreated.
+Ports par défaut	Default ports
+Ports publiés	Published ports
+Ports à exposer	Ports to expose
+Pour accéder à tes 	To reach your 
+Pour l'avatar et les graphiques du projet.	For the project's avatar and charts.
+Pour les projets sans limites à eux (onglet Paramètres de chaque projet).	For projects without their own limits (Settings tab of each project).
+Pour prouver que c'est bien toi qui as installé ce serveur, tape le code affiché dans ses journaux au démarrage.	To prove you're the one who installed this server, type the code shown in its logs at startup.
+Pour régénérer l'URL d'un projet, va dans son onglet Aperçu.	To regenerate a project's URL, go to its Overview tab.
+Pour un bouton « Se connecter avec GitHub » : crée une OAuth App sur GitHub (Settings → Developer settings) avec l'URL de retour 	For a “Sign in with GitHub” button: create an OAuth App on GitHub (Settings → Developer settings) with the callback URL 
+Pour un serveur, un bot ou une app prête à l'emploi : la console du projet écrit sur son entrée standard. Décoche pour un conteneur de dev qui lance 	For a server, a bot or a ready-to-use app: the project console writes to its standard input. Uncheck for a dev container that runs 
+Pourquoi	Why
+Premier projet	First project
+Privé	Private
+Privé : connexion à DevHub obligatoire pour toutes ces adresses	Private: signing in to DevHub required for all these addresses
+Privé : passkey obligatoire pour toutes ces adresses	Private: passkey required for all these addresses
+Profil 	Profile 
+Projet	Project
+Projet arrêté	Project stopped
+Projet privé	Private project
+Projet renommé en 	Project renamed to 
+Projets	Projects
+Projets : limites par défaut	Projects: default limits
+Projets en ligne	Projects online
+Projets web sur 	Web projects on 
+Projets épinglés	Pinned projects
+Proposer cette image à la création d'un projet	Offer this image when creating a project
+Proposer tes dépôts à la création d'un projet	Offer your repositories when creating a project
+Propriétaire	Owner
+Protégé par DevHub · 	Protected by DevHub · 
+Préparation	Preparing
+Prêt : DevHub va redémarrer sur ce domaine et obtenir son certificat HTTPS	Ready: DevHub will restart on this domain and get its HTTPS certificate
+Public : tout le monde peut ouvrir ces adresses	Public: anyone can open these addresses
+Publics	Public
+Période	Period
+Quelqu'un a	Someone
+RAM invalide : entre 	Invalid RAM: between 
+RAM invalide : entre 64 et 	Invalid RAM: between 64 and 
+RAM max (Mo)	Max RAM (MB)
+RAM par projet	RAM per project
+RAM réservée à DevHub (Mo)	RAM reserved for DevHub (MB)
+RAM utilisée	RAM used
+RAM à 	RAM at 
+Recréer	Recreate
+Recréer le conteneur	Recreate the container
+Recréer le conteneur (dernière version de l'image, les volumes restent)	Recreate the container (latest image version, volumes stay)
+Recréer le conteneur de 	Recreate the container of 
+Recréer les conteneurs sélectionnés ?	Recreate the selected containers?
+Redémarrage	Restart policy
+Redémarrage de DevHub, certificat HTTPS…	Restarting DevHub, HTTPS certificate…
+Redémarrage de DevHub…	Restarting DevHub…
+Redémarre	Restarting
+Redémarrer	Restart
+Redémarrer 	Restart 
+Refuser	Deny
+Rejoindre le serveur	Join the server
+Relance le projet quand le serveur ou Docker redémarre.	Starts the project again when the server or Docker restarts.
+Remplacer toutes les variables	Replace all variables
+Renommer	Rename
+Renommer 	Rename 
+Repasser DevHub sur l'adresse IP ?	Move DevHub back to the IP address?
+Repasser sur l'IP	Back to the IP
+Repasser sur l'adresse IP	Back to the IP address
+Reprendre les données d'un ancien projet :	Take back an old project's data:
+Ressources	Resources
+Ressources appliquées.	Resources applied.
+Ressources par défaut	Default resources
+Retirer	Remove
+Retirer 	Remove 
+Retirer ce volume	Remove this volume
+Retirer de la barre	Remove from the bar
+Retirer du catalogue	Remove from catalog
+Retirer l'accès	Remove access
+Retirer l'accès à Docker de 	Remove Docker access from 
+Retirer le filtre	Remove the filter
+Retirer le passkey	Remove the passkey
+Retirer le passkey « 	Remove the passkey “
+Retirer le port	Remove the port
+Retirer le port 	Remove port 
+Retour	Back
+Revérifier	Check again
+Rien encore.	Nothing yet.
+Rien n'a changé : 	Nothing changed: 
+Rien n'écoute	Nothing is listening
+Rien n'écoute sur le port <b>	Nothing is listening on port <b>
+Rien ne correspond à ce filtre.	Nothing matches this filter.
+Rien pour l'instant.	Nothing yet.
+Rien sur cette période	Nothing in this period
+Réappliqué automatiquement après chaque mise à jour. La compilation d'une mise à jour sans binaire précompilé n'est pas comptée ici : Docker la fait à part.	Applied again automatically after each update. Compiling an update without a prebuilt binary isn't counted here: Docker does it separately.
+Récapitulatif	Summary
+Réessayer	Try again
+Réglage enregistré.	Setting saved.
+Réglages du jeu (nom, mode, difficulté, whitelist…) dans 	Game settings (name, mode, difficulty, whitelist…) in 
+Réglages du jeu (type Paper/Vanilla/Fabric, version, MOTD, difficulté, whitelist…) dans 	Game settings (Paper/Vanilla/Fabric type, version, MOTD, difficulty, whitelist…) in 
+Réglages › Connecteurs › Ajouter un connecteur personnalisé	Settings › Connectors › Add custom connector
+Réglages → Connecteurs → Ajouter un connecteur personnalisé	Settings → Connectors → Add custom connector
+Régénérer	Regenerate
+Régénérer l'URL	Regenerate the URL
+Régénérer l'URL MCP de 	Regenerate the MCP URL of 
+Répond	Responds
+Réseau	Network
+Réseau →	Network →
+Réservé au maximum : 	Reserved at most: 
+Révoquer	Revoke
+Révoquer 	Revoke 
+Révoquer les 	Revoke the 
+Sa base est dans le volume 	Its database is in the volume 
+Sans nom de domaine : le panel sur 	Without a domain name: the panel on 
+Sans nom de domaine, on entre avec un mot de passe (les passkeys exigent un domaine).	Without a domain name, you sign in with a password (passkeys need a domain).
+Se connecter	Sign in
+Se connecter avec GitHub	Sign in with GitHub
+Se connecter avec le mot de passe	Sign in with the password
+Se connecter avec un passkey	Sign in with a passkey
+Se connecter à DevHub	Sign in to DevHub
+Sections du projet	Project sections
+Serveur	Server
+Serveur : 	Server: 
+Serveur Minecraft Bedrock	Minecraft Bedrock server
+Serveur Minecraft Bedrock (PocketMine-MP, UDP 19132)	Minecraft Bedrock server (PocketMine-MP, UDP 19132)
+Serveur Minecraft Java	Minecraft Java server
+Serveur Minecraft Java (Paper par défaut)	Minecraft Java server (Paper by default)
+Ses données sont effacées pour de bon.	Its data is erased for good.
+Seul le propriétaire peut donner accès à Docker du serveur.	Only the owner can give access to the server's Docker.
+Seul un administrateur peut supprimer des projets.	Only an administrator can delete projects.
+Seuls les dossiers 	Only the 
+Seuls tes domaines personnalisés serviront le site. Les adresses <nom>-<port> s'arrêtent aussi.	Only your custom domains will serve the site. The <name>-<port> addresses stop too.
+Shell interactif	Interactive shell
+Si tu passes 	If you go over 
+Site web	Website
+Site web = adresse HTTPS · TCP / UDP = port ouvert à tous (jeux)	Website = HTTPS address · TCP / UDP = port open to all (games)
+Son adresse ne répondra plus. Le conteneur est recréé, les fichiers sont gardés.	Its address won't respond anymore. The container is recreated, files are kept.
+Son contenu actuel est copié dans un dossier gardé, puis le conteneur redémarre (quelques secondes). Ensuite il survit à Recréer, aux changements d'image et au renommage.	Its current content is copied into a kept folder, then the container restarts (a few seconds). Then it survives Recreate, image changes and renaming.
+Son contenu actuel est gardé	Its current content is kept
+Source & réseau	Source & network
+Sous-domaine ajouté.	Subdomain added.
+Sous-domaine retiré.	Subdomain removed.
+Sous-domaines	Subdomains
+Suivre l'installation	Follow the installation
+Supprime les images sans nom qu'aucun conteneur n'utilise (anciennes versions). Les images nommées restent.	Deletes unnamed images that no container uses (old versions). Named images stay.
+Supprimer	Delete
+Supprimer 	Delete 
+Supprimer du serveur	Delete from the server
+Supprimer définitivement 	Delete for good 
+Supprimer définitivement les projets sélectionnés ?	Delete the selected projects for good?
+Supprimer l'image	Delete the image
+Supprimer la variable	Delete the variable
+Supprimer le projet	Delete the project
+Supprimer le volume	Delete the volume
+Supprimer le volume 	Delete the volume 
+Supprimer les 	Delete the 
+Sur cette page	On this page
+Sur le serveur	On the server
+Sécurité	Security
+Sélection	Selection
+Sélectionner	Select
+Sélectionner 	Select 
+Séparés par des virgules. 	Separated by commas. 
+Tableau de bord	Dashboard
+Taille	Size
+Tape 	Type 
+Tape exactement « 	Type exactly “
+Teinte 	Hue 
+Teinte libre	Custom hue
+Tentative refusée	Attempt refused
+Terminer	Done
+Tes dépôts	Your repositories
+Tes fichiers de projet (onglet Fichiers, git, start.sh)	Your project files (Files tab, git, start.sh)
+Tes passkeys	Your passkeys
+Tes projets continuent de tourner.	Your projects keep running.
+Tes projets seront servis sur 	Your projects will be served on 
+Tes projets, leurs domaines perso et tes réglages sont gardés ; DevHub redémarre en quelques secondes. 	Your projects, their own domains and your settings are kept; DevHub restarts in a few seconds. 
+Thème	Theme
+Ton compte	Your account
+Ton mot de passe	Your password
+Ton nom	Your name
+Ton nom apparaît dans le journal et sur tes actions.	Your name shows in the log and on your actions.
+Ton premier projet	Your first project
+Ton profil n'a pas accès à ce projet.	Your profile has no access to this project.
+Ton profil n'a pas accès à cette page	Your profile has no access to this page
+Tous	All
+Tous les projets	All projects
+Tout	All
+Tout afficher	Show all
+Tout ce qui tourne dans ce projet, son terminal et son URL MCP pourront créer, lire et supprimer n'importe quel conteneur du serveur, DevHub compris, et lire tous les volumes. Le conteneur est recréé, les fichiers sont gardés.	Everything running in this project, its terminal and its MCP URL will be able to create, read and delete any container on the server, DevHub included, and read every volume. The container is recreated, files are kept.
+Tout le conteneur	The whole container
+Tout le journal →	Whole log →
+Tout révoquer	Revoke all
+Tout tourne.	Everything is running.
+Toutes les actions, les tiennes comme celles des assistants IA. Rien ne peut être effacé depuis le panel.	Every action, yours and the AI assistants'. Nothing can be erased from the panel.
+Trier	Sort
+Trier : CPU	Sort: CPU
+Trier : RAM	Sort: RAM
+Trier : activité récente	Sort: recent activity
+Trier : nom	Sort: name
+Trop d'essais faux : l'ancien code ne marche plus, voici le nouveau.	Too many wrong tries: the old code no longer works, here is the new one.
+Tu as	You
+Tu choisiras ton mot de passe juste après, avec un code que la page emporte.	You'll choose your password right after, with a code the page takes along.
+Tu es hors des dossiers gardés.	You're outside the kept folders.
+Tu lis cette page en 	You're reading this page over 
+Tu pourras en ajouter d'autres (téléphone, clé USB) depuis Mon profil.	You can add more (phone, USB key) from My profile.
+Tu te connecteras avec ton mot de passe.	You'll sign in with your password.
+Tu te connecteras avec un passkey : l'empreinte, le visage ou le code de cet appareil. Aucun mot de passe.	You'll sign in with a passkey: this device's fingerprint, face or code. No password.
+Type de port	Port type
+Téléchargement	Download
+Téléchargement de 	Downloading 
+Télécharger	Download
+Télécharger tes images privées ghcr.io	Download your private ghcr.io images
+UDP : pas de test de connexion	UDP: no connection test
+URL git invalide	invalid git URL
+URL limitées à un seul projet	URLs limited to one project
+Un administrateur doit l'activer dans DevHub, page 	An administrator must turn it on in DevHub, page 
+Un badge apparaît dès qu'une version est prête, tu installes quand tu veux.	A badge shows as soon as a version is ready, you install when you want.
+Un conteneur temporaire de DevHub : il disparaît ou se remplace tout seul à la prochaine tâche.	A temporary DevHub container: it goes away or is replaced by itself at the next task.
+Un domaine ou un sous-domaine à toi. Les projets seront sur 	A domain or subdomain of yours. Projects will be on 
+Un jeton classique avec 	A classic token with 
+Un jeton d'API Cloudflare avec la permission 	A Cloudflare API token with the permission 
+Un par projet	One per project
+Un passkey ne peut pas être hameçonné : il ne fonctionne que sur 	A passkey can't be phished: it only works on 
+Un port TCP ou UDP est ouvert à tout Internet, sans connexion à DevHub. Le conteneur est recréé, les fichiers sont gardés.	A TCP or UDP port is opened to the whole Internet, without signing in to DevHub. The container is recreated, files are kept.
+Un port TCP ou UDP est ouvert à tout Internet, sans passkey. Le conteneur est recréé, les fichiers sont gardés.	A TCP or UDP port is opened to the whole Internet, without a passkey. The container is recreated, files are kept.
+Un volume orphelin n'est monté par aucun projet (projet supprimé en gardant ses données, volume retiré). Pour retrouver ses données, choisis-le dans « Volumes » en créant un projet, ou dans les Paramètres d'un projet. Recréer un projet du même nom réutilise aussi son volume principal.	An orphan volume isn't mounted by any project (project deleted keeping its data, volume removed). To get its data back, choose it in “Volumes” when creating a project, or in a project's Settings. Recreating a project with the same name also reuses its main volume.
+Une phrase, affichée sous le nom (140 caractères).	One sentence, shown under the name (140 characters).
+Une variable par ligne : 	One variable per line: 
+Utilisation	Usage
+Utilise ton passkey pour continuer.	Use your passkey to continue.
+Utilisée 	Used 
+Utilisée par	Used by
+Valeur	Value
+Variables d'environnement	Environment variables
+Variables enregistrées, conteneur recréé.	Variables saved, container recreated.
+Vaut aussi pour son terminal et son URL MCP	Also applies to its terminal and its MCP URL
+Vers 	To 
+Version installée	Installed version
+Vide = 	Empty = 
+Voici ce qui est configuré. Tout se change plus tard dans les réglages.	Here is what's set up. Everything can be changed later in the settings.
+Voir le journal →	See the log →
+Voir les projets	See the projects
+Volume du projet	Project volume
+Volume « 	Volume “
+Volumes des projets	Project volumes
+Volumes disponibles	Available volumes
+Vue d'ensemble	Overview
+Vérifie que les ports 80 et 443 du serveur sont ouverts, puis 	Check that the server's ports 80 and 443 are open, then 
+Vérifier	Check
+Vérifier le DNS	Check the DNS
+Vérifier les mises à jour de DevHub plus souvent	Check for DevHub updates more often
+Zone dangereuse	Danger zone
+Zone › DNS › Modifier	Zone › DNS › Edit
+[arrêté après 60 s : lance les commandes longues dans le shell interactif]	[stopped after 60 s: run long commands in the interactive shell]
+[code de sortie 	[exit code 
+\n…[sortie tronquée]	\n…[output cut]
+a-z, 0-9 et tirets · 32 caractères max · 	a-z, 0-9 and hyphens · 32 characters max · 
+accès : 	access: 
+accès refusé	access denied
+accès à Docker du serveur activé	access to the server's Docker on
+accès à Docker du serveur retiré	access to the server's Docker removed
+action inconnue	unknown action
+activé	on
+adresse IP du serveur inconnue	server's IP address unknown
+adresse IP invalide	invalid IP address
+adresse automatique activée	automatic address on
+adresse automatique désactivée	automatic address off
+ajoute un passkey de secours (ton téléphone, une clé USB) pour ne jamais perdre l'accès. 	add a backup passkey (your phone, a USB key) so you never lose access. 
+app · entrée standard	app · standard input
+appliquées à chaud, sans redémarrage	applied live, without a restart
+arrêté	stopped
+arrêté le conteneur	stopped the container
+attente de l'image GitHub	waiting for the GitHub image
+aucun passkey enregistré	no passkey registered
+aucun port	no port
+aucun port libre au-dessus de 	no free port above 
+aucune zone Cloudflare ne contient 	no Cloudflare zone contains 
+autre DevHub · 	other DevHub · 
+avant la création	before creation
+bash, avec couleurs, éditeurs et raccourcis	bash, with colors, editors and shortcuts
+c'est l'application qui gère l'accès.	the application handles access.
+ce conteneur est celui de DevHub : il ne se pilote pas d'ici	this container is DevHub's: it isn't controlled from here
+ce projet n'expose aucun port web	this project exposes no web port
+ce qu'un assistant peut appeler, selon les droits du profil	what an assistant can call, according to the profile's rights
+ce que le conteneur fait au démarrage	what the container does at startup
+certificat provisoire de Caddy (pas encore émis par Let's Encrypt)	Caddy's temporary certificate (not issued by Let's Encrypt yet)
+cet appareil	this device
+cette image	this image
+changé 	changed 
+changé les ressources de	changed the resources of
+chemin de volume invalide : « 	invalid volume path: “
+chemin invalide	invalid path
+chemin manquant	missing path
+choisis une image	choose an image
+client, redirect_uri ou code_verifier incorrect	wrong client, redirect_uri or code_verifier
+clique pour l'attacher, puis choisis son dossier	click to attach it, then choose its folder
+clonés dans /workspace à la création	cloned into /workspace on creation
+code incorrect	wrong code
+code invalide ou expiré	invalid or expired code
+colle le jeton Cloudflare	paste the Cloudflare token
+colle seulement le nom de l'image, sans la commande docker run (ex. nginx:latest)	paste only the image name, without the docker run command (e.g. nginx:latest)
+commande invalide	invalid command
+connecte GitHub	connect GitHub
+connecté	connected
+connexion par mot de passe désactivée : DevHub a un nom de domaine, utilise ton passkey	password sign-in disabled: DevHub has a domain name, use your passkey
+connexion…	connecting…
+construction déjà en cours	build already running
+construction en cours : attends qu'elle finisse	build running: wait for it to finish
+construction interrompue	build interrupted
+conteneur impossible à supprimer : 	container can't be removed: 
+conteneur introuvable : 	container not found: 
+copie de 	copy of 
+corrigé	fixed
+couleur invalide	invalid color
+coupé	off
+créé	created
+cérémonie inconnue	unknown ceremony
+cœur	core
+cœurs	cores
+dernières 24 h	last 24 h
+disque plein sur le serveur.	server disk full.
+domaine inconnu	unknown domain
+domaine invalide : 	invalid domain: 
+décompression 	unpacking 
+déconnecté — recharge la page	disconnected — reload the page
+défaut	default
+défaut des projets : RAM 	projects' default: RAM 
+déjà bon	already correct
+déjà installé	already installed
+démarrage automatique	automatic start
+démarrage manuel	manual start
+démarrage…	starting…
+démarré	started
+démarré le conteneur	started the container
+dépôt GitHub de DevHub inconnu	DevHub's GitHub repository unknown
+dépôt GitHub de DevHub inconnu (DEVHUB_GITHUB_REPO)	DevHub's GitHub repository unknown (DEVHUB_GITHUB_REPO)
+dépôt GitHub introuvable	GitHub repository not found
+dépôt introuvable (monte-le sur /repo)	repository not found (mount it on /repo)
+dépôt local	local repository
+dépôts privés	private repositories
+en cours	in progress
+en ligne en quelques secondes	online in a few seconds
+en marche	running
+entrée standard indisponible (clique sur Recréer pour l'activer) : 	standard input unavailable (click Recreate to turn it on): 
+environnement de dev	dev environment
+erreur : 	error: 
+erreur inconnue	unknown error
+et tape ce code pour créer ton compte.	and type this code to create your account.
+example.com est un exemple : mets ton propre domaine	example.com is an example: use your own domain
+fermé	closed
+flux actif	live stream
+format non pris en charge : PNG, JPEG, WebP ou GIF	unsupported format: PNG, JPEG, WebP or GIF
+fr-FR	en-GB
+garde ton mot de passe dans un gestionnaire de mots de passe. Avec un nom de domaine plus tard, tu passeras aux passkeys.	keep your password in a password manager. With a domain name later, you'll move to passkeys.
+garder les données	keep the data
+gardé	kept
+gardés	kept
+ghcr.io/moi/app:1.2 ou nginx	ghcr.io/me/app:1.2 or nginx
+hors DevHub	outside DevHub
+hors de /workspace : il faut le droit Terminal et fichiers	outside /workspace: needs the Terminal and files right
+https://github.com/moi/projet.git	https://github.com/me/project.git
+il y a 4 min	4 min ago
+image GitHub, redémarrage en quelques secondes	GitHub image, restart in a few seconds
+image de DevHub inconnue	DevHub's image unknown
+image du commit	commit image
+image introuvable ou privée. 	missing or private image. 
+image inutile retirée : 	unused image removed: 
+image invalide : « 	invalid image: “
+image privée ou introuvable. Pour une image ghcr.io privée, connecte GitHub dans Mon profil. 	private or missing image. For a private ghcr.io image, connect GitHub in My profile. 
+image requise	image required
+image trop lourde (2 Mo maximum)	image too large (2 MB maximum)
+image utilisée par DevHub lui-même	image used by DevHub itself
+impossible de supprimer /workspace ou un dossier à la racine du conteneur	can't delete /workspace or a folder at the container's root
+indique l'adresse IPv4 publique du serveur	give the server's public IPv4 address
+indique ton domaine	enter your domain
+injectées au démarrage du conteneur	injected when the container starts
+invitation expirée ou déjà utilisée	invitation expired or already used
+invitation expirée ou révoquée	invitation expired or revoked
+ip inconnue	unknown IP
+jamais utilisé	never used
+jamais utilisée	never used
+jetable : Recréer, changer d'image, de port ou de nom repart de zéro	disposable: Recreate, changing image, port or name starts from scratch
+jeton fine-grained	fine-grained token
+l'adresse	the address
+l'image de départ, tu pourras tout installer ensuite	the starting image, you can install everything afterwards
+la commande de l'image tourne (serveur, bot, app)	the image's command runs (server, bot, app)
+la page se met à jour toute seule, même pendant le redémarrage	the page updates by itself, even during the restart
+la whitelist du jeu décide qui entre.	the game's whitelist decides who gets in.
+lancé	ran
+le dossier 	the folder 
+le panel : interface, proxy des sous-domaines, terminaux, mises à jour	the panel: interface, subdomain proxy, terminals, updates
+le port	the port
+le port 	port 
+le projet 	project 
+le projet est arrêté	the project is stopped
+le serveur n'arrive pas à résoudre le registre (DNS). 	the server can't resolve the registry (DNS). 
+le serveur ne répond pas encore (RCON)	the server isn't responding yet (RCON)
+le volume	the volume
+le volume « 	the volume “
+lecture seule	read only
+les derniers déploiements	the latest deployments
+les deux nouveaux mots de passe ne sont pas identiques	the two new passwords don't match
+les volumes	the volumes
+leur contenu survit quand le conteneur est recréé	their content survives when the container is recreated
+limites max cumulées	combined max limits
+list, op Pseudo, whitelist add Pseudo…	list, op Name, whitelist add Name…
+maintenant	now
+mise à jour interrompue	update interrupted
+mise à jour possible seulement pour le DevHub du serveur, dans Docker	update possible only for the server's DevHub, in Docker
+modifié	changed
+modifié il y a moins de 10 min	changed less than 10 min ago
+modèle inconnu	unknown template
+modèle inconnu : 	unknown template: 
+modèle · 	template · 
+mon-projet	my-project
+mot de passe	password
+mot de passe actuel incorrect	current password is wrong
+mot de passe incorrect	wrong password
+mot de passe trop court : 	password too short: 
+mot de passe · 	password · 
+mémoire saturée	memory full
+n'importe quelle image	any image
+n'importe quelle image Docker, téléchargée tout de suite	any Docker image, downloaded right away
+ne démarre pas	doesn't start
+ne répond pas	doesn't respond
+nom de volume invalide : 	invalid volume name: 
+nom invalide	invalid name
+nom invalide (a-z, 0-9, -, 32 caractères max)	invalid name (a-z, 0-9, -, 32 characters max)
+nom manquant	name missing
+nom, apparence et démarrage	name, look and startup
+non trouvée	not found
+nouvelle version	new version
+op Pseudo	op Name
+opération annulée	operation cancelled
+ouvert une session	opened a session
+ouvre l'adresse	open the address
+ouvrir ↗	open ↗
+page introuvable	page not found
+partagé avec 	shared with 
+pas d'adresse	no address
+pas de mesure	no measure
+pas de passkey sans nom de domaine : connecte-toi avec le mot de passe	no passkey without a domain name: sign in with the password
+pas encore utilisée	not used yet
+pas encore vérifié	not checked yet
+pas téléchargée	not downloaded
+pas un volume DevHub	not a DevHub volume
+passage sur le domaine impossible : 	can't move to the domain: 
+passkey supprimé	passkey removed
+port invalide : 	invalid port: 
+possible seulement pour le DevHub du serveur, dans Docker	possible only for the server's DevHub, in Docker
+pour accéder à 	to open 
+pour que DevHub accède à tes dépôts et images privés	so DevHub can reach your private repositories and images
+privé	private
+privé (connexion requise)	private (sign-in required)
+privé (passkey)	private (passkey)
+profil 	profile 
+profil introuvable	profile not found
+projet introuvable	project not found
+projet introuvable : 	project not found: 
+projet.ton-domaine	project.your-domain
+proposé par l'image	offered by the image
+proposés dans « Nouveau projet »	offered in “New project”
+propriétaire	owner
+propriétaire, assistants IA et système	owner, AI assistants and system
+prête	ready
+prête · port 8000	ready · port 8000
+puis le dossier dans le conteneur	then the folder in the container
+rebranchés tels quels sur le nouveau conteneur	plugged back as is into the new container
+reconnu par les navigateurs	recognized by browsers
+recréé	recreated
+redémarré	restarted
+redémarré le conteneur	restarted the container
+refresh_token invalide ou révoqué	invalid or revoked refresh_token
+requête refusée : elle ne vient pas de DevHub	request refused: it doesn't come from DevHub
+retiré à l'application	removed from the app
+réglable à chaud	adjustable live
+réglage 	setting 
+réglage inconnu	unknown setting
+répond	responds
+réponse illisible de Cloudflare (	unreadable answer from Cloudflare (
+réseau du serveur	server's network
+sans limite	no limit
+sans nom · 	unnamed · 
+sous-domaine invalide : indique seulement le nom, par ex. « new » pour new.	invalid subdomain: give only the name, e.g. “new” for new.
+supprimé	deleted
+sur demande	on demand
+sur tes projets	on your projects
+taille…	size…
+texte envoyé à l'app (Entrée pour valider)	text sent to the app (Enter to send)
+toujours absente	still missing
+toujours gardé	always kept
+toutes les connexions	all connections
+triés par activité	sorted by activity
+trop d'essais : réessaie dans 	too many tries: try again in 
+téléchargement de 	downloading 
+téléchargement des images ghcr.io	downloading ghcr.io images
+téléphone	phone
+un autre enregistrement (souvent un CNAME) porte déjà ce nom : supprime-le dans Cloudflare, puis réessaie. (	another record (often a CNAME) already has this name: delete it in Cloudflare, then try again. (
+un changement de réglages est déjà en cours	a settings change is already running
+un enregistrement A vers 	an A record to 
+une URL secrète par projet, sans connexion	a secret URL per project, no sign-in
+une mise à jour est déjà en cours	an update is already running
+une mise à jour est en cours : réessaie dans une minute	an update is running: try again in a minute
+utilisé 	used 
+utilisé par 	used by 
+utilisée 	used 
+utilisée par le projet « 	used by the project “
+valeur invalide : 	invalid value: 
+version cible inconnue : vérifie les mises à jour	target version unknown: check for updates
+version inconnue : image construite sans DEVHUB_REVISION	unknown version: image built without DEVHUB_REVISION
+volume introuvable : 	volume not found: 
+volumes : seulement des chemins, ex. /data	volumes: paths only, e.g. /data
+volumes appliqués, mais contenu non recopié : 	volumes applied, but content not copied over: 
+whitelist add Pseudo	whitelist add Name
+· chaque projet reçoit son propre volume pour chacun	· each project gets its own volume for each
+· démarré 	· started 
+À donner aux joueurs	To give to players
+À jour	Up to date
+À quoi sert ce projet ?	What is this project for?
+Ça prend du temps ?	Taking a while?
+Échap	Esc
+Échap pour annuler	Esc to cancel
+Échec	Failed
+Épingler	Pin
+Épingler dans la barre	Pin to the bar
+Épinglé	Pinned
+Épinglés	Pinned
+Étape 	Step 
+Étapes	Steps
+État	Status
+à l'instant	just now
+échec	failed
+échec — 	failed — 
+étape inconnue	unknown step
+— seulement avec « Image perso »	— only with “Custom image”
+…) se tapent dans la console ci-dessous, ou dans l'onglet 	…) are typed in the console below, or in the tab 
+← Plus récent	← Newer
+← Retour	← Back
+← Tous les projets	← All projects
+↑ et ↓ rappellent les commandes précédentes.	↑ and ↓ bring back previous commands.

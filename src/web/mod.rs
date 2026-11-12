@@ -41,16 +41,17 @@ fn asset_version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| {
         let mut h: u64 = 0xcbf29ce484222325;
-        for b in CSS.bytes().chain(JS.bytes()) {
+        for b in CSS.bytes().chain(JS.bytes()).chain(crate::i18n::SOURCE.bytes()) {
             h = (h ^ b as u64).wrapping_mul(0x100000001b3);
         }
         format!("{:x}", h & 0xffffffff)
     })
 }
 
-pub async fn asset(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
+pub async fn asset(axum::extract::Path(file): axum::extract::Path<String>, axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>) -> Response {
     let (body, ty) = match file.as_str() {
         "app.css" => (CSS, "text/css; charset=utf-8"),
+        "app.js" if q.get("lang").is_some_and(|l| l == "en") => (crate::i18n::script_en(JS), "text/javascript; charset=utf-8"),
         "app.js" => (JS, "text/javascript; charset=utf-8"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -76,7 +77,7 @@ pub fn head_at(title: &str, origin: &str) -> Markup {
         link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
         link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap";
         link rel="stylesheet" href={(origin) "/assets/app.css?v=" (v)};
-        script src={(origin) "/assets/app.js?v=" (v)} defer {}
+        script src={(origin) "/assets/app.js?v=" (v) @if crate::i18n::en() { "&lang=en" }} defer {}
         // Prefetch panel links on hover. Safe: every action is a POST form.
         script type="speculationrules" { (PreEscaped(r#"{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":"/*/terminal"}},{"not":{"href_matches":"/*download*"}}]},"eagerness":"moderate"}]}"#)) }
     }
@@ -412,33 +413,36 @@ pub fn event(names: &[String], action: &str, detail: &str) -> Event {
 
 /// "Claude a lancé npm install dans mon-site" style sentence for the overview.
 pub fn sentence(actor: &str, ev: &Event) -> Markup {
-    let ai = db::ai_name(actor).map(|n| format!("{n} a"));
+    // Built whole in each language: the dictionary can't reorder "a créé".
+    let en = crate::i18n::en();
+    let name = db::ai_name(actor);
     let who = match actor {
-        _ if ai.is_some() => ai.as_deref().unwrap_or_default(),
-        "owner" => "Tu as",
-        "?" => "Quelqu'un a",
-        _ => "Le système a",
+        _ if name.is_some() => if en { name.unwrap_or_default().to_string() } else { format!("{} a", name.unwrap_or_default()) },
+        "owner" => (if en { "You" } else { "Tu as" }).into(),
+        "?" => (if en { "Someone" } else { "Quelqu'un a" }).into(),
+        _ => (if en { "The system" } else { "Le système a" }).into(),
     };
-    let verb = match ev.label.as_str() {
-        "run_command" => "lancé",
-        "file.save" | "write_file" | "edit_file" => "modifié",
-        "project.create" => "créé",
-        "project.start" => "démarré",
-        "project.stop" => "arrêté",
-        "project.restart" => "redémarré",
-        "project.rebuild" => "reconstruit",
-        "project.resources" => "changé les ressources de",
-        "container.start" => "démarré le conteneur",
-        "container.stop" => "arrêté le conteneur",
-        "container.restart" => "redémarré le conteneur",
-        "login.ok" => "ouvert une session",
-        _ => "fait",
+    let (fr, english) = match ev.label.as_str() {
+        "run_command" => ("lancé", "ran"),
+        "file.save" | "write_file" | "edit_file" => ("modifié", "changed"),
+        "project.create" => ("créé", "created"),
+        "project.start" => ("démarré", "started"),
+        "project.stop" => ("arrêté", "stopped"),
+        "project.restart" => ("redémarré", "restarted"),
+        "project.rebuild" => ("reconstruit", "rebuilt"),
+        "project.resources" => ("changé les ressources de", "changed the resources of"),
+        "container.start" => ("démarré le conteneur", "started the container"),
+        "container.stop" => ("arrêté le conteneur", "stopped the container"),
+        "container.restart" => ("redémarré le conteneur", "restarted the container"),
+        "login.ok" => ("ouvert une session", "signed in"),
+        _ => ("fait", "did"),
     };
+    let verb = if en { english } else { fr };
     let detail_first = matches!(ev.label.as_str(), "run_command" | "file.save" | "write_file" | "edit_file");
     html! {
         (who) " " (verb) " "
         @if detail_first && !ev.detail.is_empty() { code { (ev.detail) } " dans " }
-        @if verb == "fait" { code { (ev.label) } " " }
+        @if fr == "fait" { code { (ev.label) } " " }
         @if ev.label.starts_with("container.") { code { (ev.detail) } }
         @if let Some(p) = &ev.project { b { (p) } }
     }
@@ -719,7 +723,7 @@ pub fn update_pill(ctx: &Ctx) -> Markup {
                         @for (i, c) in u.pending.iter().take(6).enumerate() {
                             li { span class=(if i == 0 { "d new" } else { "d" }) {} span.m { (c.message) } span.when { @if let Some(t) = c.date { (ago(t)) } } }
                         }
-                        @if u.pending.len() > 6 { li.more { "et " (u.pending.len() - 6) " autre(s)" } }
+                        @if u.pending.len() > 6 { li.more { "+ " (u.pending.len() - 6) " autre(s)" } }
                     }
                     div.f {
                         span { "Tes projets continuent de tourner." }
@@ -826,6 +830,8 @@ fn sidebar(ctx: &Ctx, nav: Nav) -> Markup {
                         }
                         div.rme-acts {
                             button.btn.ghost.sm type="button" data-theme-toggle { (icon_c("sun", "sm")) "Thème" }
+                            @let (href, label) = crate::i18n::other();
+                            a.btn.ghost.sm href=(href) lang=(if label == "English" { "en" } else { "fr" }) { (icon_c("globe", "sm")) (label) }
                             form.inline method="post" action="/logout" { button.btn.ghost.sm { (icon_c("logout", "sm")) "Déconnexion" } }
                         }
                     }
@@ -865,6 +871,8 @@ pub async fn menu(axum::extract::State(st): axum::extract::State<AppState>, jar:
             }
             @if ctx.profile.admin { a.list-row href="/projects/new" { span.t { "Nouveau projet" } } }
             button.list-row type="button" data-theme-toggle style=(row) { span.t { "Changer de thème" } }
+            @let (href, label) = crate::i18n::other();
+            a.list-row href=(href) { span.t { (label) } }
             form method="post" action="/logout" { button.list-row style={(row) ";color:var(--err)"} { span.t { "Déconnexion" } } }
         }
         p.help style="margin-top:16px" { (ctx.host_name()) " · version " (ctx.version()) }

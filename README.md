@@ -45,6 +45,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 - **Ressources** : limites RAM / CPU du conteneur DevHub lui-même et limites par défaut des projets, appliquées à chaud.
 - **Isolation** : chaque projet a son réseau, ses limites RAM / CPU / PIDs, `no-new-privileges` et des capabilities retirées. Il n'a **aucun** accès au socket Docker.
 - **Journal** : chaque action (y compris celles de Claude), filtres par acteur, projet et période, export CSV.
+- **Français / English** : le panel, le guide d'installation et la page de connexion passent en anglais d'un clic (menu du profil, ou le lien en bas de la connexion et en haut du guide). Le choix est gardé dans le navigateur ; les pages des projets ne sont jamais touchées.
 
 ### Accès
 - **Passkeys** (WebAuthn), sans mot de passe, plusieurs appareils par profil.

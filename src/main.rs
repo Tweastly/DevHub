@@ -7,6 +7,7 @@ mod docker;
 mod files;
 mod github;
 mod host;
+mod i18n;
 mod install;
 mod live;
 mod mcp;
@@ -301,6 +302,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(web::overview::page))
         .route("/assets/{file}", get(web::asset))
         .route("/menu", get(web::menu))
+        .route("/lang/{code}", get(i18n::switch))
         .route("/login", get(login_page))
         .route("/auth/password/login", post(auth::password_login))
         .route("/auth/password/setup", post(auth::password_setup))
@@ -394,6 +396,8 @@ async fn main() -> anyhow::Result<()> {
         // Inner layer: only dashboard requests reach it, project hosts are proxied before.
         .layer(axum::middleware::from_fn_with_state(st.clone(), auth::guard))
         .layer(axum::middleware::from_fn_with_state(st.clone(), proxy::middleware))
+        // Outermost: English pages when asked (the proxy marks project answers untouched).
+        .layer(axum::middleware::from_fn(i18n::layer))
         .with_state(st);
 
     let addr = env("DEVHUB_LISTEN", "0.0.0.0:8080");

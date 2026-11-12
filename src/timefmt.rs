@@ -61,23 +61,37 @@ const MONTHS: [&str; 12] = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "j
 const MONTHS_LONG: [&str; 12] =
     ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const WEEKDAYS: [&str; 7] = ["jeudi", "vendredi", "samedi", "dimanche", "lundi", "mardi", "mercredi"];
+// The same in English, for a panel shown in English (i18n.rs).
+const MONTHS_EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_LONG_EN: [&str; 12] =
+    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WEEKDAYS_EN: [&str; 7] = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
+
+fn en() -> bool {
+    crate::i18n::en()
+}
+
+fn month(m: i64) -> &'static str {
+    (if en() { MONTHS_EN } else { MONTHS })[(m - 1) as usize]
+}
 
 /// Axis label of a history chart: "14 h" for hourly columns, "lun. 26" for 6 h ones,
 /// "26 oct." for days.
 pub fn axis(ts: i64, span: i64) -> String {
     let day = ts.div_euclid(86400);
     let (_, m, d) = civil_from_days(day);
+    let wd = day.rem_euclid(7) as usize;
     match span {
-        s if s < 6 * 3600 => format!("{} h", ts.rem_euclid(86400) / 3600),
-        s if s < 86400 => format!("{}. {d}", &WEEKDAYS[day.rem_euclid(7) as usize][..3]),
-        _ => format!("{d} {}", MONTHS[(m - 1) as usize]),
+        s if s < 6 * 3600 => if en() { format!("{}:00", ts.rem_euclid(86400) / 3600) } else { format!("{} h", ts.rem_euclid(86400) / 3600) },
+        s if s < 86400 => if en() { format!("{} {d}", &WEEKDAYS_EN[wd][..3]) } else { format!("{}. {d}", &WEEKDAYS[wd][..3]) },
+        _ => if en() { format!("{} {d}", month(m)) } else { format!("{d} {}", month(m)) },
     }
 }
 
 /// "12 oct. 2026"
 pub fn date_short(ts: i64) -> String {
     let (y, m, d) = civil_from_days(ts.div_euclid(86400));
-    format!("{d} {} {y}", MONTHS[(m - 1) as usize])
+    if en() { format!("{} {d}, {y}", month(m)) } else { format!("{d} {} {y}", month(m)) }
 }
 
 /// Day header for the journal: "AUJOURD'HUI · DIMANCHE 25 OCTOBRE".
@@ -85,10 +99,15 @@ pub fn day_header(ts: i64) -> String {
     let day = ts.div_euclid(86400);
     let today = now().div_euclid(86400);
     let (_, m, d) = civil_from_days(day);
-    let name = format!("{} {d} {}", WEEKDAYS[day.rem_euclid(7) as usize], MONTHS_LONG[(m - 1) as usize]);
+    let wd = day.rem_euclid(7) as usize;
+    let (name, prefix) = if en() {
+        (format!("{} {} {d}", WEEKDAYS_EN[wd], MONTHS_LONG_EN[(m - 1) as usize]), ["Today · ", "Yesterday · "])
+    } else {
+        (format!("{} {d} {}", WEEKDAYS[wd], MONTHS_LONG[(m - 1) as usize]), ["Aujourd'hui · ", "Hier · "])
+    };
     let prefix = match today - day {
-        0 => "Aujourd'hui · ",
-        1 => "Hier · ",
+        0 => prefix[0],
+        1 => prefix[1],
         _ => "",
     };
     format!("{prefix}{name}").to_uppercase()
@@ -98,13 +117,14 @@ pub fn day_header(ts: i64) -> String {
 pub fn relative(ts: i64) -> String {
     let d = now() - ts;
     let day = |t: i64| t.div_euclid(86400);
+    let en = en();
     match d {
-        d if d < 45 => "à l'instant".into(),
-        d if d < 3600 => format!("il y a {} min", (d + 30) / 60),
-        d if d < 6 * 3600 => format!("il y a {} h", d / 3600),
-        _ if day(now()) == day(ts) => format!("aujourd'hui {}", hm(ts)),
-        _ if day(now()) - day(ts) == 1 => format!("hier {}", hm(ts)),
-        d if d < 7 * 86400 => format!("il y a {} j", d / 86400),
+        d if d < 45 => (if en { "just now" } else { "à l'instant" }).into(),
+        d if d < 3600 => if en { format!("{} min ago", (d + 30) / 60) } else { format!("il y a {} min", (d + 30) / 60) },
+        d if d < 6 * 3600 => if en { format!("{} h ago", d / 3600) } else { format!("il y a {} h", d / 3600) },
+        _ if day(now()) == day(ts) => if en { format!("today {}", hm(ts)) } else { format!("aujourd'hui {}", hm(ts)) },
+        _ if day(now()) - day(ts) == 1 => if en { format!("yesterday {}", hm(ts)) } else { format!("hier {}", hm(ts)) },
+        d if d < 7 * 86400 => if en { format!("{} d ago", d / 86400) } else { format!("il y a {} j", d / 86400) },
         _ => date_short(ts),
     }
 }
@@ -113,7 +133,7 @@ pub fn relative(ts: i64) -> String {
 pub fn duration(secs: i64) -> String {
     let (d, h, m) = (secs / 86400, secs % 86400 / 3600, secs % 3600 / 60);
     if d > 0 {
-        format!("{d} j {h} h")
+        if en() { format!("{d} d {h} h") } else { format!("{d} j {h} h") }
     } else if h > 0 {
         format!("{h} h {m} min")
     } else {

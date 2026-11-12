@@ -56,7 +56,7 @@
     const u = new URL(a.href, location.href);
     return u.origin !== location.origin || a.target || a.hasAttribute('download') ||
       a.getAttribute('href').startsWith('#') || 'reload' in a.dataset ||
-      /\/download$|\.csv$|^\/login|^\/assets\//.test(u.pathname);
+      /\/download$|\.csv$|^\/login|^\/assets\/|^\/lang\//.test(u.pathname);
   };
   let ctrl;
   // Inline scripts inserted via the DOM don't run: recreate them in order (an external

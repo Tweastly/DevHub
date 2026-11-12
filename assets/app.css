@@ -1429,7 +1429,9 @@ body.setup-page { min-height: 100vh; display: grid; place-items: center; padding
 .wz-st.cur .n { background: var(--accent); border-color: transparent; color: var(--on-accent); }
 .wz-later { margin-top: auto; padding: 14px 8px 0; font-size: 12.5px; color: var(--faint); }
 .wz-later:hover { color: var(--text); }
-.wz-main { padding: 34px 40px 26px; display: flex; flex-direction: column; min-width: 0; animation: wz-in .35s cubic-bezier(.2,.7,.2,1) both; }
+.wz-main { position: relative; padding: 34px 40px 26px; display: flex; flex-direction: column; min-width: 0; animation: wz-in .35s cubic-bezier(.2,.7,.2,1) both; }
+.wz-lang { position: absolute; top: 14px; right: 18px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--faint); }
+.wz-lang:hover { color: var(--text); }
 @keyframes wz-in { from { opacity: 0; transform: translateY(6px); } }
 .wz-main > section { display: contents; }
 .wz-main > section[hidden] { display: none; }

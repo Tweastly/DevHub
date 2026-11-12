@@ -24,7 +24,8 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     let proj_cpu: f64 = ctx.projects.iter().map(|p| p.cpus.unwrap_or(def_cpu)).sum();
     let dh_reserved = dh_mb.unwrap_or(0);
     let over = h.mem_total_mb > 0 && proj_mb + dh_reserved > h.mem_total_mb;
-    let cores = |c: f64| if c.fract() == 0.0 { format!("{c:.0}") } else { format!("{c:.1}") };
+    // + 0.0: the sum of no projects is -0.0, shown "-0".
+    let cores = |c: f64| { let c = c + 0.0; if c.fract() == 0.0 { format!("{c:.0}") } else { format!("{c:.1}") } };
 
     let body = html! {
         div.page-head { div { h1 { "Ressources" } p.lead { "Ce que DevHub et tes projets ont le droit d'utiliser sur " (ctx.host_name()) ". Tout s'applique à chaud, sans redémarrage." } } }
@@ -44,7 +45,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
                 }
                 div.card-f.help {
                     "Réservé au maximum : " b { (proj_mb + dh_reserved) " Mo" } " ("
-                    (ctx.projects.len()) " projet" @if ctx.projects.len() > 1 { "s" } " : " (proj_mb) " Mo, " (cores(proj_cpu)) " cœurs"
+                    (ctx.projects.len()) @if ctx.projects.len() > 1 { " projets : " } @else { " projet : " } (proj_mb) " Mo, " (cores(proj_cpu)) " cœurs"
                     @if let Some(m) = dh_mb { " · DevHub : " (m) " Mo" } ")."
                     @if over { " " span style="color:var(--warn)" { "C'est plus que la RAM du serveur : si tout le monde en demande en même temps, le noyau tuera un conteneur." } }
                 }
@@ -82,7 +83,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
             }
 
             div.card #defaults {
-                div.card-h { h3 { "Projets : limites par défaut" } span.sub { (on_default) " projet" @if on_default > 1 { "s" } " sur " (ctx.projects.len()) " les utilise" @if on_default > 1 { "nt" } } }
+                div.card-h { h3 { "Projets : limites par défaut" } span.sub { (on_default) @if on_default > 1 { " projets sur " } @else { " projet sur " } (ctx.projects.len()) @if on_default > 1 { " les utilisent" } @else { " les utilise" } } }
                 form.card-b method="post" action="/resources/defaults" {
                     div.grid2 {
                         label.field { span.lbl { "RAM max (Mo)" } input.mono-input name="memory_mb" type="number" min="64" max=(h.mem_total_mb) step="64" value=(def_mb); p.help { "Vide = " (env_mb) " Mo (docker-compose)" } }

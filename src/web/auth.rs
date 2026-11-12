@@ -16,7 +16,11 @@ fn shell(title: &str, origin: &str, footer: &str, lock: bool, body: Markup) -> M
                 main.auth-card {
                     @if lock { span.auth-lock { (icon("lock")) } } @else { div style="display:flex;justify-content:center;margin-bottom:22px" { (logo(46)) } }
                     (body)
-                    p.auth-foot { "Protégé par DevHub · " (footer) }
+                    p.auth-foot {
+                        "Protégé par DevHub · " (footer)
+                        // On the dashboard's own host only: the choice is remembered there.
+                        @if origin.is_empty() { @let (href, label) = crate::i18n::other(); " · " a href=(href) { (label) } }
+                    }
                 }
             }
         }
@@ -72,11 +76,14 @@ pub fn login(needs_setup: bool, ip_mode: bool, next: Option<&str>, footer: &str)
     })
 }
 
-pub fn private_project(project: &str, login_url: &str, origin: &str, footer: &str) -> Markup {
+/// `password`: DevHub without a domain name, where one signs in with a password.
+pub fn private_project(project: &str, login_url: &str, origin: &str, footer: &str, password: bool) -> Markup {
     shell(&format!("{project} · accès privé"), origin, footer, true, html! {
         h1 { "Projet privé" }
         p.sub { b style="color:var(--text)" { (project) } " est réservé aux profils autorisés. Connecte-toi pour continuer." }
-        a.btn.primary href=(login_url) { (icon("key")) "Se connecter avec un passkey" }
+        a.btn.primary href=(login_url) {
+            @if password { (icon("lock")) "Se connecter avec le mot de passe" } @else { (icon("key")) "Se connecter avec un passkey" }
+        }
     })
 }
 

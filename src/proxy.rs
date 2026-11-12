@@ -235,7 +235,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         let login = url::Url::parse_with_params(&format!("{}/{entry}", st.cfg.origin), [("next", back)])
             .map(|u| u.to_string())
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));
-        return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, &st.cfg.origin, base_host(&st))).into_response();
+        return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, &st.cfg.origin, base_host(&st), st.cfg.ip_mode)).into_response();
     }
     let owner = viewer.as_ref().is_some_and(|p| p.sees(&t.project.name));
     let name = t.project.name.clone();
@@ -262,7 +262,10 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
     let nested = docker::is_devhub_image(&t.project.image);
     let ours = |v: &str| !nested || db::session_profile(&st.db.lock().unwrap(), v).is_some();
     match forward(req, stream, &host, st.cfg.origin.starts_with("https"), &ours).await {
-        Ok(r) => r,
+        Ok(mut r) => {
+            r.extensions_mut().insert(crate::i18n::Untouched);
+            r
+        }
         Err(e) => error_page(&st, StatusCode::BAD_GATEWAY, "Erreur de connexion",
             &format!("La connexion à <b>{name}</b> a été interrompue."),
             owner.then(|| e.to_string()).as_deref(), None),

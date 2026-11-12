@@ -13,6 +13,11 @@
 - Avec un domaine : passkeys, un sous-domaine par projet (`caddy/Caddyfile`).
 - Sans domaine, mode « IP seule » (`DEVHUB_DOMAIN` = une IP, `cfg.ip_mode`) : connexion par mot de passe (les passkeys refusent une IP), un port par projet web (`https://IP:20000`…), `caddy/Caddyfile.ip` (DevHub calcule `DEVHUB_IP_SITES`). Un projet peut quand même avoir son propre nom de domaine (onglet Réseau, nom complet) : Caddy le sert sur le 443 avec un certificat à la première visite (bloc `https://` de `Caddyfile.ip`). `docker-compose.ip.yml` ne reste que pour les anciens `.env` qui le citent.
 
+## Langue (français / anglais)
+- Le panel est écrit en français dans le code. Avec le cookie `lang=en` (lien « English » du menu du profil, de `/menu`, de la connexion et du guide → `/lang/en`), DevHub traduit ses propres réponses avant de les envoyer : pages HTML, réponses JSON du guide (`/setup/…`) et `/live/stats`, messages `ok`/`err` des redirections, `app.js` (`?lang=en`). Voir `src/i18n.rs`.
+- Dictionnaire : `src/i18n/en.tsv` (une ligne `français<TAB>English`, plus long d'abord, mots entiers ; `>` devant un mot court = nœud de texte entier). **Tout nouveau texte visible ajoute sa ligne dans `en.tsv`**, en gardant le texte français tel qu'il est dans le code (morceaux de `format!` compris). Une phrase dont l'ordre des mots change (« Tu as créé ») se construit dans chaque langue avec `i18n::en()`, comme les dates (`timefmt.rs`).
+- Jamais traduit : ce que le proxy renvoie d'un projet (`i18n::Untouched`), les valeurs de formulaires, `<textarea>` et `<pre>` (fichiers, journaux), les réponses du MCP.
+
 ## Accès au VPS
 - DevHub a la main sur le VPS depuis son conteneur, pour piloter les projets (socket Docker) et lire les statistiques du serveur (CPU, mémoire, disque, durée de fonctionnement…).
 - Le MCP (assistants IA) n'a pas cet accès à l'hôte : ses outils restent limités aux projets et aux réglages de DevHub. Pas de commande, de fichier ni de contrôle sur le VPS lui-même par le MCP.

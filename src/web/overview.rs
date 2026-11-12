@@ -12,7 +12,7 @@ pub fn period_seg(base: &str, current: &str) -> Markup {
     html! {
         div.seg {
             @for p in ["24h", "7j", "30j"] {
-                a class=(if p == current { "on" } else { "" }) href={(base) "?p=" (p)} { (p.replace('j', " j").replace("24h", "24 h")) }
+                a class=(if p == current { "on" } else { "" }) href={(base) "?p=" (p)} { (p.replace('j', if crate::i18n::en() { " d" } else { " j" }).replace("24h", "24 h")) }
             }
         }
     }

@@ -90,7 +90,11 @@ fn frame(theme: Option<&'static str>, cur: Option<usize>, signed_in: bool, main:
                             @if signed_in { a.wz-later href="/setup/later" data-reload { "Configurer plus tard" } }
                         }
                     }
-                    main.wz-main { (main) }
+                    main.wz-main {
+                        @let (href, label) = crate::i18n::other();
+                        a.wz-lang href=(href) data-reload { (icon_c("globe", "sm")) (label) }
+                        (main)
+                    }
                 }
             }
         }
@@ -99,7 +103,7 @@ fn frame(theme: Option<&'static str>, cur: Option<usize>, signed_in: bool, main:
 
 fn kicker(i: usize) -> Markup {
     html! {
-        div.wz-kick { "Étape " (i + 1) " sur " (STEPS.len()) }
+        div.wz-kick { @if crate::i18n::en() { "Step " (i + 1) " of " (STEPS.len()) } @else { "Étape " (i + 1) " sur " (STEPS.len()) } }
         div.wz-progress { i style={ "width:" (((i + 1) * 100) / STEPS.len()) "%" } {} }
     }
 }
@@ -296,7 +300,7 @@ pub(crate) fn move_pane(i: Option<usize>) -> Markup {
             div.wz-body {
                 div.wz-card.wz-checks {
                     div.wz-check { span.mk.ok { (PreEscaped(CHECK)) } span.t { "Domaine enregistré dans la configuration du serveur" } span.side {} }
-                    div.wz-check { span.mk.spin {} span.t #mv-state { "Redémarrage de DevHub, certificat HTTPS…" } span.side {} }
+                    div.wz-check { span.mk.spin #mv-spin {} span.t #mv-state { "Redémarrage de DevHub, certificat HTTPS…" } span.side {} }
                 }
                 div.wz-hint #mv-slow hidden {
                     b { "Ça prend du temps ?" }
@@ -361,6 +365,8 @@ function domainStep(env) {
         // Answers once Caddy has a valid certificate for the domain: before, TLS fails.
         await fetch(j.url + '/login', { mode: 'no-cors', cache: 'no-store' });
         $('#mv-state').textContent = 'DevHub répond sur ' + j.url + ' : on y va…';
+        $('#mv-spin').className = 'mk ok';
+        $('#mv-spin').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg>';
         setTimeout(() => { location.href = to; }, 1200);
         return;
       } catch {}
