@@ -56,6 +56,7 @@ fn ip_sites(ip: &str, (lo, hi): (u16, u16)) -> String {
 pub fn spawn(st: AppState, listen: String) {
     tokio::spawn(async move {
         remove_former_container(&st).await;
+        release_web_ports(&st).await;
         let mut wait = 1;
         loop {
             let started = Instant::now();
@@ -117,6 +118,35 @@ async fn keep(r: impl AsyncRead + Unpin) {
             g.pop_front();
         }
         g.push_back(l);
+    }
+}
+
+/// Without a domain name, Caddy listens on each web project's port itself. Containers made
+/// while DevHub had a domain publish those ports on the server's loopback, which would keep
+/// Caddy from starting: they are recreated without them (stopped ones stay stopped).
+async fn release_web_ports(st: &AppState) {
+    if !st.cfg.ip_mode {
+        return;
+    }
+    let d = &st.docker;
+    let projects = crate::db::list_projects(&st.db.lock().unwrap()).unwrap_or_default();
+    for p in projects {
+        let Ok(info) = d.inspect_container(&crate::docker::container_name(&p.name), None).await else { continue };
+        let bound = info.host_config.and_then(|h| h.port_bindings).unwrap_or_default();
+        let published = p.http_ports().any(|m| bound.get(&format!("{}/tcp", m.container)).is_some_and(|b| b.as_ref().is_some_and(|v| !v.is_empty())));
+        if !published {
+            continue;
+        }
+        let running = info.state.and_then(|s| s.running).unwrap_or(false);
+        match crate::docker::create(d, &p, &st.limits()).await {
+            Ok(()) => {
+                if !running {
+                    let _ = crate::docker::stop(d, &p.name).await;
+                }
+                tracing::info!("{} : ports web rendus à Caddy (adresse IP)", p.name);
+            }
+            Err(e) => tracing::warn!("{} : ports web non libérés ({e:#})", p.name),
+        }
     }
 }
 

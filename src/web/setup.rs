@@ -32,7 +32,7 @@ fn index(step: &str) -> usize {
 const FIRST_SIGNED_IN: usize = 3;
 
 /// Setting: the guide is over (finished, put off, or left for the dashboard). From then
-/// on /setup leads to the settings page, where everything it set can be changed.
+/// on /setup leads to the dashboard; what it set is changed on each setting's own page.
 pub const SETUP_DONE: &str = "setup_done";
 
 pub fn finished(st: &AppState) -> bool {
@@ -144,9 +144,9 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar, Query(q): Query<Ha
     if !me.admin {
         return Oops::forbidden().response(&st, &jar);
     }
-    // Installed: the guide never comes back, its settings are on the settings page.
+    // Installed: the guide never comes back (its settings are on their own pages).
     if finished(&st) {
-        return Redirect::to("/settings").into_response();
+        return Redirect::to("/").into_response();
     }
     let which = q.get("step").map(String::as_str).unwrap_or("domain");
     let main = match which {
@@ -192,7 +192,8 @@ fn first_steps(st: &AppState) -> Markup {
                 }
             }
         }
-        @if ip_mode {
+        // Not after a move to the IP decided on the address page: straight to the password.
+        @if ip_mode && !finished(st) {
             section #s-choice hidden {
                 (kicker(1))
                 h1 { "As-tu un nom de domaine ?" }
@@ -209,7 +210,7 @@ fn first_steps(st: &AppState) -> Markup {
         }
         // After the account: the rest of the guide, or the settings when DevHub was installed
         // already (a move to a domain asks for a passkey there).
-        section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) data-after=(if finished(st) { "/settings" } else { "/setup?step=domain" }) {
+        section #s-account hidden data-mode=(if ip_mode { "password" } else { "passkey" }) data-after=(if finished(st) { "/address" } else { "/setup?step=domain" }) {
             (kicker(2))
             h1 { "Crée ton compte propriétaire" }
             @if ip_mode {

@@ -584,12 +584,12 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                 }
             }
 
-            // ---- Subdomains (sites only; none without a domain name) ----
-            @if first_http.is_some() && !st.cfg.ip_mode {
+            // ---- Subdomains (sites only); without a domain name for DevHub, the project's own ----
+            @if first_http.is_some() {
                 section.card.card-b.nsub {
                     div.nhero-h {
-                        h3 { "Sous-domaines" }
-                        span.muted { "HTTPS créé à la première visite" }
+                        h3 { @if st.cfg.ip_mode { "Noms de domaine" } @else { "Sous-domaines" } }
+                        span.muted { @if st.cfg.ip_mode { "un enregistrement A vers " span.mono { (st.cfg.domain) } ", HTTPS créé à la première visite" } @else { "HTTPS créé à la première visite" } }
                         @if let Some(apps) = &st.cfg.apps_domain {
                             @if dns.is_some() { span.chip.end title={"*." (apps) " → " (dns.clone().unwrap_or_default())} { span.dot.running {} "DNS *." (apps) } }
                             @else { span.chip.warn.end title={"Ajoute un enregistrement A *." (apps) " vers l'IP du serveur"} { span.dot.restarting {} "DNS *." (apps) " non détecté" } }
@@ -625,7 +625,7 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                                 button.btn.sm { "Ajouter" }
                             }
                         }
-                        @if x.domains.is_empty() && !manages { span.muted { "Aucun sous-domaine." } }
+                        @if x.domains.is_empty() && !manages { span.muted { @if st.cfg.ip_mode { "Aucun nom de domaine." } @else { "Aucun sous-domaine." } } }
                     }
                     @for ((h, _), t) in x.domains.iter().zip(&https) {
                         @if let Some(Err(e)) = t { p.err-text { (icon_c("error", "sm")) b { (h) } " : pas de certificat HTTPS. " (e) } }

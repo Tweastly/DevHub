@@ -193,10 +193,11 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
     if host == base_host(&st) {
         return next.run(req).await;
     }
-    // Without a domain: a port of the project range is a project, anything else the dashboard.
-    let ip_port = st.cfg.ip_mode.then(|| {
+    // Without a domain, on the server's IP: a port of the project range is a project, anything
+    // else the dashboard. Another name is a project's own domain.
+    let on_ip = st.cfg.ip_mode && host.rsplit_once(':').map_or(host.as_str(), |x| x.0) == base_ip(&st);
+    let ip_port = on_ip.then(|| {
         host.rsplit_once(':')
-            .filter(|(h, _)| *h == base_ip(&st))
             .and_then(|(_, p)| p.parse::<u16>().ok())
             .filter(|p| (st.cfg.port_range.0..=st.cfg.port_range.1).contains(p))
     });
@@ -230,7 +231,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
         let back = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
         // Custom domains don't share the dashboard cookie: go through the session handoff.
-        let entry = if st.cfg.ip_mode || host.ends_with(&format!(".{}", base_host(&st))) { "login" } else { "auth/handoff" };
+        let entry = if on_ip || host.ends_with(&format!(".{}", base_host(&st))) { "login" } else { "auth/handoff" };
         let login = url::Url::parse_with_params(&format!("{}/{entry}", st.cfg.origin), [("next", back)])
             .map(|u| u.to_string())
             .unwrap_or_else(|_| format!("{}/login", st.cfg.origin));

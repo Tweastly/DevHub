@@ -1,7 +1,8 @@
 # Mode « IP seule » (pas de nom de domaine) : DevHub lance Caddy avec ce fichier quand
 # DEVHUB_DOMAIN est une adresse IP. Le panel sur https://<IP>, chaque projet web sur
-# https://<IP>:<port>. DEVHUB_IP_SITES liste ces adresses (calculé par DevHub, voir
-# src/caddy.rs), car Caddy n'accepte pas de plage de ports dans une adresse.
+# https://<IP>:<port>, et les noms de domaine donnés aux projets sur le 443.
+# DEVHUB_IP_SITES liste les adresses de l'IP (calculé par DevHub, voir src/caddy.rs), car
+# Caddy n'accepte pas de plage de ports dans une adresse.
 {
 	admin off
 	# Its local authority stays in its storage: no system trust store in a container.
@@ -10,6 +11,11 @@
 	# Browsers send no server name (SNI) for an IP address: pick the IP's certificate anyway,
 	# also behind NAT where the connection's local address isn't the public one.
 	default_sni {$DEVHUB_DOMAIN}
+	# A project's own domain name gets its certificate on first visit, only if DevHub
+	# confirms the name belongs to a project.
+	on_demand_tls {
+		ask http://{$DEVHUB_UPSTREAM}/_caddy/ask
+	}
 }
 
 # If DevHub doesn't answer (it is starting), a small page that reloads itself.
@@ -33,6 +39,17 @@
 			profile shortlived
 		}
 		issuer internal
+	}
+	reverse_proxy {$DEVHUB_UPSTREAM} {
+		flush_interval -1
+	}
+	import restarting
+}
+
+# Any other name: a domain name given to a project (Réseau tab), routed by DevHub.
+https:// {
+	tls {
+		on_demand
 	}
 	reverse_proxy {$DEVHUB_UPSTREAM} {
 		flush_interval -1

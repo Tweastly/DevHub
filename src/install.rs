@@ -166,7 +166,7 @@ fn parse(args: &[String], out: &Out) -> anyhow::Result<Opts> {
 }
 
 /// The server's public IPv4, as the internet sees it.
-async fn public_ip() -> Option<IpAddr> {
+pub async fn public_ip() -> Option<IpAddr> {
     if let Some(ip) = std::env::var("DEVHUB_PUBLIC_IP").ok().and_then(|v| v.trim().parse().ok()) {
         return Some(ip);
     }
