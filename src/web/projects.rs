@@ -424,6 +424,11 @@ fn tpl_label(key: &str) -> (&'static str, &'static str) {
 pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx_admin(&st, &jar)?;
     let suffix = format!(".{}", crate::proxy::base_host(&st));
+    // Without a domain name there are no subdomains: the project gets the next port of the IP.
+    let ip_address = st.cfg.ip_mode.then(|| {
+        let port = db::allocate_port(&st.db.lock().unwrap(), st.cfg.port_range, &[]).map(|p| format!(":{p}")).unwrap_or_default();
+        format!("{}{port}", st.cfg.domain)
+    });
     let v = |k: &str| q.get(k).cloned().unwrap_or_default();
     let chosen = q.get("template").cloned().unwrap_or_else(|| "site".into());
     let catalog = db::catalog(&st.db.lock().unwrap());
@@ -527,7 +532,10 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                             div { b style="font-size:16px" data-recap="name" { "mon-projet" } div.mono.dim style="font-size:12px" { "modèle · " span data-recap="model" {} } }
                         }
                         table.tbl style="border:1px solid var(--border);border-radius:12px;border-collapse:separate;overflow:hidden" {
-                            tr { td.muted { "Adresse" } td.num.mono style="font-size:12px" { span data-recap="host" data-suffix=(suffix) { "mon-projet" (suffix) } } }
+                            tr { td.muted { "Adresse" } td.num.mono style="font-size:12px" {
+                                @if let Some(a) = &ip_address { span title="Sans nom de domaine, chaque projet web a son port sur l'IP du serveur" { (a) } }
+                                @else { span data-recap="host" data-suffix=(suffix) { "mon-projet" (suffix) } }
+                            } }
                             tr { td.muted { "Accès" } td.num { span.pill.private { (icon_c("lock", "sm")) "privé (connexion requise)" } } }
                             tr { td.muted { "RAM max" } td.num.mono { (ctx.default_mb()) " Mo" } }
                             tr { td.muted { "CPU max" } td.num.mono { (ctx.default_cpus()) " cœurs" } }

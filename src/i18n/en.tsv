@@ -715,6 +715,7 @@ Le port doit être autorisé dans le pare-feu du VPS (	The port must be allowed 
 Le port où ton application écoute, dans son conteneur	The port your application listens on, inside its container
 Le projet a déjà son volume, monté sur 	The project already has its volume, mounted on 
 Le projet n'aura plus aucune adresse web tant que tu n'ajoutes pas de domaine personnalisé. Les adresses <nom>-<port> s'arrêtent aussi.	The project won't have any web address until you add a custom domain. The <name>-<port> addresses stop too.
+Le projet n'aura plus aucune adresse web tant que tu ne lui donnes pas de nom de domaine. Ses autres ports web s'arrêtent aussi.	The project won't have any web address until you give it a domain name. Its other web ports stop too.
 Le projet reçoit 	The project gets 
 Le serveur démarre : suis-le dans Terminal & journaux.	The server is starting: follow it in Terminal & logs.
 Le serveur n'a pas pu récupérer la nouvelle version sur GitHub : le paquet d'images doit être public.	The server couldn't get the new version from GitHub: the image package must be public.
@@ -952,6 +953,7 @@ Révoquer 	Revoke
 Révoquer les 	Revoke the 
 Sa base est dans le volume 	Its database is in the volume 
 Sans nom de domaine : le panel sur 	Without a domain name: the panel on 
+Sans nom de domaine, chaque projet web a son port sur l'IP du serveur	Without a domain name, each web project has its port on the server's IP
 Sans nom de domaine, on entre avec un mot de passe (les passkeys exigent un domaine).	Without a domain name, you sign in with a password (passkeys need a domain).
 Se connecter	Sign in
 Se connecter avec GitHub	Sign in with GitHub
@@ -969,6 +971,7 @@ Ses données sont effacées pour de bon.	Its data is erased for good.
 Seul le propriétaire peut donner accès à Docker du serveur.	Only the owner can give access to the server's Docker.
 Seul un administrateur peut supprimer des projets.	Only an administrator can delete projects.
 Seuls les dossiers 	Only the 
+Seuls ses noms de domaine serviront le site. Ses autres ports web s'arrêtent aussi.	Only its domain names will serve the site. Its other web ports stop too.
 Seuls tes domaines personnalisés serviront le site. Les adresses <nom>-<port> s'arrêtent aussi.	Only your custom domains will serve the site. The <name>-<port> addresses stop too.
 Shell interactif	Interactive shell
 Si tu passes 	If you go over 

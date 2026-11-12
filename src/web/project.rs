@@ -500,7 +500,12 @@ pub async fn network(State(st): State<AppState>, jar: CookieJar, Path(name): Pat
                     @if manages {
                         form.nauto method="post" action={(base) "/auto-domain"}
                             data-confirm=[auto.then(|| format!("Désactiver {auto_host} ?"))]
-                            data-confirm-body=(if x.domains.is_empty() { "Le projet n'aura plus aucune adresse web tant que tu n'ajoutes pas de domaine personnalisé. Les adresses <nom>-<port> s'arrêtent aussi." } else { "Seuls tes domaines personnalisés serviront le site. Les adresses <nom>-<port> s'arrêtent aussi." })
+                            data-confirm-body=(match (x.domains.is_empty(), st.cfg.ip_mode) {
+                                (true, false) => "Le projet n'aura plus aucune adresse web tant que tu n'ajoutes pas de domaine personnalisé. Les adresses <nom>-<port> s'arrêtent aussi.",
+                                (false, false) => "Seuls tes domaines personnalisés serviront le site. Les adresses <nom>-<port> s'arrêtent aussi.",
+                                (true, true) => "Le projet n'aura plus aucune adresse web tant que tu ne lui donnes pas de nom de domaine. Ses autres ports web s'arrêtent aussi.",
+                                (false, true) => "Seuls ses noms de domaine serviront le site. Ses autres ports web s'arrêtent aussi.",
+                            })
                             data-tone="warn" data-confirm-ok="Désactiver" {
                             (back_field(&here))
                             input type="hidden" name="on" value=(if auto { "0" } else { "1" });
