@@ -67,6 +67,8 @@ pub struct NewProject {
     pub service: bool,
     /// Extra volumes, as typed in the form (see `parse_volumes`).
     pub volumes: String,
+    /// Without a domain name: the port of the IP for its first web port (else the next free).
+    pub web_port: Option<u16>,
 }
 
 pub enum Change {
@@ -249,6 +251,20 @@ pub fn parse_env(s: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Without a domain name, a web project answers on a port of the IP: is `port` one it can
+/// have (in the projects' range, held by no other project)?
+pub fn web_port_free(st: &AppState, port: u16) -> R<()> {
+    let (lo, hi) = st.cfg.port_range;
+    if !(lo..=hi).contains(&port) {
+        return Err(format!("port hors de la plage des projets : {lo}–{hi}"));
+    }
+    let projects = db::list_projects(&st.db.lock().unwrap()).map_err(internal)?;
+    match projects.iter().find(|p| p.ports.iter().any(|m| m.host == port)) {
+        Some(p) => Err(format!("port déjà pris par « {} »", p.name)),
+        None => Ok(()),
+    }
+}
+
 /// Keeps existing host ports for unchanged ports, allocates the rest. A public TCP port
 /// gets the same host port as inside the container when it's free (25565 → 25565),
 /// otherwise the next free one (a second Minecraft server lands on 25566).
@@ -287,7 +303,7 @@ fn valid_name(name: &str) -> R<()> {
         return Err("nom invalide (a-z, 0-9, -, 32 caractères max)".into());
     }
     // Taken by the pages /projects/new and /projects/bulk.
-    if matches!(name, "new" | "bulk") {
+    if matches!(name, "new" | "bulk" | "port-check") {
         return Err(format!("« {name} » est réservé, choisis un autre nom"));
     }
     Ok(())
@@ -339,7 +355,20 @@ pub async fn create(st: &AppState, np: NewProject, actor: &str) -> R<db::Project
     }
     let mounts = parse_volumes(&np.volumes, &name, reserved_paths(matches!(np.template.as_str(), "minecraft" | "pocketmine")))?;
     check_volumes(st, &name, &mounts).await?;
-    let ports = map_ports(st, &[], &wanted).map_err(internal)?;
+    if let Some(want) = np.web_port.filter(|_| st.cfg.ip_mode) {
+        web_port_free(st, want)?;
+    }
+    let mut ports = map_ports(st, &[], &wanted).map_err(internal)?;
+    if let (Some(want), true) = (np.web_port, st.cfg.ip_mode) {
+        if let Some(i) = ports.iter().position(|m| !m.tcp && !m.udp) {
+            // Another web port of this project may have been given that one: they swap.
+            let before = ports[i].host;
+            if let Some(o) = ports.iter_mut().find(|m| m.host == want) {
+                o.host = before;
+            }
+            ports[i].host = want;
+        }
+    }
     // Only custom images choose; templates are dev containers, game servers always services.
     let service = np.service && np.template == "custom";
     let p = db::Project {

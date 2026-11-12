@@ -421,14 +421,28 @@ fn tpl_label(key: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// Without a domain name: may a new project's site take this port of the IP? For the live
+/// check of the "Adresse du site" field.
+pub async fn port_check(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<axum::Json<serde_json::Value>, Response> {
+    ctx_admin(&st, &jar)?;
+    let res = match q.get("port").and_then(|p| p.trim().parse::<u16>().ok()) {
+        None => Err("indique un numéro de port".to_string()),
+        Some(p) => crate::ops::web_port_free(&st, p),
+    };
+    Ok(axum::Json(match res {
+        Ok(()) => serde_json::json!({ "ok": true, "msg": "Port libre" }),
+        Err(e) => serde_json::json!({ "ok": false, "msg": e }),
+    }))
+}
+
 pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Query<HashMap<String, String>>) -> Result<Markup, Response> {
     let ctx = ctx_admin(&st, &jar)?;
     let suffix = format!(".{}", crate::proxy::base_host(&st));
-    // Without a domain name there are no subdomains: the project gets the next port of the IP.
-    let ip_address = st.cfg.ip_mode.then(|| {
-        let port = db::allocate_port(&st.db.lock().unwrap(), st.cfg.port_range, &[]).map(|p| format!(":{p}")).unwrap_or_default();
-        format!("{}{port}", st.cfg.domain)
-    });
+    // Without a domain name there are no subdomains: the site answers on a port of the IP,
+    // the next free one unless chosen.
+    let free_port = st.cfg.ip_mode.then(|| db::allocate_port(&st.db.lock().unwrap(), st.cfg.port_range, &[]).ok()).flatten();
+    let web_port = q.get("web_port").filter(|p| !p.is_empty()).cloned().or(free_port.map(|p| p.to_string())).unwrap_or_default();
+    let (lo, hi) = st.cfg.port_range;
     let v = |k: &str| q.get(k).cloned().unwrap_or_default();
     let chosen = q.get("template").cloned().unwrap_or_else(|| "site".into());
     let catalog = db::catalog(&st.db.lock().unwrap());
@@ -445,11 +459,25 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                         div.card-b {
                             label.field {
                                 span.lbl { "Nom du projet" }
-                                div.ig style="max-width:560px" {
-                                    input.mono-input name="name" required maxlength="32" pattern="[a-z0-9-]{1,32}" placeholder="mon-portfolio" value=(v("name")) autocomplete="off" autofocus;
-                                    span.suf { (suffix) }
+                                @if st.cfg.ip_mode {
+                                    input.mono-input name="name" required maxlength="32" pattern="[a-z0-9-]{1,32}" placeholder="mon-portfolio" value=(v("name")) autocomplete="off" autofocus style="max-width:560px";
+                                } @else {
+                                    div.ig style="max-width:560px" {
+                                        input.mono-input name="name" required maxlength="32" pattern="[a-z0-9-]{1,32}" placeholder="mon-portfolio" value=(v("name")) autocomplete="off" autofocus;
+                                        span.suf { (suffix) }
+                                    }
                                 }
                                 p.help { "a-z, 0-9 et tirets · 32 caractères max · " span data-recap="count" { "0/32" } }
+                            }
+                            @if st.cfg.ip_mode {
+                                label.field data-show-for="other" style="margin-top:16px" {
+                                    span.lbl { "Adresse du site" }
+                                    div.ig #web-port style="max-width:340px" {
+                                        span.pre { "https://" (st.cfg.domain) ":" }
+                                        input.mono-input name="web_port" type="number" min=(lo) max=(hi) value=(web_port) required aria-label="Port de l'IP pour le site" data-check="/projects/port-check";
+                                    }
+                                    p.help { span #web-port-state {} "Sans nom de domaine, chaque site a son port sur l'IP du serveur : " span.mono { (lo) "–" (hi) } "." }
+                                }
                             }
                         }
                     }
@@ -533,7 +561,7 @@ pub async fn new_form(State(st): State<AppState>, jar: CookieJar, Query(q): Quer
                         }
                         table.tbl style="border:1px solid var(--border);border-radius:12px;border-collapse:separate;overflow:hidden" {
                             tr { td.muted { "Adresse" } td.num.mono style="font-size:12px" {
-                                @if let Some(a) = &ip_address { span title="Sans nom de domaine, chaque projet web a son port sur l'IP du serveur" { (a) } }
+                                @if st.cfg.ip_mode { span data-recap="ipaddr" data-ip=(st.cfg.domain) { (st.cfg.domain) ":" (web_port) } }
                                 @else { span data-recap="host" data-suffix=(suffix) { "mon-projet" (suffix) } }
                             } }
                             tr { td.muted { "Accès" } td.num { span.pill.private { (icon_c("lock", "sm")) "privé (connexion requise)" } } }

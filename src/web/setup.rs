@@ -1203,7 +1203,7 @@ pub async fn save(State(st): State<AppState>, jar: CookieJar, Path(which): Path<
             if !FIRST_TEMPLATES.iter().any(|t| t.0 == template) {
                 Err("modèle inconnu".into())
             } else {
-                let np = ops::NewProject { name, template, image: None, git_url: None, ports: Vec::new(), service: false, volumes: String::new() };
+                let np = ops::NewProject { name, template, image: None, git_url: None, ports: Vec::new(), service: false, volumes: String::new(), web_port: None };
                 ops::create(&st, np, &who.actor()).await.map(|p| format!("/setup?step=done&project={}", p.name))
             }
         }

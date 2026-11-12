@@ -189,6 +189,7 @@
  · voir	 · see
  · vérifié à 	 · checked at 
  · à changer dans Mon profil	 · change it in My profile
+ »	”
  » (un chemin absolu, ex. /data)	” (an absolute path, e.g. /data)
  » (un seul nom, sans espace, ex. nginx:latest)	” (a single name, no space, e.g. nginx:latest)
  » ajouté. Tu peux maintenant te connecter depuis cet appareil.	” added. You can now sign in from this device.
@@ -843,7 +844,9 @@ Pic à 	Peak of
 Plus ancien →	Older →
 Plus d'actions	More actions
 Plus tard	Later
+Port de l'IP pour le site	IP port for the site
 Port de l'app	App port
+Port libre	Port free
 Ports des projets	Project ports
 Ports enregistrés, conteneur recréé.	Ports saved, container recreated.
 Ports par défaut	Default ports
@@ -954,6 +957,7 @@ Révoquer les 	Revoke the
 Sa base est dans le volume 	Its database is in the volume 
 Sans nom de domaine : le panel sur 	Without a domain name: the panel on 
 Sans nom de domaine, chaque projet web a son port sur l'IP du serveur	Without a domain name, each web project has its port on the server's IP
+Sans nom de domaine, chaque site a son port sur l'IP du serveur : 	Without a domain name, each site has its port on the server's IP: 
 Sans nom de domaine, on entre avec un mot de passe (les passkeys exigent un domaine).	Without a domain name, you sign in with a password (passkeys need a domain).
 Se connecter	Sign in
 Se connecter avec GitHub	Sign in with GitHub
@@ -1217,6 +1221,7 @@ image utilisée par DevHub lui-même	image used by DevHub itself
 impossible de supprimer /workspace ou un dossier à la racine du conteneur	can't delete /workspace or a folder at the container's root
 indique l'adresse IPv4 publique du serveur	give the server's public IPv4 address
 indique ton domaine	enter your domain
+indique un numéro de port	enter a port number
 injectées au démarrage du conteneur	injected when the container starts
 invitation expirée ou déjà utilisée	invitation expired or already used
 invitation expirée ou révoquée	invitation expired or revoked
@@ -1290,6 +1295,8 @@ pas téléchargée	not downloaded
 pas un volume DevHub	not a DevHub volume
 passage sur le domaine impossible : 	can't move to the domain: 
 passkey supprimé	passkey removed
+port déjà pris par « 	port already taken by “
+port hors de la plage des projets : 	port outside the projects' range: 
 port invalide : 	invalid port: 
 possible seulement pour le DevHub du serveur, dans Docker	possible only for the server's DevHub, in Docker
 pour accéder à 	to open 
@@ -1356,6 +1363,7 @@ volume introuvable : 	volume not found:
 volumes : seulement des chemins, ex. /data	volumes: paths only, e.g. /data
 volumes appliqués, mais contenu non recopié : 	volumes applied, but content not copied over: 
 whitelist add Pseudo	whitelist add Name
+« 	“
 · chaque projet reçoit son propre volume pour chacun	· each project gets its own volume for each
 · démarré 	· started 
 À donner aux joueurs	To give to players

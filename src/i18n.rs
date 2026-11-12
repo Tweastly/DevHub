@@ -291,7 +291,7 @@ pub fn script_en(js: &str) -> &'static str {
 pub async fn layer(req: Request, next: Next) -> Response {
     let en = wants_en(req.headers());
     // JSON read by the pages: the guide's answers, and live states (a project's current step).
-    let json = req.uri().path().starts_with("/setup/") || req.uri().path() == "/live/stats";
+    let json = req.uri().path().starts_with("/setup/") || matches!(req.uri().path(), "/live/stats" | "/projects/port-check");
     let res = EN.scope(en, next.run(req)).await;
     if !en || res.extensions().get::<Untouched>().is_some() {
         return res;

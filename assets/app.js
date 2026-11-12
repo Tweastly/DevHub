@@ -686,6 +686,7 @@
         const tile = $('input[name=template]:checked', np);
         $$('[data-recap=name]').forEach(e => e.textContent = name);
         $$('[data-recap=host]').forEach(e => e.textContent = name + e.dataset.suffix);
+        if (np.web_port) $$('[data-recap=ipaddr]').forEach(e => e.textContent = e.dataset.ip + ':' + (np.web_port.value || '…'));
         $$('[data-recap=initials]').forEach(e => e.textContent = initials(name));
         $$('[data-recap=model]').forEach(e => e.textContent = tile ? tile.dataset.label : '');
         const n = $('[data-recap=count]', np); if (n) n.textContent = np.name.value.length + '/32';
@@ -695,9 +696,30 @@
         if (np.ports) np.ports.placeholder = { site: '8000', minecraft: '25565/tcp', pocketmine: '19132/udp' }[t] || '3000, 5173';
         const show = t === 'minecraft' || t === 'pocketmine' ? t : 'other';
         $$('[data-show-for]', np).forEach(e => { e.hidden = e.dataset.showFor !== show; });
+        // A game server has no site: its port of the IP is neither checked nor sent.
+        if (np.web_port) np.web_port.disabled = show !== 'other';
         $$('[data-show-for-custom]', np).forEach(e => { e.hidden = !custom; });
       };
       np.addEventListener('input', upd);
+      // Without a domain: the site's port of the IP, checked while typing.
+      const wp = np.web_port;
+      if (wp) {
+        const box = $('#web-port'), state = $('#web-port-state');
+        let timer, asked = 0;
+        const check = async () => {
+          const n = ++asked;
+          try {
+            const j = await (await fetch(wp.dataset.check + '?port=' + encodeURIComponent(wp.value))).json();
+            if (n !== asked) return;
+            box.classList.toggle('bad', !j.ok);
+            state.className = j.ok ? 'port-ok' : 'port-bad';
+            state.textContent = j.msg.charAt(0).toUpperCase() + j.msg.slice(1) + ' · ';
+            wp.setCustomValidity(j.ok ? '' : j.msg);
+          } catch {}
+        };
+        wp.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 250); });
+        check();
+      }
       // A tile of "Mes images" fills the image, its ports and its launch mode.
       np.addEventListener('change', e => {
         const t = e.target;

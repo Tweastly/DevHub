@@ -338,6 +338,7 @@ async fn call(st: &AppState, who: &db::Profile, actor: &str, params: &Value) -> 
                     ports: ports("ports")?,
                     service: a["service"].as_bool().unwrap_or(true),
                     volumes: a["volumes"].as_str().unwrap_or("").to_string(),
+                    web_port: None,
                 };
                 let p = ops::create(st, np, actor).await?;
                 let addr = match (p.first_http(), p.public_ports().next()) {
