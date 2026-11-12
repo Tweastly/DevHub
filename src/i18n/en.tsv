@@ -582,6 +582,7 @@ Elle est réglée toute seule : adresse du projet, données dans 	It's set up by
 Elle et les adresses par port répondent.	It and the per-port addresses respond.
 Elle ne sera plus proposée dans « Nouveau projet ». L'image reste sur le serveur et les projets qui l'utilisent continuent de tourner.	It won't be offered in “New project” anymore. The image stays on the server and the projects using it keep running.
 En construction	Building
+En cours	In progress
 En ligne	Online
 En ligne depuis	Online for
 En ligne depuis 	Online for 

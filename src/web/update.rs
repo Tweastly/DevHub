@@ -209,13 +209,14 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                             span.dim {
                                 @match (d.finished_at, d.ok) {
                                     (Some(f), _) => { @if !d.method.is_empty() { (d.method) " · " } (took(f - d.started_at)) }
-                                    _ => "en cours",
+                                    _ => "—",
                                 }
                             }
                             @match d.ok {
                                 Some(true) => span.res.ok { span.dot.running {} "OK" },
                                 Some(false) => span.res.err title=(d.error) { span.dot.dead {} "Échec" },
-                                None => span.res { span.dot.restarting {} "…" },
+                                // Unfinished: the one being installed (a restart marks the others failed).
+                                None => span.res { span.dot.restarting {} "En cours" },
                             }
                         }
                     }
