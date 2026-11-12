@@ -124,6 +124,16 @@ pub fn resolve_custom(st: &AppState, host: &str) -> Option<Target> {
 }
 
 const HANDOFF_PATH: &str = "/__devhub/auth";
+
+/// What a handoff code opens on the project's domain: a session of the same passkey, or of
+/// the same profile for a password sign-in, that ends with the DevHub session it came from.
+pub struct Handoff {
+    host: String,
+    expires: i64,
+    passkey: Option<i64>,
+    profile: Option<i64>,
+    parent: String,
+}
 const HANDOFF_TTL: i64 = 60;
 
 /// Dashboard side of the session handoff for custom domains, which can't see the
@@ -172,7 +182,9 @@ pub async fn handoff(State(st): State<AppState>, jar: CookieJar, Query(q): Query
     // the private page sent the browser back here endlessly.
     let passkey = auth::current_passkey(&st, &jar).map(|p| p.0);
     let profile_id = if passkey.is_none() { profile.map(|p| p.id) } else { None };
-    st.handoffs.lock().unwrap().insert(code.clone(), (host.clone(), db::now() + HANDOFF_TTL, passkey, profile_id));
+    let parent = jar.get(auth::COOKIE).map(|c| c.value().to_string()).unwrap_or_default();
+    let h = Handoff { host: host.clone(), expires: db::now() + HANDOFF_TTL, passkey, profile: profile_id, parent };
+    st.handoffs.lock().unwrap().insert(code.clone(), h);
     let path = match u.query() {
         Some(q) => format!("{}?{q}", u.path()),
         None => u.path().to_string(),
@@ -187,14 +199,14 @@ fn handoff_finish(st: &AppState, host: &str, req: &Request) -> Response {
     let code = q.get("code").cloned().unwrap_or_default();
     let who = {
         let mut h = st.handoffs.lock().unwrap();
-        h.retain(|_, (_, exp, _, _)| *exp > db::now());
-        h.remove(&code).filter(|(bound, _, _, _)| bound == host).map(|x| (x.2, x.3))
+        h.retain(|_, x| x.expires > db::now());
+        h.remove(&code).filter(|x| x.host == host)
     };
-    let Some((passkey, profile_id)) = who else {
+    let Some(who) = who else {
         return error_page(st, StatusCode::FORBIDDEN, "Lien expiré", "Ce lien de connexion n'est plus valable. Recharge la page du projet.", None, None);
     };
     let token = crate::random_token(32);
-    if db::create_session(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, passkey, profile_id).is_err() {
+    if db::create_session_from(&st.db.lock().unwrap(), &token, 7 * 24 * 3600, who.passkey, who.profile, Some(&who.parent)).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let next = q.get("next").filter(|n| n.starts_with('/') && !n.starts_with("//") && !n.contains('\\')).cloned().unwrap_or_else(|| "/".into());
@@ -245,6 +257,20 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
     // (whose login link also lets them switch to a profile that can).
     let viewer = auth::current_profile(&st, &CookieJar::from_headers(req.headers()));
     if !t.project.public && !viewer.as_ref().is_some_and(|p| p.sees(&t.project.name)) {
+        // Arriving from another site, the browser holds back DevHub's SameSite=Strict cookie
+        // (the one of the IP and of the subdomains): a signed-in profile would see the private
+        // page. The page reloads itself once, from this site, and the cookie comes along.
+        let fetch = |k: &str| req.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("");
+        if req.method() == axum::http::Method::GET && fetch("sec-fetch-site") == "cross-site" && fetch("sec-fetch-dest") == "document" {
+            // Absolute, on this very host: a path like "//other.site" can't send it elsewhere.
+            let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
+            let here = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+            let page = maud::html! {
+                (maud::DOCTYPE)
+                html { head { meta charset="utf-8"; meta name="robots" content="noindex"; meta http-equiv="refresh" content={"0;url=" (here)}; title { "DevHub" } } body {} }
+            };
+            return (StatusCode::OK, [(header::CACHE_CONTROL, "no-store")], page).into_response();
+        }
         let scheme = if st.cfg.origin.starts_with("https") { "https" } else { "http" };
         let back = format!("{scheme}://{host}{}", req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
         // Custom domains don't share the dashboard cookie: go through the session handoff.
@@ -255,6 +281,7 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
         return (StatusCode::UNAUTHORIZED, crate::web::auth::private_project(&t.project.name, &login, &st.cfg.origin, base_host(&st), st.cfg.ip_mode)).into_response();
     }
     let owner = viewer.as_ref().is_some_and(|p| p.sees(&t.project.name));
+    let private = !t.project.public;
     let name = t.project.name.clone();
     let stream = match connect(&st, &t).await {
         Ok(s) => s,
@@ -281,11 +308,31 @@ pub async fn middleware(State(st): State<AppState>, req: Request, next: Next) ->
     match forward(req, stream, &host, st.cfg.origin.starts_with("https"), &ours).await {
         Ok(mut r) => {
             r.extensions_mut().insert(crate::i18n::Untouched);
+            if private {
+                keep_private(&mut r);
+            }
             r
         }
         Err(e) => error_page(&st, StatusCode::BAD_GATEWAY, "Erreur de connexion",
             &format!("La connexion à <b>{name}</b> a été interrompue."),
             owner.then(|| e.to_string()).as_deref(), None),
+    }
+}
+
+/// A private project's answers: its pages are asked of DevHub again each time, which checks
+/// the sign-in (without it the browser showed them from its cache after signing out), and no
+/// shared cache (a CDN in front) may keep any of them. An app's own caching stays, made private.
+fn keep_private(r: &mut Response) {
+    let html = r.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|t| t.starts_with("text/html"));
+    let cc = r.headers().get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()).map(str::to_ascii_lowercase);
+    let value = match cc {
+        _ if html => "private, no-cache".to_string(),
+        None => "private, no-cache".to_string(),
+        Some(c) if c.contains("no-store") || c.contains("private") => return,
+        Some(c) => std::iter::once("private").chain(c.split(',').map(str::trim).filter(|d| !d.is_empty() && *d != "public")).collect::<Vec<_>>().join(", "),
+    };
+    if let Ok(v) = HeaderValue::from_str(&value) {
+        r.headers_mut().insert(header::CACHE_CONTROL, v);
     }
 }
 
@@ -372,6 +419,25 @@ pub async fn caddy_ask(State(st): State<AppState>, Query(q): Query<HashMap<Strin
 
 #[cfg(test)]
 mod tests {
+    fn cache(ty: &str, cc: Option<&str>) -> Option<String> {
+        let mut r = axum::response::Response::new(axum::body::Body::empty());
+        r.headers_mut().insert(super::header::CONTENT_TYPE, ty.parse().unwrap());
+        if let Some(c) = cc {
+            r.headers_mut().insert(super::header::CACHE_CONTROL, c.parse().unwrap());
+        }
+        super::keep_private(&mut r);
+        r.headers().get(super::header::CACHE_CONTROL).map(|v| v.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn private_projects_are_never_shown_from_cache() {
+        assert_eq!(cache("text/html", None).as_deref(), Some("private, no-cache"));
+        assert_eq!(cache("text/html; charset=utf-8", Some("public, max-age=3600")).as_deref(), Some("private, no-cache"));
+        assert_eq!(cache("image/png", None).as_deref(), Some("private, no-cache"));
+        assert_eq!(cache("text/css", Some("public, max-age=31536000, immutable")).as_deref(), Some("private, max-age=31536000, immutable"));
+        assert_eq!(cache("text/css", Some("no-store")).as_deref(), Some("no-store"));
+    }
+
     use super::strip_session_cookie;
     use axum::http::{header, HeaderMap, HeaderValue};
 

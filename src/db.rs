@@ -140,6 +140,12 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     let _ = c.execute("ALTER TABLE images ADD COLUMN volumes TEXT NOT NULL DEFAULT ''", []);
     let _ = c.execute("ALTER TABLE passkeys ADD COLUMN last_used INTEGER", []);
     let _ = c.execute("ALTER TABLE sessions ADD COLUMN passkey_id INTEGER", []);
+    // A session opened on a project's own domain (proxy.rs handoff) lives as long as the
+    // DevHub session it came from: signing out of DevHub closes it too. Those opened before
+    // can't be told apart: when the column arrives, everyone signs in again once.
+    if c.execute("ALTER TABLE sessions ADD COLUMN parent TEXT", []).is_ok() {
+        c.execute("DELETE FROM sessions", [])?;
+    }
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS metrics(ts INTEGER NOT NULL, scope TEXT NOT NULL, cpu REAL NOT NULL, mem INTEGER NOT NULL);
          CREATE INDEX IF NOT EXISTS metrics_scope_ts ON metrics(scope, ts);
@@ -309,7 +315,8 @@ pub fn session_profile(c: &Connection, token: &str) -> Option<Profile> {
     let pid: i64 = c
         .query_row(
             "SELECT COALESCE(p.profile_id, s.profile_id) FROM sessions s LEFT JOIN passkeys p ON p.id = s.passkey_id
-             WHERE s.token=?1 AND s.expires > ?2 AND (p.id IS NOT NULL OR (s.passkey_id IS NULL AND s.profile_id IS NOT NULL))",
+             WHERE s.token=?1 AND s.expires > ?2 AND (p.id IS NOT NULL OR (s.passkey_id IS NULL AND s.profile_id IS NOT NULL))
+               AND (s.parent IS NULL OR EXISTS (SELECT 1 FROM sessions o WHERE o.token = s.parent AND o.expires > ?2))",
             params![token, now()],
             |r| r.get(0),
         )
@@ -510,10 +517,16 @@ pub fn delete_passkey(c: &Connection, id: i64) -> anyhow::Result<()> {
 
 /// A session opened with a passkey (`passkey_id`) or, without a domain, a password (`profile_id`).
 pub fn create_session(c: &Connection, token: &str, ttl: i64, passkey_id: Option<i64>, profile_id: Option<i64>) -> anyhow::Result<()> {
+    create_session_from(c, token, ttl, passkey_id, profile_id, None)
+}
+
+/// A session that ends with `parent` (see the `parent` column).
+pub fn create_session_from(c: &Connection, token: &str, ttl: i64, passkey_id: Option<i64>, profile_id: Option<i64>, parent: Option<&str>) -> anyhow::Result<()> {
     c.execute("DELETE FROM sessions WHERE expires < ?1", [now()])?;
+    c.execute("DELETE FROM sessions WHERE parent IS NOT NULL AND parent NOT IN (SELECT token FROM sessions)", [])?;
     c.execute(
-        "INSERT INTO sessions(token, expires, passkey_id, profile_id) VALUES (?1,?2,?3,?4)",
-        params![token, now() + ttl, passkey_id, profile_id],
+        "INSERT INTO sessions(token, expires, passkey_id, profile_id, parent) VALUES (?1,?2,?3,?4,?5)",
+        params![token, now() + ttl, passkey_id, profile_id, parent],
     )?;
     Ok(())
 }
@@ -564,7 +577,7 @@ pub fn session_valid(c: &Connection, token: &str) -> bool {
 }
 
 pub fn delete_session(c: &Connection, token: &str) {
-    let _ = c.execute("DELETE FROM sessions WHERE token=?1", [token]);
+    let _ = c.execute("DELETE FROM sessions WHERE token=?1 OR parent=?1", [token]);
 }
 
 pub fn setting(c: &Connection, key: &str) -> Option<String> {
