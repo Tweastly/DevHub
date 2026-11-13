@@ -69,8 +69,8 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     let failed = !u.running && u.available() && last.is_some_and(|d| d.ok == Some(false) && target.starts_with(&d.sha));
     let state = if u.running { "running" } else if failed { "failed" } else if u.available() { "available" } else { "ok" };
     let steps = updater::steps(&u.last_log, failed);
-    let done = steps.iter().filter(|s| s.state == "done").count();
-    let pct = if u.running { (done * 25 + 10).min(95) } else { 100 };
+    let prog = u.running.then(|| updater::progress(&st, u));
+    let pct = prog.as_ref().map_or(100.0, |p| p.pct);
     let former_dir = db::setting(&st.db.lock().unwrap(), updater::FORMER_DIR);
     let compose_dir = updater::compose_dir(&st).await;
     let running_since = last.filter(|d| d.finished_at.is_none()).map(|d| db::now() - d.started_at);
@@ -81,7 +81,9 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     };
     let body = html! {
         div.page-head { div { h1 { "Mise à jour" } } }
-        div #upd data-state=(state) {
+        div #upd data-state=(state)
+            data-p0=[prog.as_ref().map(|p| format!("{:.2}", p.pct))] data-p1=[prog.as_ref().map(|p| format!("{:.2}", p.end))]
+            data-left=[prog.as_ref().map(|p| format!("{:.1}", p.left))] data-eta=[prog.as_ref().map(|p| format!("{:.1}", p.eta))] {
             section class={"card upd-hero " (state)} {
                 div.upd-top {
                     span.upd-badge {
@@ -96,7 +98,10 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                         @match state {
                             "running" => {
                                 div.upd-title { "Installation de " span.mono { (short(&target)) } "…" }
-                                div.upd-sub { @if let Some(s) = running_since { "Commencée il y a " (took(s)) " · " } "la page se met à jour toute seule, même pendant le redémarrage" }
+                                div.upd-sub {
+                                    @if let Some(s) = running_since { "Commencée il y a " (took(s)) " · " }
+                                    span #upd-eta data-pre="Fin dans environ " data-soon="Presque terminé…" { (updater::eta_text(prog.as_ref().map_or(0.0, |p| p.eta))) }
+                                }
                             }
                             "failed" => {
                                 div.upd-title { "La mise à jour vers " span.mono { (short(&target)) } " a échoué" }
@@ -120,7 +125,7 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                         }
                     }
                     @match state {
-                        "running" => span.upd-pct { (pct) " %" },
+                        "running" => span.upd-pct { (pct.floor()) " %" },
                         "failed" | "available" => (apply),
                         _ => form.inline method="post" action="/update/check" { button.btn { (icon("refresh")) "Vérifier" } },
                     }
@@ -128,8 +133,9 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
                 @if let Some(e) = &u.error {
                     (alert("warn", html! { b { "GitHub injoignable : " } (e.split(" (").next().unwrap_or(e)) @if e.contains("TOKEN") { " Dépôt privé : définis " code { "DEVHUB_GITHUB_TOKEN" } "." } }))
                 }
-                @if state == "running" {
-                    div.bar.upd-bar { i style={"width:" (pct) "%"} {} }
+                @if let Some(p) = &prog {
+                    div.bar.upd-bar { i style={"width:" (format!("{:.2}", pct)) "%"} {} }
+                    div.upd-doing #upd-doing data-restart="DevHub redémarre… la page reprend toute seule." { (p.doing) }
                 }
                 @if state == "running" || state == "failed" { (stepper(&steps)) }
                 @if state == "failed" {
@@ -233,21 +239,45 @@ pub async fn page(State(st): State<AppState>, jar: CookieJar) -> Result<Markup, 
     }, body))
 }
 
-/// While an update runs: the card is refetched every 3 s. DevHub itself restarts in the
-/// middle, so failed requests just wait for it to come back.
+/// While an update runs: the card is refetched every 2 s for where the update stands (the
+/// bar's start, where the current part ends, in how long, the ETA), and the bar moves on its
+/// own in between, never backwards, also while DevHub restarts and doesn't answer.
 const POLL_JS: &str = r#"
 (()=>{
+const $=id=>document.getElementById(id);
+let shown=null,plan=null,done=false;
+const learn=()=>{const u=$('upd');if(!u||u.dataset.state!=='running')return;
+  plan={p0:+u.dataset.p0,p1:+u.dataset.p1,left:Math.max(+u.dataset.left,0.5),eta:+u.dataset.eta,t:performance.now()};
+  if(shown===null)shown=plan.p0;};
+const ease=x=>x<0.9?x:0.9+0.1*(1-Math.exp(-(x-0.9)*4));
+const eta=s=>{const e=$('upd-eta');if(!e)return;
+  e.textContent=s<=5?e.dataset.soon:e.dataset.pre+(s<60?Math.ceil(s/5)*5+' s':Math.max(1,Math.round(s/60))+' min');};
+const paint=()=>{
+  if(!$('upd')){clearInterval(iv);return;}
+  if(!plan)return;
+  const dt=(performance.now()-plan.t)/1000;
+  const target=done?100:plan.p0+(plan.p1-plan.p0)*Math.min(ease(dt/plan.left),0.999);
+  shown=Math.max(shown,shown+(target-shown)*(done?0.3:0.12));
+  const bar=document.querySelector('#upd .upd-bar > i');if(bar)bar.style.width=shown.toFixed(2)+'%';
+  const pc=document.querySelector('#upd .upd-pct');if(pc)pc.textContent=Math.floor(shown)+' %';
+  if(!done)eta(Math.max(plan.eta-dt,0));
+};
+const restarting=()=>{const d=$('upd-doing');if(d&&d.dataset.restart)d.textContent=d.dataset.restart;};
 const tick=async()=>{
-  const cur=document.getElementById('upd');
-  if(!cur||cur.dataset.state!=='running')return;
+  const cur=$('upd');if(!cur||cur.dataset.state!=='running')return;
   try{
     const r=await fetch('/update',{cache:'no-store'});
     if(r.ok){const doc=new DOMParser().parseFromString(await r.text(),'text/html');const nu=doc.getElementById('upd');
-      if(nu){cur.replaceWith(nu);if(nu.dataset.state!=='running'){location.reload();return;}}}
-    else document.querySelector('#upd .upd-sub')?.replaceChildren('DevHub redémarre… la page reprend toute seule.');
-  }catch{document.querySelector('#upd .upd-sub')?.replaceChildren('DevHub redémarre… la page reprend toute seule.');}
-  setTimeout(tick,3000);
+      if(nu){
+        if(nu.dataset.state!=='running'){done=true;const e=$('upd-eta');if(e)e.textContent=e.dataset.soon;setTimeout(()=>location.reload(),900);return;}
+        const b=nu.querySelector('.upd-bar > i');if(b&&shown!==null)b.style.width=shown.toFixed(2)+'%';
+        cur.replaceWith(nu);learn();paint();
+      }}
+    else restarting();
+  }catch{restarting();}
+  setTimeout(tick,2000);
 };
-setTimeout(tick,3000);
+learn();const iv=setInterval(paint,100);
+setTimeout(tick,2000);
 })();
 "#;

@@ -39,8 +39,10 @@ async fn snapshot(st: &AppState, who: &db::Profile) -> String {
         // What the update badge shows: the pages fetch it again when this changes.
         let u = st.update.lock().unwrap().clone();
         let last = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next();
+        // While it installs, also every 2 %: the badge's ring follows the progress.
+        let step = if u.running { (crate::updater::progress(st, &u).pct / 2.0).floor() as i64 } else { 0 };
         let key = format!(
-            "{}|{}|{}|{}",
+            "{}|{step}|{}|{}|{}",
             u.running,
             u.pending.len(),
             u.target.unwrap_or_default(),

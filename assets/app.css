@@ -1008,7 +1008,8 @@ img.avatar { object-fit: cover; padding: 0; background: var(--card-2); }
 .upd-sub .accent { color: var(--accent-ink); }
 .upd-pct { font: 500 26px var(--mono); color: var(--accent-ink); }
 .upd-bar { height: 6px; }
-.upd-bar > i { background: var(--accent); }
+.upd-bar > i { background: var(--accent); transition: width .15s linear; }
+.upd-doing { margin-top: 8px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .upd-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .upd-steps li { padding: 14px; border-radius: 11px; background: var(--card-2); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .upd-steps .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--border-2); box-sizing: border-box; }

@@ -120,6 +120,11 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
             id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
             action TEXT NOT NULL, detail TEXT NOT NULL);",
     )?;
+    // How long each part of an update took, to estimate the next ones (update page ETA):
+    // waiting for GitHub to build the image, downloading it, restarting DevHub.
+    for col in ["wait_s", "pull_s", "restart_s"] {
+        let _ = c.execute(&format!("ALTER TABLE deploys ADD COLUMN {col} INTEGER"), []);
+    }
     // Migration: column added after the first release.
     let _ = c.execute("ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("ALTER TABLE projects ADD COLUMN memory_mb INTEGER", []);
@@ -996,6 +1001,40 @@ pub struct Deploy {
 pub fn deploy_start(c: &Connection, sha: &str, message: &str) -> anyhow::Result<()> {
     c.execute("INSERT INTO deploys(sha, message, started_at) VALUES (?1,?2,?3)", params![sha, message, now()])?;
     Ok(())
+}
+
+/// Records how long a part of the update took: "wait_s", "pull_s" or "restart_s".
+pub fn deploy_timing(c: &Connection, id: i64, part: &str, secs: i64) {
+    if matches!(part, "wait_s" | "pull_s" | "restart_s") {
+        let _ = c.execute(&format!("UPDATE deploys SET {part}=?2 WHERE id=?1"), params![id, secs.max(0)]);
+    }
+}
+
+/// Typical durations of the parts of an update (median of the latest successful ones), and
+/// of a whole update, from those that recorded them.
+#[derive(Clone, Copy, Default)]
+pub struct DeployTimes {
+    pub wait: Option<i64>,
+    pub pull: Option<i64>,
+    pub restart: Option<i64>,
+    pub total: Option<i64>,
+}
+
+pub fn deploy_times(c: &Connection) -> DeployTimes {
+    let median = |sql: &str| -> Option<i64> {
+        let mut s = c.prepare(sql).ok()?;
+        let mut v: Vec<i64> = s.query_map([], |r| r.get::<_, i64>(0)).ok()?.filter_map(Result::ok).collect();
+        v.sort_unstable();
+        v.get(v.len() / 2).copied()
+    };
+    let recent = |col: &str| format!("SELECT {col} FROM deploys WHERE ok=1 AND {col} IS NOT NULL ORDER BY id DESC LIMIT 9");
+    DeployTimes {
+        // Only the updates that did wait: most don't, and a zero says nothing of how long.
+        wait: median("SELECT wait_s FROM deploys WHERE ok=1 AND wait_s > 0 ORDER BY id DESC LIMIT 9"),
+        pull: median(&recent("pull_s")),
+        restart: median(&recent("restart_s")),
+        total: median("SELECT finished_at - started_at FROM deploys WHERE ok=1 AND finished_at IS NOT NULL AND method != 'compose' ORDER BY id DESC LIMIT 9"),
+    }
 }
 
 pub fn deploy_finish(c: &Connection, id: i64, finished_at: i64, ok: bool, method: &str, error: &str) -> anyhow::Result<()> {

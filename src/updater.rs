@@ -22,6 +22,23 @@ const FORMER_HELPER_IMAGES: [&str; 2] = ["devhub-updater:git", "docker:27-cli"];
 static PREPARING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static PRE_LOG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// The image download as it goes, for the update's progress bar.
+#[derive(Clone, Default)]
+struct Prep {
+    /// When the image was first found missing on GitHub (still being built).
+    waiting_since: Option<i64>,
+    /// Start of the current download attempt.
+    pull_started: Option<i64>,
+    pull: crate::docker::PullProgress,
+}
+static PREP: std::sync::Mutex<Option<Prep>> = std::sync::Mutex::new(None);
+
+fn prep(f: impl FnOnce(&mut Prep)) {
+    if let Some(p) = PREP.lock().unwrap().as_mut() {
+        f(p);
+    }
+}
+
 fn pre_log(line: &str) {
     let mut l = PRE_LOG.lock().unwrap();
     l.push_str(line);
@@ -58,6 +75,8 @@ pub struct Info {
     pub last_log: String,
     /// Full sha of the branch head on GitHub.
     pub target: Option<String>,
+    /// When the running update's helper started (the restart part), unix seconds.
+    pub helper_started: Option<i64>,
 }
 
 impl Info {
@@ -214,13 +233,19 @@ async fn refresh_runner(st: &AppState, info: &mut Info) {
     let mut out = PRE_LOG.lock().unwrap().clone();
     match d.inspect_container(UPDATER, None::<InspectContainerOptions>).await {
         Ok(c) => {
-            info.running = preparing || c.state.and_then(|s| s.running).unwrap_or(false);
+            let state = c.state.unwrap_or_default();
+            let helper_running = state.running.unwrap_or(false);
+            info.running = preparing || helper_running;
+            info.helper_started = helper_running.then(|| state.started_at.as_deref().and_then(crate::timefmt::parse_rfc3339)).flatten();
             let mut s = d.logs::<String>(UPDATER, Some(LogsOptions { stdout: true, stderr: true, tail: "300".into(), ..Default::default() }));
             while let Some(Ok(l)) = s.next().await {
                 out.push_str(&l.to_string());
             }
         }
-        Err(_) => info.running = preparing,
+        Err(_) => {
+            info.running = preparing;
+            info.helper_started = None;
+        }
     }
     info.last_log = out;
 }
@@ -405,6 +430,7 @@ pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
         l.clear();
     }
     pre_log("== téléchargement de l'image (0 s)");
+    *PREP.lock().unwrap() = Some(Prep::default());
     let (sha, message) = {
         let mut i = st.update.lock().unwrap();
         i.running = true;
@@ -415,12 +441,18 @@ pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         let res = async {
-            pull_when_built(&st, &image).await?;
+            let (wait, pull) = pull_when_built(&st, &image).await?;
             pre_log(&format!("image GitHub récupérée : {image} ({} s)", started.elapsed().as_secs()));
+            if let Some(last) = db::deploys(&st.db.lock().unwrap(), 1).into_iter().next() {
+                let c = st.db.lock().unwrap();
+                db::deploy_timing(&c, last.id, "wait_s", wait);
+                db::deploy_timing(&c, last.id, "pull_s", pull);
+            }
             start_helper(&st, UPDATER, &image, Vec::new()).await
         }
         .await;
         PREPARING.store(false, std::sync::atomic::Ordering::Relaxed);
+        *PREP.lock().unwrap() = None;
         if let Err(e) = res {
             pre_log(&format!("erreur : {e:#}"));
             st.update.lock().unwrap().running = false;
@@ -433,11 +465,17 @@ pub async fn run_update(st: &AppState) -> anyhow::Result<()> {
 }
 
 /// The image of a commit pushed a moment ago is still being built by GitHub: wait for it
-/// (8 minutes at most).
-async fn pull_when_built(st: &AppState, image: &str) -> anyhow::Result<()> {
+/// (8 minutes at most). Returns how long it waited and how long the download took, in s.
+async fn pull_when_built(st: &AppState, image: &str) -> anyhow::Result<(i64, i64)> {
+    let start = db::now();
     for i in 0..32 {
-        match crate::docker::pull(&st.docker, image).await {
-            Ok(()) => return Ok(()),
+        let attempt = db::now();
+        prep(|p| {
+            p.pull_started = Some(attempt);
+            p.pull = Default::default();
+        });
+        match crate::docker::pull_with(&st.docker, image, |g| prep(|p| p.pull = g.clone())).await {
+            Ok(()) => return Ok((attempt - start, db::now() - attempt)),
             Err(e) => {
                 let m = format!("{e:#}").to_lowercase();
                 if m.contains("denied") || m.contains("unauthorized") || m.contains("forbidden") {
@@ -445,6 +483,7 @@ async fn pull_when_built(st: &AppState, image: &str) -> anyhow::Result<()> {
                 }
                 if i == 0 {
                     pre_log("image GitHub pas encore prête, attente (8 min max)…");
+                    prep(|p| p.waiting_since = Some(start));
                 }
             }
         }
@@ -605,6 +644,9 @@ pub async fn finalize(st: &AppState) {
     let ok = state.exit_code == Some(0) && log.contains("== terminé");
     let method = if log.contains("Recreate") || log.contains("== reconstruction de DevHub") { "compose" } else { "image GitHub" };
     let finished = state.finished_at.as_deref().and_then(crate::timefmt::parse_rfc3339).unwrap_or_else(db::now);
+    if let Some(began) = state.started_at.as_deref().and_then(crate::timefmt::parse_rfc3339) {
+        db::deploy_timing(&st.db.lock().unwrap(), last.id, "restart_s", finished - began);
+    }
     let error = if ok { String::new() } else { error_excerpt(&log) };
     let _ = db::deploy_finish(&st.db.lock().unwrap(), last.id, finished, ok, method, &error);
     // A successful update leaves nothing behind; a failed one keeps its helper (and its
@@ -647,6 +689,94 @@ pub struct Step {
     pub detail: String,
     /// "done", "now", "fail" or "todo".
     pub state: &'static str,
+}
+
+/// Where a running update stands, for its progress bar and its ETA. The bar moves from
+/// `pct` towards `end` (where the current part ends) over `left` seconds; the page animates
+/// it in between, also while DevHub restarts and doesn't answer.
+pub struct Progress {
+    pub pct: f64,
+    pub end: f64,
+    /// Seconds until the current part ends, and until the update is done (estimates).
+    pub left: f64,
+    pub eta: f64,
+    /// What it is doing, e.g. "Téléchargement de l'image · 2/5 couches · 40 / 120 Mo".
+    pub doing: String,
+}
+
+/// Grows like `x`, then slows down past 0.9 without ever reaching 1: a part that takes longer
+/// than usual keeps moving a little instead of stopping or jumping.
+pub fn ease(x: f64) -> f64 {
+    let x = x.max(0.0);
+    if x < 0.9 { x } else { 0.9 + 0.1 * (1.0 - (-(x - 0.9) * 4.0).exp()) }
+}
+
+/// The bar is split between the download and the restart by how long they usually take
+/// (the latest updates), the download following the bytes actually received.
+pub fn progress(st: &AppState, info: &Info) -> Progress {
+    let t = db::deploy_times(&st.db.lock().unwrap());
+    let total = t.total.unwrap_or(45).clamp(10, 600) as f64;
+    let e_pull = t.pull.map(|v| v as f64).unwrap_or(total * 0.65).max(4.0);
+    let e_restart = t.restart.map(|v| v as f64).unwrap_or(total * 0.35).max(4.0);
+    let e_wait = t.wait.unwrap_or(180) as f64;
+    // Once the helper is done, the new DevHub answers within a few seconds.
+    const ONLINE: f64 = 3.0;
+    const WAIT_SHARE: f64 = 0.12;
+    let (dl0, rs1) = (3.0, 97.0);
+    let dl1 = dl0 + (rs1 - dl0) * e_pull / (e_pull + e_restart);
+    let now = db::now();
+    let prep = PREP.lock().unwrap().clone();
+    if let (true, Some(p)) = (PREPARING.load(std::sync::atomic::Ordering::Relaxed), prep) {
+        let downloading = p.pull.layers > 0;
+        if let (Some(w), false) = (p.waiting_since, downloading) {
+            let el = (now - w) as f64;
+            let left = (e_wait - el).max(15.0);
+            return Progress {
+                pct: dl0 + (dl1 - dl0) * WAIT_SHARE * ease(el / e_wait),
+                end: dl0 + (dl1 - dl0) * WAIT_SHARE,
+                left,
+                eta: left + e_pull + e_restart + ONLINE,
+                doing: "En attente de l'image GitHub (construite après chaque push)".into(),
+            };
+        }
+        let el = p.pull_started.map(|s| (now - s) as f64).unwrap_or(0.0);
+        let (f, left) = if downloading {
+            let f = p.pull.fraction();
+            // From the pace so far once there is one, else the usual duration.
+            (f, if f > 0.05 { el * (1.0 - f) / f } else { e_pull - el }.max(1.0))
+        } else {
+            (0.3 * ease(el / e_pull), (e_pull - el).max(2.0))
+        };
+        let base = if p.waiting_since.is_some() { WAIT_SHARE } else { 0.0 };
+        return Progress {
+            pct: dl0 + (dl1 - dl0) * (base + (1.0 - base) * f),
+            end: dl1,
+            left,
+            eta: left + e_restart + ONLINE,
+            doing: if downloading { format!("Téléchargement de l'image · {}", p.pull) } else { "Téléchargement de l'image".into() },
+        };
+    }
+    // The helper replaces DevHub's container (this page may already come from the new one).
+    let el = info.helper_started.map(|s| (now - s) as f64).unwrap_or(0.0);
+    let left = (e_restart - el).max(2.0);
+    Progress {
+        pct: dl1 + (rs1 - dl1) * ease(el / e_restart),
+        end: rs1,
+        left,
+        eta: left + ONLINE,
+        doing: "Redémarrage de DevHub sur la nouvelle version".into(),
+    }
+}
+
+/// "Fin dans environ 40 s": rounded so it doesn't flicker; under 5 s, "Presque terminé…".
+pub fn eta_text(secs: f64) -> String {
+    if secs <= 5.0 {
+        "Presque terminé…".into()
+    } else if secs < 60.0 {
+        format!("Fin dans environ {} s", ((secs / 5.0).ceil() * 5.0) as i64)
+    } else {
+        format!("Fin dans environ {} min", ((secs / 60.0).round() as i64).max(1))
+    }
 }
 
 /// The four steps of an update, read from its log ("== step (N s)" lines). Also reads the
@@ -696,6 +826,7 @@ pub async fn refresh(st: &AppState) {
     let mut cur = st.update.lock().unwrap();
     cur.running = info.running;
     cur.last_log = info.last_log;
+    cur.helper_started = info.helper_started;
 }
 
 /// Live updater logs (SSE). "reset" first (events need non-empty data or browsers drop them), then the whole log followed as it grows
@@ -740,6 +871,31 @@ pub async fn stream(State(st): State<AppState>, jar: CookieJar) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn progress_slows_down_but_never_stops() {
+        assert!((super::ease(0.5) - 0.5).abs() < 1e-9);
+        let (a, b, c) = (super::ease(1.0), super::ease(1.5), super::ease(3.0));
+        assert!(a < b && b < c && c < 1.0, "{a} {b} {c}");
+        assert!(super::ease(100.0) <= 1.0);
+        assert_eq!(super::ease(-1.0), 0.0);
+    }
+
+    #[test]
+    fn eta_is_rounded() {
+        assert_eq!(super::eta_text(3.0), "Presque terminé…");
+        assert_eq!(super::eta_text(21.0), "Fin dans environ 25 s");
+        assert_eq!(super::eta_text(150.0), "Fin dans environ 3 min");
+    }
+
+    #[test]
+    fn download_fraction_follows_bytes_then_unpacking() {
+        let p = |got, total, downloaded, extracted| crate::docker::PullProgress { got, total, layers: 4, downloaded, extracted };
+        assert_eq!(p(0, 100, 0, 0).fraction(), 0.0);
+        assert!((p(50, 100, 2, 0).fraction() - 0.425).abs() < 1e-9);
+        assert!((p(100, 100, 4, 2).fraction() - 0.925).abs() < 1e-9);
+        assert_eq!(p(100, 100, 4, 4).fraction(), 1.0);
+    }
+
     use super::steps;
 
     /// An update now: image download in DevHub, then `devhub deploy` in the helper.

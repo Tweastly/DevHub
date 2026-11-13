@@ -700,8 +700,7 @@ pub fn update_pill(ctx: &Ctx) -> Markup {
     let just_done = !u.running && !u.available() && last.as_ref().is_some_and(|d| d.ok == Some(true) && d.finished_at.is_some_and(|f| crate::db::now() - f < 120));
     html! {
         @if u.running {
-            @let done = crate::updater::steps(&u.last_log, false).iter().filter(|s| s.state == "done").count();
-            @let pct = (done * 20 + 10).min(95);
+            @let pct = crate::updater::progress(&ctx.st, u).pct.floor() as i64;
             a.update-pill.running href="/update" title="Suivre l'installation" {
                 svg.ring width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" {
                     circle cx="8" cy="8" r="6" {}

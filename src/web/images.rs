@@ -285,7 +285,7 @@ pub(crate) fn start_pull(st: &AppState, image: &str) {
         let s2 = st.clone();
         let t2 = tag.clone();
         let r = docker::pull_with(&st.docker, &image, move |step| {
-            s2.pulls.lock().unwrap().insert(t2.clone(), step);
+            s2.pulls.lock().unwrap().insert(t2.clone(), step.to_string());
         })
         .await;
         reload(&st).await;

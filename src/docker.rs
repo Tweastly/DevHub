@@ -199,7 +199,40 @@ pub async fn prune_template_tags(d: &Docker) {
 }
 
 /// Pulls `image`, reporting "7/12 couches · 312 Mo" style progress along the way.
-pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(String)) -> anyhow::Result<()> {
+/// Where a download stands: bytes received of the layers' total, and layers downloaded and
+/// unpacked. Shown as "2/5 couches · 40 / 120 Mo", then "décompression 3/5 couches".
+#[derive(Clone, Default)]
+pub struct PullProgress {
+    pub got: i64,
+    pub total: i64,
+    pub layers: usize,
+    pub downloaded: usize,
+    pub extracted: usize,
+}
+
+impl PullProgress {
+    /// 0 to 1: the download counts for most of it, unpacking for the rest.
+    pub fn fraction(&self) -> f64 {
+        if self.layers == 0 {
+            return 0.0;
+        }
+        let bytes = if self.total > 0 { self.got as f64 / self.total as f64 } else { self.downloaded as f64 / self.layers as f64 };
+        (0.85 * bytes.min(1.0) + 0.15 * self.extracted as f64 / self.layers as f64).min(1.0)
+    }
+}
+
+impl std::fmt::Display for PullProgress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mb = |b: i64| b / 1_048_576;
+        if self.downloaded == self.layers {
+            write!(f, "décompression {}/{} couches", self.extracted, self.layers)
+        } else {
+            write!(f, "{}/{} couches · {} / {} Mo", self.downloaded, self.layers, mb(self.got), mb(self.total))
+        }
+    }
+}
+
+pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(&PullProgress)) -> anyhow::Result<()> {
     let tagged = with_tag(image);
     let image = tagged.as_str();
     // Private ghcr.io images: the GitHub account connected in "Mon profil".
@@ -242,14 +275,12 @@ pub async fn pull_with(docker: &Docker, image: &str, progress: impl Fn(String)) 
             "Pull complete" | "Already exists" => (l.2, l.3) = (true, true),
             _ => {}
         }
-        let n = layers.len();
-        let got: i64 = layers.values().map(|l| if l.2 { l.1.max(l.0) } else { l.0 }).sum();
-        let total: i64 = layers.values().map(|l| l.1.max(l.0)).sum();
-        let mb = |b: i64| b / 1_048_576;
-        progress(if layers.values().all(|l| l.2) {
-            format!("décompression {}/{n} couches", layers.values().filter(|l| l.3).count())
-        } else {
-            format!("{}/{n} couches · {} / {} Mo", layers.values().filter(|l| l.2).count(), mb(got), mb(total))
+        progress(&PullProgress {
+            got: layers.values().map(|l| if l.2 { l.1.max(l.0) } else { l.0 }).sum(),
+            total: layers.values().map(|l| l.1.max(l.0)).sum(),
+            layers: layers.len(),
+            downloaded: layers.values().filter(|l| l.2).count(),
+            extracted: layers.values().filter(|l| l.3).count(),
         });
     }
     Ok(())

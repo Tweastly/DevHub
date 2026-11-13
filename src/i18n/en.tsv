@@ -582,6 +582,7 @@ Développeur	Developer
 Elle est réglée toute seule : adresse du projet, données dans 	It's set up by itself: project address, data in 
 Elle et les adresses par port répondent.	It and the per-port addresses respond.
 Elle ne sera plus proposée dans « Nouveau projet ». L'image reste sur le serveur et les projets qui l'utilisent continuent de tourner.	It won't be offered in “New project” anymore. The image stays on the server and the projects using it keep running.
+En attente de l'image GitHub (construite après chaque push)	Waiting for the GitHub image (built after each push)
 En construction	Building
 En cours	In progress
 En ligne	Online
@@ -605,6 +606,7 @@ Fichiers	Files
 Filtrer	Filter
 Filtrer les projets	Filter projects
 Filtrer les projets…	Filter projects…
+Fin dans environ 	Done in about 
 Garder	Keep
 Garder 	Keep 
 Garder ce dossier	Keep this folder
@@ -861,6 +863,7 @@ Pour un bouton « Se connecter avec GitHub » : crée une OAuth App sur GitHub (
 Pour un serveur, un bot ou une app prête à l'emploi : la console du projet écrit sur son entrée standard. Décoche pour un conteneur de dev qui lance 	For a server, a bot or a ready-to-use app: the project console writes to its standard input. Uncheck for a dev container that runs 
 Pourquoi	Why
 Premier projet	First project
+Presque terminé…	Almost done…
 Privé	Private
 Privé : connexion à DevHub obligatoire pour toutes ces adresses	Private: signing in to DevHub required for all these addresses
 Privé : passkey obligatoire pour toutes ces adresses	Private: passkey required for all these addresses
@@ -897,6 +900,7 @@ Recréer le conteneur (dernière version de l'image, les volumes restent)	Recrea
 Recréer le conteneur de 	Recreate the container of 
 Recréer les conteneurs sélectionnés ?	Recreate the selected containers?
 Redémarrage	Restart policy
+Redémarrage de DevHub sur la nouvelle version	Restarting DevHub on the new version
 Redémarrage de DevHub, certificat HTTPS…	Restarting DevHub, HTTPS certificate…
 Redémarrage de DevHub…	Restarting DevHub…
 Redémarre	Restarting
@@ -1056,6 +1060,8 @@ Tu te connecteras avec un passkey : l'empreinte, le visage ou le code de cet app
 Type de port	Port type
 Téléchargement	Download
 Téléchargement de 	Downloading 
+Téléchargement de l'image	Downloading the image
+Téléchargement de l'image · 	Downloading the image · 
 Télécharger	Download
 Télécharger tes images privées ghcr.io	Download your private ghcr.io images
 UDP : pas de test de connexion	UDP: no connection test

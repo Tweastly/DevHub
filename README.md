@@ -55,6 +55,7 @@ Dans ce README, `dev.example.com` est le domaine du panel et `example.com` son d
 
 ### Mises à jour
 - **Page Mise à jour** : une seule carte selon l'état (à jour, nouveautés à installer, installation en 4 étapes en direct, échec avec la raison et « Réessayer »), le déploiement automatique, la source et l'historique des déploiements (durée, résultat).
+- **Progression en continu et temps restant** : pendant l'installation, la barre suit les octets réellement téléchargés, puis la durée habituelle du redémarrage (DevHub retient la durée de chaque phase des dernières mises à jour). Elle avance aussi pendant les quelques secondes où DevHub redémarre, sans jamais reculer, et affiche « Fin dans environ 30 s ».
 - DevHub vérifie GitHub toutes les 30 min et propose « Mettre à jour » : il télécharge l'image que GitHub a construite pour le nouveau commit, puis un conteneur temporaire de cette image remplace le conteneur `devhub` (mêmes volumes, mêmes réglages ; l'ancien est remis en route si le nouveau ne démarre pas). Le panel et les sites des projets sont coupés quelques secondes ; les projets eux-mêmes continuent de tourner.
 - La page de mise à jour suit le redémarrage et reprend toute seule dès que le panel répond.
 - **Déploiement automatique** (option) : chaque commit poussé est déployé environ 20 s après.
